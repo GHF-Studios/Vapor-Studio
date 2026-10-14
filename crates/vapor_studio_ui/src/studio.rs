@@ -56,7 +56,7 @@ struct StudioProfile {
     workspace_root: Option<PathBuf>,
 }
 
-pub(super) struct StudioApp {
+pub struct StudioApp {
     section: Section,
     workspace_root: String,
     profiles: Vec<StudioProfile>,
@@ -76,7 +76,7 @@ pub(super) struct StudioApp {
 }
 
 impl StudioApp {
-    pub(super) fn new(
+    pub fn new(
         creation: &eframe::CreationContext<'_>,
         workspace: Option<PathBuf>,
         play_mode: bool,
@@ -707,7 +707,7 @@ impl eframe::App for StudioApp {
                 Section::Workspace => self.draw_workspace(ui),
                 Section::Workshop => {
                     ui.heading("Workshop");
-                    ui.label("The legacy Vapor-Shell pipeline can acquire items by PublishedFileId through SteamCMD.");
+                    ui.label("The Vapor-CLI provider can acquire items by PublishedFileId through SteamCMD.");
                     ui.label("Its app-root cache and role-specific manifests are not yet connected to Studio's local content graph.");
                     ui.weak("This view stays read-only until the provider and library share one content identity and provenance contract.");
                 }
