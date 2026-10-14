@@ -1,0 +1,20 @@
+[package]
+name = "vapor_launcher_gui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "vapor-studio"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+eframe = "0.36.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+semver = "1"
+toml = "0.8"
+vapor_core = { path = "../../../Vapor/crates/vapor_core" }
+vapor_devtools = { path = "../../../Vapor/crates/vapor_devtools" }
+vapor_launcher_core = { path = "../vapor_launcher_core" }
+vapor_sdk_core = { path = "../../../Vapor-SDK/crates/vapor_sdk_core" }
