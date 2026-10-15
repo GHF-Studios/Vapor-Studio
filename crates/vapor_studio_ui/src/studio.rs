@@ -701,7 +701,7 @@ impl eframe::App for StudioApp {
             .default_size(190.0)
             .show(ui, |ui| self.draw_navigation(ui));
         egui::Panel::top("studio-header").show(ui, |ui| self.draw_header(ui));
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             match self.section {
                 Section::Library => self.draw_library(ui), Section::Compose => self.draw_compose(ui),
                 Section::Workspace => self.draw_workspace(ui),
