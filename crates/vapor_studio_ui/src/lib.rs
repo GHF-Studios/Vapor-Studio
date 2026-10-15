@@ -1,3 +1,4 @@
-mod studio;
+mod app;
+mod navigation;
 
-pub use studio::StudioApp;
+pub use app::StudioApp;
