@@ -47,9 +47,41 @@ impl StudioApp {
             if !self.workshop_subscriptions.is_empty() {
                 ui.collapsing(format!("My subscriptions ({})", self.workshop_subscriptions.len()), |ui| {
                     for id in self.workshop_subscriptions.iter().cloned().collect::<Vec<_>>() {
+                        let details = self.workshop_subscription_details.get(&id).cloned();
+                        let title = details
+                            .as_ref()
+                            .map(|item| item.title.clone())
+                            .or_else(|| {
+                                self.workshop_results
+                                    .iter()
+                                    .find(|item| item.published_file_id == id)
+                                    .map(|item| item.title.clone())
+                            })
+                            .unwrap_or_else(|| "Workshop item".to_owned());
+                        let locally_available = self.catalog.iter().any(|content| {
+                            content.published_file_id.as_deref() == Some(id.as_str())
+                        });
                         ui.horizontal(|ui| {
-                            ui.label(format!("PublishedFileId {id}"));
-                            if ui.add_enabled(!self.running, egui::Button::new("Import")).clicked() {
+                            ui.strong(title);
+                            ui.weak(format!("PublishedFileId {id}"));
+                            if let Some(item) = &details {
+                                let state = if item.downloading {
+                                    "Downloading in Steam"
+                                } else if item.needs_update {
+                                    "Steam update available"
+                                } else if item.installed {
+                                    "Downloaded in Steam"
+                                } else {
+                                    "Subscribed"
+                                };
+                                ui.weak(state);
+                                if let Some((current, total)) = item.download_progress.filter(|(_, total)| *total > 0) {
+                                    ui.weak(format!("{:.1} / {:.1} MiB", current as f64 / 1_048_576.0, total as f64 / 1_048_576.0));
+                                }
+                            }
+                            if locally_available {
+                                ui.weak("Available in Vapor Library");
+                            } else if ui.add_enabled(!self.running, egui::Button::new("Import to Library")).clicked() {
                                 self.workshop_id = id.clone();
                                 self.download_workshop_item();
                             }
@@ -57,6 +89,12 @@ impl StudioApp {
                                 self.set_workshop_subscription(id.clone(), false);
                             }
                         });
+                        if let Some(item) = details.as_ref() && !item.description.is_empty() {
+                            ui.collapsing("Description", |ui| { ui.label(&item.description); });
+                        }
+                        if let Some(url) = details.as_ref().and_then(|item| item.preview_url.as_ref()) {
+                            ui.hyperlink_to("Open Workshop item", url);
+                        }
                     }
                 });
             }

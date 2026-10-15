@@ -81,6 +81,7 @@ pub struct StudioApp {
     workshop_search_text: String,
     workshop_results: Vec<vapor_studio_core::WorkshopItem>,
     workshop_subscriptions: std::collections::BTreeSet<String>,
+    workshop_subscription_details: std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
     workshop_result_total: u32,
     workshop_page: u32,
     composition_preview: Option<vapor_studio_core::CompositionPreview>,
@@ -159,6 +160,7 @@ impl StudioApp {
             workshop_search_text: String::new(),
             workshop_results: Vec::new(),
             workshop_subscriptions: std::collections::BTreeSet::new(),
+            workshop_subscription_details: std::collections::BTreeMap::new(),
             workshop_result_total: 0,
             workshop_page: 1,
             composition_preview: None,
@@ -216,6 +218,10 @@ impl StudioApp {
                 &result,
                 OperationResult::FileSaved(Ok(path))
                     if path.file_name().is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml"))
+            );
+            let refresh_after_subscription_change = matches!(
+                &result,
+                OperationResult::WorkshopSubscriptionChange(Ok(()), _, _)
             );
             let failure = match &result {
                 OperationResult::Workspace(Err(error))
@@ -348,11 +354,17 @@ impl StudioApp {
                     self.status = format!("Steam Workshop returned {} items on page {} of {}.", self.workshop_results.len(), self.workshop_page, self.workshop_result_total);
                 }
                 OperationResult::WorkshopSubscriptions(Ok(subscriptions)) => {
-                    self.workshop_subscriptions = subscriptions.into_iter().map(|item| item.published_file_id).collect();
+                    self.workshop_subscriptions = subscriptions.iter().map(|item| item.published_file_id.clone()).collect();
+                    self.workshop_subscription_details = subscriptions.into_iter().map(|item| (item.published_file_id.clone(), item)).collect();
                     self.status = format!("Loaded {} Steam Workshop subscriptions.", self.workshop_subscriptions.len());
                 }
                 OperationResult::WorkshopSubscriptionChange(Ok(()), id, subscribed) => {
-                    if subscribed { self.workshop_subscriptions.insert(id.clone()); } else { self.workshop_subscriptions.remove(&id); }
+                    if subscribed {
+                        self.workshop_subscriptions.insert(id.clone());
+                    } else {
+                        self.workshop_subscriptions.remove(&id);
+                        self.workshop_subscription_details.remove(&id);
+                    }
                     self.status = format!("{} Steam Workshop item {id}.", if subscribed { "Subscribed to" } else { "Unsubscribed from" });
                 }
                 OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => self.status = error,
@@ -468,6 +480,9 @@ impl StudioApp {
             self.active_operation = None;
             if refresh_after_content_change || refresh_after_manifest_save {
                 self.refresh_content_catalog();
+            }
+            if refresh_after_subscription_change {
+                self.refresh_workshop_subscriptions();
             }
         }
     }
