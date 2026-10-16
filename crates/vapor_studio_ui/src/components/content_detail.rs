@@ -56,9 +56,11 @@ impl StudioApp {
                     let root = ContentIdentity {
                         id: id.to_owned(), version: content.version.clone(),
                     };
-                    let workspace = content.locations.iter()
-                        .find(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
-                        .map(|location| location.root.clone());
+                    let workspace = content
+                        .locations
+                        .iter()
+                        .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
+                        .then(|| std::path::PathBuf::from(self.workspace_root.trim()));
                     self.assign_profile_root(root, workspace);
                 }
                 ui.separator();
