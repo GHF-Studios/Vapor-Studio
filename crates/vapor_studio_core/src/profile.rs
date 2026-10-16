@@ -158,7 +158,8 @@ pub struct CompositionProfile {
     pub workspace: Option<WorkspaceAssociation>,
     #[serde(default)]
     pub launch: LaunchSettings,
-    #[serde(default)]
+    /// Live installation observation; intentionally omitted from saved profiles.
+    #[serde(skip)]
     pub installation: InstallationState,
 }
 
