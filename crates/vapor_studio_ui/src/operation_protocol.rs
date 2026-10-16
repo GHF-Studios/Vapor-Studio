@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use crate::navigation::Section;
+use std::path::PathBuf;
 use vapor_core::VaporWorkspace;
 use vapor_studio_core::ContentIdentity;
 
@@ -18,7 +18,14 @@ pub(super) enum OperationResult {
     RememberedSources(Result<Vec<PathBuf>, String>),
     AdoptedContentProject(Result<(String, Vec<vapor_studio_core::SourceContent>), String>),
     UnregisteredContentProject(
-        Result<(String, Vec<vapor_studio_core::SourceContent>, ContentIdentity), String>,
+        Result<
+            (
+                String,
+                Vec<vapor_studio_core::SourceContent>,
+                ContentIdentity,
+            ),
+            String,
+        >,
     ),
     UnregisteredProjectScan(Result<vapor_studio_core::UnregisteredProjectScan, String>),
     Discovery(
@@ -49,6 +56,7 @@ pub(super) enum OperationResult {
     WorkshopStage(Result<vapor_studio_core::WorkshopPackagePreview, String>),
     WorkshopAcquisition(Result<Vec<vapor_studio_core::WorkshopAcquisition>, String>),
     WorkshopPublish(Result<vapor_studio_core::WorkshopPublication, String>),
+    RootPublish(Result<vapor_sdk_core::root::types::RootPublishReport, String>),
     WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>, String),
     WorkshopSubscriptions(Result<Vec<vapor_studio_core::WorkshopSubscription>, String>),
     WorkshopSubscriptionBatchChange(Result<(), String>, Vec<String>, bool),
@@ -85,6 +93,7 @@ impl OperationResult {
             | Self::WorkshopStage(Err(error))
             | Self::WorkshopAcquisition(Err(error))
             | Self::WorkshopPublish(Err(error))
+            | Self::RootPublish(Err(error))
             | Self::WorkshopSearch(Err(error), _)
             | Self::WorkshopSubscriptions(Err(error))
             | Self::WorkshopSubscriptionBatchChange(Err(error), _, _) => Some(error.clone()),
@@ -97,6 +106,20 @@ impl OperationResult {
                 Some(error.clone())
             }
             Self::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
+            Self::RootPublish(Ok(report))
+                if report
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| !status.success()) =>
+            {
+                Some(format!(
+                    "Steam root upload failed with {}",
+                    report
+                        .status
+                        .as_ref()
+                        .map_or_else(|| "unknown status".to_owned(), ToString::to_string)
+                ))
+            }
             Self::RunInstalled(Ok(result)) | Self::RunProfile(Ok(result))
                 if result.launch_error.is_some() =>
             {
@@ -132,9 +155,6 @@ impl OperationResult {
     }
 
     pub(super) fn refreshes_workshop_subscriptions(&self) -> bool {
-        matches!(
-            self,
-            Self::WorkshopSubscriptionBatchChange(_, _, _)
-        )
+        matches!(self, Self::WorkshopSubscriptionBatchChange(_, _, _))
     }
 }

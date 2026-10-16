@@ -48,7 +48,7 @@ impl StudioApp {
                 .add_enabled(
                     !self.operation.running
                         && !self.has_unsaved_workspace_edits()
-                    && !self.authoring.composition_edit_selector.trim().is_empty(),
+                        && !self.authoring.composition_edit_selector.trim().is_empty(),
                     egui::Button::new("Load dependencies"),
                 )
                 .clicked()
@@ -56,7 +56,10 @@ impl StudioApp {
                 self.load_source_composition();
             }
             if ui
-                .add_enabled(!self.operation.running && self.authoring.composition_edit.is_some(), egui::Button::new("Save dependencies"))
+                .add_enabled(
+                    !self.operation.running && self.authoring.composition_edit.is_some(),
+                    egui::Button::new("Save dependencies"),
+                )
                 .clicked()
             {
                 self.save_source_composition();
@@ -64,7 +67,45 @@ impl StudioApp {
         });
 
         if source_projects.is_empty() {
-            ui.weak("No local content projects found. Open a workspace and discover its content first.");
+            let candidates = self.workspace.unregistered_projects.candidates.len();
+            let card_style = ui.style().clone();
+            egui::Frame::group(&card_style).show(ui, |ui| {
+                if candidates > 0 {
+                    ui.heading(format!("{candidates} workspace project{} need adoption", if candidates == 1 { "" } else { "s" }));
+                    ui.label("These manifests are already on this device. Adopt them into Vapor's content index to make them available in compositions and profiles.");
+                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Review and adopt projects")).clicked() {
+                        self.navigate_to_workspace_content();
+                    }
+                } else if self.workspace.root.trim().is_empty() {
+                    ui.heading("Open a workspace to compose content");
+                    ui.label("Compositions connect authored Engine, Game, pack, and extension projects from one workspace.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Open workspace").clicked() {
+                            self.section = super::super::Section::Workspace;
+                        }
+                        if ui.button("Create workspace").clicked() {
+                            self.section = super::super::Section::Create;
+                        }
+                    });
+                } else if !self.workspace.unregistered_scan_completed {
+                    ui.heading("Check this workspace for content");
+                    ui.label("A project scan has not completed yet. Scanning only reads manifests; it does not change workspace files.");
+                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Find workspace projects")).clicked() {
+                        self.scan_unregistered_content_projects();
+                    }
+                } else {
+                    ui.heading("No authored projects to compose yet");
+                    ui.label("Create content in this workspace or scan again after adding a role manifest.");
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
+                            self.section = super::super::Section::Create;
+                        }
+                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Scan again")).clicked() {
+                            self.scan_unregistered_content_projects();
+                        }
+                    });
+                }
+            });
         }
 
         let mut remove_link = None;
@@ -95,7 +136,11 @@ impl StudioApp {
                             ui.label(&link.id);
                             let mut version = link.version.clone().unwrap_or_default();
                             if ui
-                                .add(egui::TextEdit::singleline(&mut version).desired_width(150.0).hint_text("any compatible version"))
+                                .add(
+                                    egui::TextEdit::singleline(&mut version)
+                                        .desired_width(150.0)
+                                        .hint_text("any compatible version"),
+                                )
                                 .changed()
                             {
                                 link.version = (!version.trim().is_empty()).then_some(version);
@@ -103,7 +148,11 @@ impl StudioApp {
                             ui.checkbox(&mut link.optional, "");
                             let mut reason = link.reason.clone().unwrap_or_default();
                             if ui
-                                .add(egui::TextEdit::singleline(&mut reason).desired_width(180.0).hint_text("Why is this included?"))
+                                .add(
+                                    egui::TextEdit::singleline(&mut reason)
+                                        .desired_width(180.0)
+                                        .hint_text("Why is this included?"),
+                                )
                                 .changed()
                             {
                                 link.reason = (!reason.trim().is_empty()).then_some(reason);
@@ -131,7 +180,10 @@ impl StudioApp {
                         super::super::source_content_kind(&composition.kind),
                         super::super::source_content_kind(&content.kind),
                     ) {
-                        (Some(parent), Some(child)) => vapor_studio_core::source_dependency_relationship(parent, child).is_some(),
+                        (Some(parent), Some(child)) => {
+                            vapor_studio_core::source_dependency_relationship(parent, child)
+                                .is_some()
+                        }
                         _ => false,
                     }
                 })
@@ -152,7 +204,10 @@ impl StudioApp {
                     })
                     .show_ui(ui, |ui| {
                         for (selector, kind, version) in &choices {
-                            let label = format!("{selector} · {kind} · {}", version.as_deref().unwrap_or("unversioned"));
+                            let label = format!(
+                                "{selector} · {kind} · {}",
+                                version.as_deref().unwrap_or("unversioned")
+                            );
                             ui.selectable_value(
                                 &mut self.authoring.composition_link_candidate,
                                 selector.clone(),
@@ -164,21 +219,31 @@ impl StudioApp {
                     .add_enabled(
                         !self.operation.running
                             && !self.authoring.composition_link_candidate.is_empty()
-                            && choices.iter().any(|(selector, _, _)| selector == &self.authoring.composition_link_candidate),
+                            && choices.iter().any(|(selector, _, _)| {
+                                selector == &self.authoring.composition_link_candidate
+                            }),
                         egui::Button::new("Add edge"),
                     )
                     .clicked()
                 {
-                    if let Some((selector, kind, version)) = choices
-                        .iter()
-                        .find(|(selector, _, _)| selector == &self.authoring.composition_link_candidate)
+                    if let Some((selector, kind, version)) =
+                        choices.iter().find(|(selector, _, _)| {
+                            selector == &self.authoring.composition_link_candidate
+                        })
                     {
                         let id = selector.split('@').next().unwrap_or(selector).to_owned();
                         let relationship = super::super::source_content_kind(&composition.kind)
-                            .and_then(|parent| super::super::source_content_kind(kind)
-                                .and_then(|child| vapor_studio_core::source_dependency_relationship(parent, child)))
+                            .and_then(|parent| {
+                                super::super::source_content_kind(kind).and_then(|child| {
+                                    vapor_studio_core::source_dependency_relationship(parent, child)
+                                })
+                            })
                             .unwrap_or("dependency");
-                        if composition.links.iter().any(|link| link.id == id && link.relationship == relationship) {
+                        if composition
+                            .links
+                            .iter()
+                            .any(|link| link.id == id && link.relationship == relationship)
+                        {
                             self.status = format!("{id} is already in this graph.");
                         } else {
                             composition.links.push(SourceCompositionLink {
@@ -193,7 +258,8 @@ impl StudioApp {
                     }
                 }
             });
-            source_graph_saved = self.authoring.composition_original_links.as_ref() == Some(&composition.links);
+            source_graph_saved =
+                self.authoring.composition_original_links.as_ref() == Some(&composition.links);
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.horizontal_wrapped(|ui| {
                     let source_selector = composition.version.as_ref()
@@ -216,11 +282,15 @@ impl StudioApp {
                     !self.operation.running && source_graph_saved,
                     egui::Button::new("Stage Workshop review"),
                 )
-                .on_disabled_hover_text("Save the current graph before staging its source content for review.")
+                .on_disabled_hover_text(
+                    "Save the current graph before staging its source content for review.",
+                )
                 .clicked()
             {
                 stage_source_selector = Some(
-                    composition.version.as_ref()
+                    composition
+                        .version
+                        .as_ref()
                         .map(|version| format!("{}@{version}", composition.id))
                         .unwrap_or_else(|| composition.id.clone()),
                 );
@@ -241,7 +311,9 @@ impl StudioApp {
             self.stage_workshop_content(selector);
         }
         let selector = self.authoring.composition_edit.as_ref().map(|composition| {
-            composition.version.as_ref()
+            composition
+                .version
+                .as_ref()
                 .map(|version| format!("{}@{version}", composition.id))
                 .unwrap_or_else(|| composition.id.clone())
         });
@@ -263,6 +335,9 @@ impl StudioApp {
             }
         }
         ui.add_space(6.0);
-        ui.small(format!("Workspace: {}", PathBuf::from(self.workspace.root.trim()).display()));
+        ui.small(format!(
+            "Workspace: {}",
+            PathBuf::from(self.workspace.root.trim()).display()
+        ));
     }
 }

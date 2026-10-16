@@ -1,11 +1,11 @@
-#[path = "components/mod.rs"]
-mod components;
 #[path = "app_shell.rs"]
 mod app_shell;
 #[path = "authoring_results.rs"]
 mod authoring_results;
 #[path = "catalog.rs"]
 mod catalog;
+#[path = "components/mod.rs"]
+mod components;
 #[path = "composition_lifecycle.rs"]
 mod composition_lifecycle;
 #[path = "content_creation.rs"]
@@ -18,37 +18,40 @@ mod operation_protocol;
 mod operation_results;
 #[path = "operations.rs"]
 mod operations;
-#[path = "profiles.rs"]
-mod profiles;
-#[path = "source_authoring.rs"]
-mod source_authoring;
 #[path = "pages/mod.rs"]
 mod pages;
+#[path = "profiles.rs"]
+mod profiles;
+#[path = "root_publishing.rs"]
+mod root_publishing;
+#[path = "source_authoring.rs"]
+mod source_authoring;
+#[path = "workshop.rs"]
+mod workshop;
+#[path = "workspace_content.rs"]
+mod workspace_content;
+#[path = "workspace_editor.rs"]
+mod workspace_editor;
 #[path = "workspace_files.rs"]
 mod workspace_files;
 #[path = "workspace_ops.rs"]
 mod workspace_ops;
-#[path = "workspace_editor.rs"]
-mod workspace_editor;
-#[path = "workspace_content.rs"]
-mod workspace_content;
-#[path = "workshop.rs"]
-mod workshop;
 
 use crate::navigation::Section;
-use std::path::PathBuf;
-use eframe::egui;
-use operations::OperationState;
-use profiles::ProfileState;
-use source_authoring::AuthoringState;
-use composition_lifecycle::ProfileCompositionState;
-use workshop::WorkshopState;
-use workspace_ops::WorkspaceState;
-use vapor_studio_core::decode_profiles;
 use catalog::{
     CatalogState, catalog_content_selector, catalog_matches_filters, content_selector,
     source_content_kind, source_content_selector,
 };
+use composition_lifecycle::ProfileCompositionState;
+use eframe::egui;
+use operations::OperationState;
+use profiles::ProfileState;
+use root_publishing::RootPublishingState;
+use source_authoring::AuthoringState;
+use std::path::PathBuf;
+use vapor_studio_core::decode_profiles;
+use workshop::WorkshopState;
+use workspace_ops::WorkspaceState;
 
 pub struct StudioApp {
     section: Section,
@@ -58,6 +61,7 @@ pub struct StudioApp {
     authoring: AuthoringState,
     profile_composition: ProfileCompositionState,
     workshop: WorkshopState,
+    root_publishing: RootPublishingState,
     status: String,
     operation: OperationState,
     diagnostics: vapor_devtools::app::DevtoolsApp,
@@ -144,10 +148,15 @@ impl StudioApp {
                 profile_recovery
                     .as_ref()
                     .map(|recovery| recovery.message.clone()),
-                if profile_recovery.is_some() { saved_profiles } else { None },
+                if profile_recovery.is_some() {
+                    saved_profiles
+                } else {
+                    None
+                },
             ),
             catalog: CatalogState::default(),
             workshop: WorkshopState::default(),
+            root_publishing: RootPublishingState::default(),
             authoring: AuthoringState::default(),
             profile_composition: ProfileCompositionState::default(),
             status: "Choose a workspace or discover content in this folder.".to_owned(),
@@ -164,7 +173,6 @@ impl StudioApp {
         }
         app
     }
-
 }
 
 fn configure_studio_visuals(context: &egui::Context) {
@@ -178,5 +186,4 @@ fn configure_studio_visuals(context: &egui::Context) {
     visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(39, 59, 75);
     visuals.widgets.active.bg_fill = egui::Color32::from_rgb(39, 100, 126);
     context.set_visuals(visuals);
-
 }

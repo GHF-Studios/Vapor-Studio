@@ -9,9 +9,7 @@ impl StudioApp {
             OperationResult::WorkspaceSelection(Err(error)) => self.status = error,
             OperationResult::UnregisteredProjectScan(Err(error)) => self.status = error,
             OperationResult::RememberedSources(Err(error)) => self.status = error,
-            OperationResult::RememberedSources(Ok(known)) => {
-                self.apply_remembered_sources(known)
-            }
+            OperationResult::RememberedSources(Ok(known)) => self.apply_remembered_sources(known),
             OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
                 self.apply_adopted_content_project(summary, contents)
             }
@@ -52,16 +50,12 @@ impl StudioApp {
             OperationResult::CompositionPreview(Ok(preview)) => {
                 self.apply_composition_preview(preview)
             }
-            OperationResult::WorkshopStage(Err(error)) => {
-                self.apply_workshop_stage_error(error)
-            }
+            OperationResult::WorkshopStage(Err(error)) => self.apply_workshop_stage_error(error),
             OperationResult::WorkshopAcquisition(Err(error)) => {
                 self.apply_workshop_acquisition_error(error)
             }
             OperationResult::WorkshopPublish(Err(error))
-            | OperationResult::WorkshopSearch(Err(error), _) => {
-                self.apply_workshop_error(error)
-            }
+            | OperationResult::WorkshopSearch(Err(error), _) => self.apply_workshop_error(error),
             OperationResult::WorkshopSubscriptions(Err(error)) => {
                 self.apply_workshop_subscriptions_error(error)
             }
@@ -71,9 +65,40 @@ impl StudioApp {
             OperationResult::WorkshopPublish(Ok(publication)) => {
                 self.apply_workshop_publication(publication)
             }
-            OperationResult::WorkshopStage(Ok(preview)) => {
-                self.apply_workshop_stage(preview)
+            OperationResult::RootPublish(Ok(report)) => {
+                self.root_publishing.preview = Some(report.clone());
+                if report.planned {
+                    self.root_publishing.status = format!(
+                        "Steam root review ready · App {} · depot {} · {} files · account {}.",
+                        report.package.app_id,
+                        report.package.depot_id,
+                        report.package.copied_files,
+                        report.account,
+                    );
+                } else if report
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.success())
+                {
+                    self.root_publishing.confirmation.clear();
+                    self.root_publishing.status = format!(
+                        "Steam upload completed · App {} · depot {} · account {} · branch {}.",
+                        report.package.app_id,
+                        report.package.depot_id,
+                        report.account,
+                        report.set_live.as_deref().unwrap_or("not changed"),
+                    );
+                } else if let Some(status) = report.status.as_ref() {
+                    self.root_publishing.status =
+                        format!("Steam root upload failed with {status}.");
+                }
+                self.status = self.root_publishing.status.clone();
             }
+            OperationResult::RootPublish(Err(error)) => {
+                self.root_publishing.status = error.clone();
+                self.status = error;
+            }
+            OperationResult::WorkshopStage(Ok(preview)) => self.apply_workshop_stage(preview),
             OperationResult::WorkshopSearch(Ok(page), query) => {
                 self.apply_workshop_search(page, query)
             }
@@ -86,18 +111,14 @@ impl StudioApp {
             OperationResult::WorkshopSubscriptionBatchChange(Err(error), _, _) => {
                 self.apply_workshop_error(error)
             }
-            OperationResult::WorkspaceFiles(Ok(files)) => {
-                self.apply_workspace_files(files)
-            }
+            OperationResult::WorkspaceFiles(Ok(files)) => self.apply_workspace_files(files),
             OperationResult::WorkspaceFileCreated(Ok(path)) => {
                 self.apply_workspace_file_created(path)
             }
             OperationResult::FileContents(Ok((path, contents))) => {
                 self.apply_workspace_file_opened(path, contents)
             }
-            OperationResult::FileSaved(Ok(path)) => {
-                self.apply_workspace_file_saved(path)
-            }
+            OperationResult::FileSaved(Ok(path)) => self.apply_workspace_file_saved(path),
             OperationResult::WorkspaceFilesSaved(results) => {
                 self.apply_workspace_files_saved(results)
             }

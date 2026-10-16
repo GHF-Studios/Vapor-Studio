@@ -1,5 +1,7 @@
+use super::super::root_publishing::root_publish_confirmation;
 use super::super::{Section, StudioApp, source_content_selector};
 use eframe::egui;
+use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
 impl StudioApp {
     pub(in crate::app) fn draw_publish(&mut self, ui: &mut egui::Ui) {
@@ -155,20 +157,102 @@ impl StudioApp {
 
         ui.group(|ui| {
             ui.heading("Vapor app on Steam");
-            ui.label("Root packaging produces a read-only plan for the Vapor Steam app and depot. The GUI does not publish a root build yet.");
+            ui.label("Review the exact package, Steam account, and branch before a SteamPipe upload.");
             ui.label(format!(
-                "AppID {} · DepotID {} · branch vapor-dev",
-                vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
-                vapor_sdk_core::root::types::ROOT_STEAM_DEPOT_ID,
+                "Steam AppID {ROOT_STEAM_APP_ID} · DepotID {ROOT_STEAM_DEPOT_ID}",
             ));
-            if ui
-                .add_enabled(
+
+            let mut settings_changed = false;
+            ui.horizontal(|ui| {
+                ui.label("Publisher account");
+                settings_changed |= ui.add_enabled(
                     !self.operation.running,
-                    egui::Button::new("Preview root package"),
-                )
-                .clicked()
-            {
-                self.preview_steam_package();
+                    egui::TextEdit::singleline(&mut self.root_publishing.account)
+                        .hint_text("Steamworks account name"),
+                ).changed();
+            });
+            ui.horizontal(|ui| {
+                ui.label("Build description");
+                settings_changed |= ui.add_enabled(
+                    !self.operation.running,
+                    egui::TextEdit::singleline(&mut self.root_publishing.description)
+                        .hint_text("Vapor root package"),
+                ).changed();
+            });
+            ui.horizontal(|ui| {
+                ui.label("Set live on beta branch (optional)");
+                settings_changed |= ui.add_enabled(
+                    !self.operation.running,
+                    egui::TextEdit::singleline(&mut self.root_publishing.set_live_branch)
+                        .hint_text("leave empty to upload without changing a branch"),
+                ).changed();
+            });
+            ui.weak("SteamCMD handles password and Steam Guard prompts locally. Leaving the branch empty keeps this upload from changing what players receive.");
+            if settings_changed {
+                self.invalidate_root_publish_review();
+            }
+
+            ui.horizontal(|ui| {
+                if ui.add_enabled(
+                    !self.operation.running && !self.root_publishing.account.trim().is_empty(),
+                    egui::Button::new("Review Steam upload"),
+                ).clicked() {
+                    self.preview_steam_package();
+                }
+                if self.root_publishing.preview.is_some() && ui.add_enabled(
+                    !self.operation.running,
+                    egui::Button::new("Discard review"),
+                ).clicked() {
+                    self.invalidate_root_publish_review();
+                }
+            });
+
+            if let Some(preview) = self.root_publishing.preview.as_ref() {
+                ui.separator();
+                ui.strong(if preview.planned { "Reviewed SteamPipe upload" } else { "SteamPipe result" });
+                ui.label(format!(
+                    "App {} · depot {} · {} files · {} source roots",
+                    preview.package.app_id,
+                    preview.package.depot_id,
+                    preview.package.copied_files,
+                    preview.package.included_roots.len(),
+                ));
+                ui.label(format!("Account: {} · branch: {}", preview.account, preview.set_live.as_deref().unwrap_or("unchanged")));
+                ui.small(format!("SteamCMD: {}", preview.steamcmd.display()));
+                ui.small(format!("Package output: {}", preview.package.package_root.display()));
+                ui.collapsing("Included depot paths", |ui| {
+                    for path in &preview.package.included_roots {
+                        ui.small(path.display().to_string());
+                    }
+                });
+                if preview.planned {
+                    let confirmation = root_publish_confirmation(preview.set_live.as_deref());
+                    ui.colored_label(egui::Color32::YELLOW, "This sends the reviewed build to Steamworks. SteamCMD may prompt for your password or Steam Guard code.");
+                    if preview.set_live.is_some() {
+                        ui.colored_label(egui::Color32::YELLOW, "The selected beta branch will be changed after upload.");
+                    }
+                    ui.label(format!("Type {confirmation} to authorize this upload."));
+                    ui.add_enabled(
+                        !self.operation.running,
+                        egui::TextEdit::singleline(&mut self.root_publishing.confirmation).hint_text(&confirmation),
+                    );
+                    if ui.add_enabled(
+                        !self.operation.running && self.root_publishing.confirmation.trim() == confirmation,
+                        egui::Button::new(if preview.set_live.is_some() { "Upload and set branch live" } else { "Upload Steam build" }),
+                    ).clicked() {
+                        self.publish_steam_root();
+                    }
+                } else if let Some(status) = preview.status.as_ref() {
+                    if status.success() {
+                        ui.colored_label(egui::Color32::GREEN, "SteamCMD reported a successful upload.");
+                    } else {
+                        ui.colored_label(egui::Color32::RED, format!("SteamCMD exited with {status}."));
+                    }
+                }
+            }
+            if !self.root_publishing.status.is_empty() {
+                ui.separator();
+                ui.label(&self.root_publishing.status);
             }
         });
     }

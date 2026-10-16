@@ -1,7 +1,6 @@
 use super::{Section, StudioApp};
-use super::operation_protocol::OperationResult;
 use eframe::egui;
-use vapor_studio_core::{CURRENT_SCHEMA_VERSION, OperationKind, ProfileDocument};
+use vapor_studio_core::{CURRENT_SCHEMA_VERSION, ProfileDocument};
 
 impl StudioApp {
     pub(super) fn draw_profile_target_selector(&mut self, ui: &mut egui::Ui) {
@@ -63,8 +62,12 @@ impl StudioApp {
             ui.weak("No workspace open");
         } else {
             ui.small("OPEN WORKSPACE");
-            ui.label(std::path::Path::new(&self.workspace.root)
-                .file_name().and_then(|name| name.to_str()).unwrap_or(&self.workspace.root));
+            ui.label(
+                std::path::Path::new(&self.workspace.root)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&self.workspace.root),
+            );
             if self.has_unsaved_workspace_edits() {
                 ui.colored_label(egui::Color32::YELLOW, "Unsaved changes");
             }
@@ -109,34 +112,6 @@ impl StudioApp {
             }
         });
     }
-
-    pub(super) fn preview_steam_package(&mut self) {
-        self.spawn(OperationKind::StageRootDistribution, |_context| {
-            let result = vapor_sdk_core::root::package::root_package(
-                &vapor_sdk_core::root::types::RootPackageRequest {
-                    plan: true,
-                    app_id: vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
-                    depot_id: vapor_sdk_core::root::types::ROOT_STEAM_DEPOT_ID,
-                    description: "Vapor Studio package preview".to_owned(),
-                    set_live: None,
-                },
-            )
-            .map(|report| {
-                format!(
-                    "Steam root preview · App {} · depot {} · {} source roots · {} files · output {}",
-                    report.app_id,
-                    report.depot_id,
-                    report.included_roots.len(),
-                    report.copied_files,
-                    report.package_root.display(),
-                )
-            })
-            .map_err(|error| error.to_string());
-            OperationResult::Message(result)
-        });
-        self.status = "Preparing a read-only Steam root package plan…".to_owned();
-    }
-
 }
 
 impl eframe::App for StudioApp {
@@ -150,8 +125,8 @@ impl eframe::App for StudioApp {
         egui::Panel::bottom("studio-operation-center")
             .show(ui, |ui| self.draw_operation_center(ui));
         egui::CentralPanel::default().show(ui, |ui| {
-            let workspace_editor = self.section == Section::Workspace
-                && self.workspace.editor.files_open;
+            let workspace_editor =
+                self.section == Section::Workspace && self.workspace.editor.files_open;
             if workspace_editor {
                 self.draw_workspace(ui);
             } else {

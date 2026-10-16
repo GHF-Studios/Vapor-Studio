@@ -42,6 +42,7 @@ pub enum OperationKind {
     StageWorkshop,
     PublishWorkshop,
     StageRootDistribution,
+    PublishRootDistribution,
 }
 
 impl OperationKind {
@@ -86,6 +87,7 @@ impl OperationKind {
             Self::StageWorkshop => "stage-workshop",
             Self::PublishWorkshop => "publish-workshop",
             Self::StageRootDistribution => "stage-root-distribution",
+            Self::PublishRootDistribution => "publish-root-distribution",
         }
     }
 }

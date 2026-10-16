@@ -1,20 +1,21 @@
 use super::StudioApp;
 use super::operation_protocol::OperationResult;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex, mpsc::{self, Receiver, TryRecvError}},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, TryRecvError},
+    },
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
-use serde::{Deserialize, Serialize};
 use vapor_core::{
-    OperationEvent as CoreOperationEvent,
-    OperationRequest as CoreOperationRequest,
+    OperationEvent as CoreOperationEvent, OperationRequest as CoreOperationRequest,
     OperationService,
 };
 use vapor_studio_core::{
-    OperationEvent, OperationId, OperationKind,
-    OperationPhase, OperationRequest, OperationStatus,
+    OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
 };
 
 pub(super) struct OperationState {
@@ -45,9 +46,9 @@ impl Default for OperationState {
 
 impl OperationState {
     pub(super) fn restore_history(&mut self, encoded: Option<&str>) {
-        let Some(history) = encoded.and_then(|value| {
-            serde_json::from_str::<VecDeque<HistoricalOperation>>(value).ok()
-        }) else {
+        let Some(history) = encoded
+            .and_then(|value| serde_json::from_str::<VecDeque<HistoricalOperation>>(value).ok())
+        else {
             return;
         };
         self.operation_history = history.into_iter().take(20).collect();
@@ -70,10 +71,7 @@ pub(super) fn elapsed_label(completed_at_unix: u64) -> String {
     }
 }
 
-fn apply_core_operation_event(
-    event: &CoreOperationEvent,
-    current: &mut OperationEvent,
-) {
+fn apply_core_operation_event(event: &CoreOperationEvent, current: &mut OperationEvent) {
     if event.id != current.id {
         return;
     }
@@ -93,11 +91,17 @@ impl StudioApp {
             .lock()
             .ok()
             .and_then(|mut event| event.take());
-        if let (Some(event), Some(active)) = (latest_event.as_ref(), self.operation.active_operation.as_mut())
-        {
+        if let (Some(event), Some(active)) = (
+            latest_event.as_ref(),
+            self.operation.active_operation.as_mut(),
+        ) {
             apply_core_operation_event(event, active);
         }
-        let received = self.operation.receiver.as_ref().map(|receiver| receiver.try_recv());
+        let received = self
+            .operation
+            .receiver
+            .as_ref()
+            .map(|receiver| receiver.try_recv());
         let result = match received {
             Some(Ok(result)) => Some(result),
             Some(Err(TryRecvError::Disconnected)) => {
@@ -136,10 +140,12 @@ impl StudioApp {
                 let completed_at_unix = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map_or(0, |duration| duration.as_secs());
-                self.operation.operation_history.push_front(HistoricalOperation {
-                    completed_at_unix,
-                    event: event.clone(),
-                });
+                self.operation
+                    .operation_history
+                    .push_front(HistoricalOperation {
+                        completed_at_unix,
+                        event: event.clone(),
+                    });
                 self.operation.operation_history.truncate(20);
             }
             self.operation.active_operation = None;
@@ -201,6 +207,7 @@ impl StudioApp {
                 OperationPhase::Staging
             }
             OperationKind::PublishWorkshop => OperationPhase::Publishing,
+            OperationKind::PublishRootDistribution => OperationPhase::Publishing,
             _ => OperationPhase::Queued,
         };
         self.operation.active_operation = Some(OperationEvent {
@@ -246,6 +253,4 @@ impl StudioApp {
         self.operation.receiver = Some(receiver);
         self.operation.running = true;
     }
-
 }
-

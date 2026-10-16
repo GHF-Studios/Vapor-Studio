@@ -59,7 +59,17 @@ impl StudioApp {
                             "This installation needs review before it can be played. Open Library for verification or repair.");
                     }
                 } else {
-                    ui.weak("Choose a Packagepack to create your first launchable composition.");
+                    if !self.workspace.unregistered_projects.candidates.is_empty() {
+                        ui.weak(format!(
+                            "{} authored projects found. Adopt a Packagepack or create one to make this profile playable.",
+                            self.workspace.unregistered_projects.candidates.len(),
+                        ));
+                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Review workspace content")).clicked() {
+                            self.navigate_to_workspace_content();
+                        }
+                    } else {
+                        ui.weak("Choose a Packagepack to create your first launchable composition.");
+                    }
                     if ui.add_enabled(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                         egui::Button::new("Browse content"),
@@ -137,7 +147,9 @@ impl StudioApp {
             }
         });
         if self.operation.operation_history.is_empty() {
-            ui.weak("Completed installs, builds, validation, and publishing actions will appear here.");
+            ui.weak(
+                "Completed installs, builds, validation, and publishing actions will appear here.",
+            );
         } else {
             for entry in self.operation.operation_history.iter().take(5) {
                 ui.horizontal(|ui| {
@@ -156,7 +168,9 @@ impl StudioApp {
                             ui.weak("In progress");
                         }
                     }
-                    ui.weak(super::super::operations::elapsed_label(entry.completed_at_unix));
+                    ui.weak(super::super::operations::elapsed_label(
+                        entry.completed_at_unix,
+                    ));
                 });
             }
         }

@@ -4,50 +4,52 @@ use eframe::egui;
 impl StudioApp {
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new(if self.operation.running {
-                "Operation running"
-            } else {
-                "Operations and activity"
-            })
-            .default_open(self.operation.running)
-            .show(ui, |ui| {
-                if let Some(operation) = &self.operation.active_operation {
-                    ui.horizontal(|ui| {
-                        if self.operation.running {
-                            ui.spinner();
-                        }
-                        ui.strong(operation_kind_label(&operation.kind));
-                        ui.label(operation_phase_label(&operation.phase));
-                        ui.label(&self.status);
-                    });
-                    if let Some(progress) = &operation.progress {
-                        if let Some(total) = progress.total {
-                            let fraction = if total == 0 {
-                                0.0
-                            } else {
-                                (progress.completed as f32 / total as f32).clamp(0.0, 1.0)
-                            };
-                            ui.add(egui::ProgressBar::new(fraction).text(format!(
-                                "{} / {} {}",
-                                progress.completed, total, progress.unit
-                            )));
-                        } else {
-                            ui.label(format!("{} {}", progress.completed, progress.unit));
-                        }
+            "Operation running"
+        } else {
+            "Operations and activity"
+        })
+        .default_open(self.operation.running)
+        .show(ui, |ui| {
+            if let Some(operation) = &self.operation.active_operation {
+                ui.horizontal(|ui| {
+                    if self.operation.running {
+                        ui.spinner();
                     }
-                    if let Some(profile_id) = &operation.profile_id {
-                        ui.small(format!("Profile {profile_id}"));
-                    }
-                } else {
+                    ui.strong(operation_kind_label(&operation.kind));
+                    ui.label(operation_phase_label(&operation.phase));
                     ui.label(&self.status);
+                });
+                if let Some(progress) = &operation.progress {
+                    if let Some(total) = progress.total {
+                        let fraction = if total == 0 {
+                            0.0
+                        } else {
+                            (progress.completed as f32 / total as f32).clamp(0.0, 1.0)
+                        };
+                        ui.add(egui::ProgressBar::new(fraction).text(format!(
+                            "{} / {} {}",
+                            progress.completed, total, progress.unit
+                        )));
+                    } else {
+                        ui.label(format!("{} {}", progress.completed, progress.unit));
+                    }
                 }
-                for operation in self.operation.operation_history.iter().take(5) {
-                    ui.horizontal(|ui| {
-                        ui.small(operation_kind_label(&operation.event.kind));
-                        ui.small(operation_status_label(&operation.event.status));
-                        ui.weak(super::operations::elapsed_label(operation.completed_at_unix));
-                    });
+                if let Some(profile_id) = &operation.profile_id {
+                    ui.small(format!("Profile {profile_id}"));
                 }
-            });
+            } else {
+                ui.label(&self.status);
+            }
+            for operation in self.operation.operation_history.iter().take(5) {
+                ui.horizontal(|ui| {
+                    ui.small(operation_kind_label(&operation.event.kind));
+                    ui.small(operation_status_label(&operation.event.status));
+                    ui.weak(super::operations::elapsed_label(
+                        operation.completed_at_unix,
+                    ));
+                });
+            }
+        });
     }
 }
 
@@ -92,6 +94,7 @@ pub(super) fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &
         StageWorkshop => "Stage Workshop review",
         PublishWorkshop => "Publish to Workshop",
         StageRootDistribution => "Preview Steam package",
+        PublishRootDistribution => "Publish Steam root package",
     }
 }
 
