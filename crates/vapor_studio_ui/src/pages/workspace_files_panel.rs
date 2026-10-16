@@ -193,19 +193,21 @@ impl StudioApp {
                 if let Some(path) = open_file {
                     self.open_workspace_file(path);
                 }
+                let selected_path = self.workspace.selected_file.clone();
                 let can_edit = !self.operation.running && !self.authoring.manifest_metadata_dirty;
                 if let Some(document) = self.workspace.active_document_mut() {
-                    columns[1].add_enabled_ui(can_edit, |ui| {
-                        egui::TextEdit::multiline(&mut document.contents)
-                            .code_editor()
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(24)
-                            .show(ui)
+                    columns[1].push_id(selected_path.as_deref(), |ui| {
+                        ui.add_enabled_ui(can_edit, |ui| {
+                            egui::TextEdit::multiline(&mut document.contents)
+                                .code_editor()
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(24)
+                                .show(ui)
+                        });
                     });
                 } else {
                     columns[1].weak("Open a file from the project tree to begin editing.");
                 }
-                let selected_path = self.workspace.selected_file.clone();
                 let active_contents = self
                     .workspace
                     .active_document()
