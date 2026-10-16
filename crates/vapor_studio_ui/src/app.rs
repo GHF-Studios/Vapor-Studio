@@ -22,6 +22,8 @@ mod pages;
 mod workspace_files;
 #[path = "workspace_ops.rs"]
 mod workspace_ops;
+#[path = "workspace_editor.rs"]
+mod workspace_editor;
 #[path = "workshop.rs"]
 mod workshop;
 
