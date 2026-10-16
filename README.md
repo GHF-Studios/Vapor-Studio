@@ -38,4 +38,14 @@ editor for existing source projects. Saving checks that the opened manifest
 snapshot is still current, preserves unrelated manifest fields, validates the
 updated role manifest through Vapor Shell discovery, and atomically replaces
 the file.
-Packagepack graph and publication-metadata edits share a per-manifest lock.
+Packagepack graph, publication-metadata, and runtime-output edits share one
+per-manifest lock and atomic replacement path.
+
+The same project overview opens a structured runtime-output editor for declared
+executables and libraries. Names are validated by Vapor Shell, and updates use
+the same stale-snapshot check, shared manifest lock, unknown-field preservation,
+atomic replacement, and post-save discovery as Workshop metadata. Changing
+outputs clears the affected active profile's installation plan so it must be
+resolved and installed again before Play. Any profile pinned to the exact
+edited content version is invalidated; profiles pinned to parallel versions
+remain intact.

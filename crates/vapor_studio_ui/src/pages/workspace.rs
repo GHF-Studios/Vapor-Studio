@@ -149,7 +149,7 @@ impl StudioApp {
                                 .map(PathBuf::from);
                             if ui
                                 .add_enabled(
-                                    !self.running && !self.workspace_editor_dirty,
+                                    !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
                                     egui::Button::new("Validate"),
                                 )
                                 .on_hover_text("Validate this content manifest and its local references through Vapor Shell.")
@@ -160,7 +160,7 @@ impl StudioApp {
                             if let Some(relative_manifest) = relative_manifest {
                                 if ui
                                     .add_enabled(
-                                        !self.running && !self.workspace_editor_dirty,
+                                        !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
                                         egui::Button::new("Edit manifest"),
                                     )
                                     .on_disabled_hover_text("Save or discard the current file before opening a project manifest.")
@@ -171,7 +171,7 @@ impl StudioApp {
                             }
                             if ui
                                 .add_enabled(
-                                    !self.running && !self.workspace_editor_dirty,
+                                    !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
                                     egui::Button::new("Edit Workshop metadata"),
                                 )
                                 .on_disabled_hover_text("Save or reload the open file first; Workshop edits use a fresh Shell-validated manifest snapshot.")
@@ -180,7 +180,17 @@ impl StudioApp {
                                 self.load_source_workshop_metadata(&content);
                             }
                             if ui
-                                    .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Edit dependencies"))
+                                .add_enabled(
+                                    !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                                    egui::Button::new("Edit runtime outputs"),
+                                )
+                                .on_disabled_hover_text("Save or discard open edits first; runtime output edits use a fresh Shell-validated manifest snapshot.")
+                                .clicked()
+                            {
+                                self.load_source_runtime_outputs(&content);
+                            }
+                            if ui
+                                    .add_enabled(!self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Edit dependencies"))
                                     .clicked()
                             {
                                 self.composition_edit_selector =
@@ -192,7 +202,7 @@ impl StudioApp {
                             }
                             if content.kind == vapor_core::ContentKind::Packagepack.as_str()
                                 && ui
-                                    .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Use in active profile"))
+                                    .add_enabled(!self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Use in active profile"))
                                     .clicked()
                             {
                                 self.assign_profile_root(
@@ -252,23 +262,64 @@ impl StudioApp {
                     ui.label("Change note");
                     changed |= ui.text_edit_singleline(&mut self.workshop_metadata_change_note).changed();
                 });
-                self.workshop_metadata_dirty |= changed;
+                self.manifest_metadata_dirty |= changed;
                 ui.horizontal(|ui| {
                     if ui.add_enabled(
-                        !self.running && !self.workspace_editor_dirty && self.workshop_metadata_dirty,
+                        !self.running && !self.workspace_editor_dirty && self.manifest_metadata_dirty,
                         egui::Button::new("Save Workshop metadata"),
                     ).clicked() {
                         self.save_source_workshop_metadata();
                     }
-                    if ui.add_enabled(!self.running && self.workshop_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
+                    if ui.add_enabled(!self.running && self.manifest_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
                         self.set_workshop_metadata_fields(&metadata.policy);
-                        self.workshop_metadata_dirty = false;
+                        self.manifest_metadata_dirty = false;
                     }
-                    if ui.add_enabled(!self.running && !self.workshop_metadata_dirty, egui::Button::new("Close")).clicked() {
+                    if ui.add_enabled(!self.running && !self.manifest_metadata_dirty, egui::Button::new("Close")).clicked() {
                         self.workshop_metadata_edit = None;
                     }
-                    if self.workshop_metadata_dirty {
+                    if self.manifest_metadata_dirty {
                         ui.colored_label(egui::Color32::YELLOW, "Unsaved metadata draft");
+                    }
+                });
+            });
+        }
+        if let Some(outputs) = self.runtime_outputs_edit.clone() {
+            ui.group(|ui| {
+                ui.heading(format!("Runtime outputs · {}", outputs.id));
+                ui.label("Declare Cargo build outputs copied into the deployed artifact's bin/ and lib/ directories. Enter one file name per line; paths are not accepted.");
+                ui.columns(2, |columns| {
+                    columns[0].label("Executables");
+                    let binaries_changed = columns[0].add(
+                        egui::TextEdit::multiline(&mut self.runtime_binaries_text)
+                            .desired_rows(4)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("spacetime-engine"),
+                    ).changed();
+                    columns[1].label("Libraries");
+                    let libraries_changed = columns[1].add(
+                        egui::TextEdit::multiline(&mut self.runtime_libraries_text)
+                            .desired_rows(4)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("libexample.so"),
+                    ).changed();
+                    self.manifest_metadata_dirty |= binaries_changed || libraries_changed;
+                });
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(
+                        !self.running && !self.workspace_editor_dirty && self.manifest_metadata_dirty,
+                        egui::Button::new("Save runtime outputs"),
+                    ).clicked() {
+                        self.save_source_runtime_outputs();
+                    }
+                    if ui.add_enabled(!self.running && self.manifest_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
+                        self.set_runtime_output_fields(&outputs);
+                        self.manifest_metadata_dirty = false;
+                    }
+                    if ui.add_enabled(!self.running && !self.manifest_metadata_dirty, egui::Button::new("Close")).clicked() {
+                        self.runtime_outputs_edit = None;
+                    }
+                    if self.manifest_metadata_dirty {
+                        ui.colored_label(egui::Color32::YELLOW, "Unsaved runtime output changes");
                     }
                 });
             });

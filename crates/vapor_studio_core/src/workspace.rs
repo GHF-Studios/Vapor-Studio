@@ -32,6 +32,7 @@ pub struct SourceWorkshopPolicy {
 
 pub use vapor_shell::content::WorkshopPolicyDraft;
 pub use vapor_shell::content::SourceWorkshopMetadata;
+pub use vapor_shell::content::SourceRuntimeOutputs;
 
 pub use vapor_shell::content::{
     CompositionLink as SourceCompositionLink, SourceComposition,
@@ -81,6 +82,29 @@ pub fn save_source_workshop_metadata(
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
     content::save_source_workshop_metadata(&paths, selector, expected_source, policy)
+}
+
+pub fn load_source_runtime_outputs(
+    application_executable: &Path,
+    workspace_root: &Path,
+    selector: &str,
+) -> Result<SourceRuntimeOutputs, String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    content::load_source_runtime_outputs(&paths, selector)
+}
+
+pub fn save_source_runtime_outputs(
+    application_executable: &Path,
+    workspace_root: &Path,
+    selector: &str,
+    expected_source: &str,
+    binaries: &[String],
+    libraries: &[String],
+) -> Result<SourceRuntimeOutputs, String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    content::save_source_runtime_outputs(&paths, selector, expected_source, binaries, libraries)
 }
 
 /// Ask Vapor Shell whether one source role can directly depend on another.

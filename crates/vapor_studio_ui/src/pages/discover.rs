@@ -24,7 +24,7 @@ impl StudioApp {
                         ui.selectable_value(&mut self.catalog_kind_filter, Some(kind.clone()), kind);
                     }
                 });
-            if ui.add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Refresh local catalog"))
+            if ui.add_enabled(!self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Refresh local catalog"))
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
                 .clicked()
             {

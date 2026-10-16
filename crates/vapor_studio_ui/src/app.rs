@@ -44,6 +44,8 @@ enum OperationResult {
     SourceCompositionSaved(Result<vapor_studio_core::SourceComposition, String>),
     SourceWorkshopLoaded(Result<vapor_studio_core::SourceWorkshopMetadata, String>),
     SourceWorkshopSaved(Result<vapor_studio_core::SourceWorkshopMetadata, String>),
+    SourceRuntimeOutputsLoaded(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
+    SourceRuntimeOutputsSaved(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
     Install(Result<vapor_studio_core::InstalledComposition, String>),
     Update(Result<vapor_studio_core::InstalledComposition, String>),
     RunProfile(Result<vapor_studio_core::InstalledComposition, String>),
@@ -82,6 +84,8 @@ fn operation_failure(result: &OperationResult) -> Option<String> {
         | OperationResult::SourceCompositionSaved(Err(error))
         | OperationResult::SourceWorkshopLoaded(Err(error))
         | OperationResult::SourceWorkshopSaved(Err(error))
+        | OperationResult::SourceRuntimeOutputsLoaded(Err(error))
+        | OperationResult::SourceRuntimeOutputsSaved(Err(error))
         | OperationResult::Install(Err(error))
         | OperationResult::Update(Err(error))
         | OperationResult::RunProfile(Err(error))
@@ -138,7 +142,10 @@ pub struct StudioApp {
     composition_original_links: Option<Vec<vapor_studio_core::SourceCompositionLink>>,
     composition_link_candidate: String,
     workshop_metadata_edit: Option<vapor_studio_core::SourceWorkshopMetadata>,
-    workshop_metadata_dirty: bool,
+    manifest_metadata_dirty: bool,
+    runtime_outputs_edit: Option<vapor_studio_core::SourceRuntimeOutputs>,
+    runtime_binaries_text: String,
+    runtime_libraries_text: String,
     workshop_metadata_app_id: String,
     workshop_metadata_published_file_id: String,
     workshop_metadata_visibility: String,
@@ -274,7 +281,10 @@ impl StudioApp {
             composition_original_links: None,
             composition_link_candidate: String::new(),
             workshop_metadata_edit: None,
-            workshop_metadata_dirty: false,
+            manifest_metadata_dirty: false,
+            runtime_outputs_edit: None,
+            runtime_binaries_text: String::new(),
+            runtime_libraries_text: String::new(),
             workshop_metadata_app_id: String::new(),
             workshop_metadata_published_file_id: String::new(),
             workshop_metadata_visibility: String::new(),
@@ -361,6 +371,7 @@ impl StudioApp {
                     | OperationResult::AdoptedContentProject(Ok(_))
                     | OperationResult::SourceCompositionSaved(Ok(_))
                     | OperationResult::SourceWorkshopSaved(Ok(_))
+                    | OperationResult::SourceRuntimeOutputsSaved(Ok(_))
             );
             let refresh_after_manifest_save = matches!(
                 &result,
@@ -406,7 +417,8 @@ impl StudioApp {
                 }
                 OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
                     self.workshop_metadata_edit = None;
-                    self.workshop_metadata_dirty = false;
+                    self.runtime_outputs_edit = None;
+                    self.manifest_metadata_dirty = false;
                     self.activate_workspace(root, contents, catalog, files)
                 }
                 OperationResult::Discovery(source_result, catalog_result) => {
@@ -471,6 +483,8 @@ impl StudioApp {
                 | OperationResult::SourceCompositionSaved(Err(error))
                 | OperationResult::SourceWorkshopLoaded(Err(error))
                 | OperationResult::SourceWorkshopSaved(Err(error))
+                | OperationResult::SourceRuntimeOutputsLoaded(Err(error))
+                | OperationResult::SourceRuntimeOutputsSaved(Err(error))
                 | OperationResult::AdoptedContentProject(Err(error)) => self.status = error,
                 OperationResult::Verify(Err(error)) => {
                     let artifacts = match self.profiles[self.active_profile].installation.clone() {
@@ -653,31 +667,30 @@ impl StudioApp {
                     );
                 }
                 OperationResult::SourceCompositionSaved(Ok(composition)) => {
-                    let affects_active_profile = self.profiles[self.active_profile].root_package.as_ref()
-                        .is_some_and(|root| root.id == composition.id)
-                        || self.profiles[self.active_profile].resolved_graph.as_ref()
-                            .is_some_and(|graph| graph.nodes.iter().any(|node| node.content.id == composition.id));
+                    let identity = ContentIdentity {
+                        id: composition.id.clone(),
+                        version: composition.version.clone(),
+                    };
                     self.composition_original_links = Some(composition.links.clone());
                     self.composition_edit = Some(composition);
-                    self.workshop_preview = None;
-                    if affects_active_profile {
-                        self.profiles[self.active_profile].resolved_graph = None;
-                        self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::NotInstalled;
-                        self.repreview_after_catalog_refresh = true;
-                    }
+                    self.invalidate_profiles_for_source_content(&identity);
                     self.status = "Saved the source content graph. Studio is refreshing its catalog and composition plan.".to_owned();
                 }
                 OperationResult::SourceWorkshopLoaded(Ok(metadata)) => {
                     self.set_workshop_metadata_fields(&metadata.policy);
                     self.workshop_metadata_edit = Some(metadata);
-                    self.workshop_metadata_dirty = false;
+                    self.runtime_outputs_edit = None;
+                    self.manifest_metadata_dirty = false;
                     self.status = "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell.".to_owned();
                 }
                 OperationResult::SourceWorkshopSaved(Ok(metadata)) => {
                     self.set_workshop_metadata_fields(&metadata.policy);
                     self.workshop_metadata_edit = Some(metadata.clone());
-                    self.workshop_metadata_dirty = false;
-                    self.workshop_preview = None;
+                    self.manifest_metadata_dirty = false;
+                    self.invalidate_profiles_for_source_content(&ContentIdentity {
+                        id: metadata.id.clone(),
+                        version: metadata.version.clone(),
+                    });
                     if let Ok(relative) = metadata.manifest.strip_prefix(Path::new(self.workspace_root.trim())) {
                         let relative = relative.to_path_buf();
                         if self.selected_workspace_file.as_ref() == Some(&relative) {
@@ -688,6 +701,32 @@ impl StudioApp {
                         }
                     }
                     self.status = "Saved Workshop metadata through Vapor Shell. Studio is refreshing the workspace catalog.".to_owned();
+                }
+                OperationResult::SourceRuntimeOutputsLoaded(Ok(outputs)) => {
+                    self.set_runtime_output_fields(&outputs);
+                    self.runtime_outputs_edit = Some(outputs);
+                    self.workshop_metadata_edit = None;
+                    self.manifest_metadata_dirty = false;
+                    self.status = "Loaded runtime output declarations. Edit the executable and library lists, then save through Vapor Shell.".to_owned();
+                }
+                OperationResult::SourceRuntimeOutputsSaved(Ok(outputs)) => {
+                    self.set_runtime_output_fields(&outputs);
+                    self.runtime_outputs_edit = Some(outputs.clone());
+                    self.manifest_metadata_dirty = false;
+                    self.invalidate_profiles_for_source_content(&ContentIdentity {
+                        id: outputs.id.clone(),
+                        version: outputs.version.clone(),
+                    });
+                    if let Ok(relative) = outputs.manifest.strip_prefix(Path::new(self.workspace_root.trim())) {
+                        let relative = relative.to_path_buf();
+                        if self.selected_workspace_file.as_ref() == Some(&relative) {
+                            self.workspace_editor = outputs.source.clone();
+                            self.workspace_editor_original = outputs.source.clone();
+                            self.workspace_editor_dirty = false;
+                            self.refresh_workspace_editor_toml_diagnostic();
+                        }
+                    }
+                    self.status = "Saved runtime outputs through Vapor Shell. Studio is refreshing the catalog and active profile.".to_owned();
                 }
                 OperationResult::Install(Ok(composition)) => {
                     self.composition_preview = None;
@@ -901,9 +940,9 @@ impl StudioApp {
     }
 
     pub(super) fn open_workspace_path(&mut self, path: PathBuf) {
-        if self.workshop_metadata_dirty {
+        if self.manifest_metadata_dirty {
             self.workspace_root_draft = self.workspace_root.clone();
-            self.status = "Save or discard the Workshop metadata draft before changing workspaces.".to_owned();
+            self.status = "Save or discard the structured manifest edits before changing workspaces.".to_owned();
             return;
         }
         if self.workspace_editor_dirty {
@@ -1443,9 +1482,9 @@ impl StudioApp {
     }
 
     fn require_saved_workspace(&mut self, action: &str) -> bool {
-        if self.workshop_metadata_dirty {
+        if self.manifest_metadata_dirty {
             self.status = format!(
-                "Save or discard the Workshop metadata draft before you {action}.",
+                "Save or discard structured manifest edits before you {action}.",
             );
             return false;
         }
@@ -1486,8 +1525,8 @@ impl StudioApp {
     }
 
     fn open_workspace_file(&mut self, path: PathBuf) {
-        if self.workshop_metadata_dirty {
-            self.status = "Save or discard the Workshop metadata draft before opening another file.".to_owned();
+        if self.manifest_metadata_dirty {
+            self.status = "Save or discard structured manifest edits before opening another file.".to_owned();
             return;
         }
         if self.workspace_editor_dirty {
@@ -1617,6 +1656,7 @@ impl StudioApp {
             OperationKind::Resolve
             | OperationKind::LoadComposition
             | OperationKind::LoadWorkshopMetadata
+            | OperationKind::LoadRuntimeOutputs
             | OperationKind::Discover
             | OperationKind::OpenWorkspace
             | OperationKind::RememberWorkspace
@@ -1626,7 +1666,8 @@ impl StudioApp {
             OperationKind::CreateWorkspace => OperationPhase::Building,
             OperationKind::CreateWorkspaceFile
             | OperationKind::SaveComposition
-            | OperationKind::SaveWorkshopMetadata => OperationPhase::Building,
+            | OperationKind::SaveWorkshopMetadata
+            | OperationKind::SaveRuntimeOutputs => OperationPhase::Building,
             OperationKind::Acquire => OperationPhase::Acquiring,
             OperationKind::Install | OperationKind::Update | OperationKind::Repair => {
                 OperationPhase::Installing
@@ -1758,9 +1799,9 @@ impl StudioApp {
         if self.running || index >= self.profiles.len() {
             return;
         }
-        if self.workspace_editor_dirty {
+        if self.workspace_editor_dirty || self.manifest_metadata_dirty {
             self.status =
-                "Save or discard the current editor changes before switching profiles.".to_owned();
+                "Save or discard workspace file or manifest metadata edits before switching profiles.".to_owned();
             return;
         }
         self.active_profile = index;
@@ -1775,6 +1816,9 @@ impl StudioApp {
         self.selected_catalog_content = None;
         self.composition_preview = None;
         self.workshop_preview = None;
+        self.workshop_metadata_edit = None;
+        self.runtime_outputs_edit = None;
+        self.manifest_metadata_dirty = false;
         self.workspace_files.clear();
         self.selected_workspace_file = None;
         self.workspace_editor.clear();
@@ -1791,6 +1835,10 @@ impl StudioApp {
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
     ) {
+        if self.manifest_metadata_dirty {
+            self.status = "Save or discard structured manifest edits before changing the profile composition.".to_owned();
+            return;
+        }
         let next_workspace = workspace
             .clone()
             .unwrap_or_else(|| self.fallback_workspace_root.clone());
@@ -1806,7 +1854,7 @@ impl StudioApp {
         }
         if self.workspace_editor_dirty && Path::new(self.workspace_root.trim()) != next_workspace {
             self.status =
-                "Save or discard editor changes before assigning content from another workspace."
+                "Save or discard workspace edits before assigning content from another workspace."
                     .to_owned();
             return;
         }
@@ -1950,6 +1998,74 @@ impl StudioApp {
             ))
         });
         self.status = format!("Loading Workshop metadata for {selector} through Vapor Shell…");
+    }
+
+    pub(super) fn load_source_runtime_outputs(&mut self, content: &vapor_studio_core::SourceContent) {
+        if !self.require_saved_workspace("edit runtime output declarations") { return; }
+        let selector = source_content_selector(content);
+        let root = PathBuf::from(self.workspace_root.trim());
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+        };
+        self.spawn(OperationKind::LoadRuntimeOutputs, move |_context| {
+            OperationResult::SourceRuntimeOutputsLoaded(vapor_studio_core::load_source_runtime_outputs(
+                &executable, &root, &selector,
+            ))
+        });
+        self.status = format!("Loading runtime output declarations for {selector} through Vapor Shell…");
+    }
+
+    pub(super) fn save_source_runtime_outputs(&mut self) {
+        if self.workspace_editor_dirty {
+            self.status = "Save or reload the open file before saving runtime outputs.".to_owned();
+            return;
+        }
+        let Some(outputs) = self.runtime_outputs_edit.clone() else {
+            self.status = "Load a source content project's runtime outputs first.".to_owned();
+            return;
+        };
+        let parse_names = |text: &str| text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        let binaries = parse_names(&self.runtime_binaries_text);
+        let libraries = parse_names(&self.runtime_libraries_text);
+        let selector = outputs.version.as_deref()
+            .map(|version| format!("{}@{version}", outputs.id))
+            .unwrap_or_else(|| outputs.id.clone());
+        let expected_source = outputs.source;
+        let root = PathBuf::from(self.workspace_root.trim());
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+        };
+        self.spawn(OperationKind::SaveRuntimeOutputs, move |_context| {
+            OperationResult::SourceRuntimeOutputsSaved(vapor_studio_core::save_source_runtime_outputs(
+                &executable, &root, &selector, &expected_source, &binaries, &libraries,
+            ))
+        });
+        self.status = format!("Validating and saving runtime outputs for {selector} through Vapor Shell…");
+    }
+
+    fn set_runtime_output_fields(&mut self, outputs: &vapor_studio_core::SourceRuntimeOutputs) {
+        self.runtime_binaries_text = outputs.binaries.join("\n");
+        self.runtime_libraries_text = outputs.libraries.join("\n");
+    }
+
+    fn invalidate_profiles_for_source_content(&mut self, identity: &ContentIdentity) {
+        self.workshop_preview = None;
+        for (index, profile) in self.profiles.iter_mut().enumerate() {
+            let affected = profile.root_package.as_ref().is_some_and(|root| root == identity)
+                || profile.resolved_graph.as_ref()
+                    .is_some_and(|graph| graph.nodes.iter().any(|node| &node.content == identity));
+            if affected {
+                profile.resolved_graph = None;
+                profile.installation = vapor_studio_core::InstallationState::NotInstalled;
+                self.repreview_after_catalog_refresh |= index == self.active_profile;
+            }
+        }
     }
 
     pub(super) fn save_source_workshop_metadata(&mut self) {
