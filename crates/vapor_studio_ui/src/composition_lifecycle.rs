@@ -1,0 +1,282 @@
+use super::{StudioApp, content_selector};
+use super::operations::OperationResult;
+use std::path::PathBuf;
+use vapor_studio_core::{ContentIdentity, OperationKind};
+
+impl StudioApp {
+    pub(super) fn install_selected(&mut self) {
+        if !self.require_saved_workspace("install this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
+        let workspace = profile.workspace.map(|workspace| workspace.root);
+        let executable = match std::env::current_exe() {
+            Ok(executable) => executable,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        let selector = root_package
+            .version
+            .as_deref()
+            .map(|version| format!("{}@{}", root_package.id, version))
+            .unwrap_or_else(|| root_package.id.clone());
+        self.spawn(OperationKind::Install, move |_context| {
+            OperationResult::Install(vapor_studio_core::install_profile_composition(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+            ))
+        });
+        self.status = "Installing the selected composition and dependencies…".to_owned();
+    }
+
+    pub(super) fn update_selected(&mut self) {
+        if !self.require_saved_workspace("update this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
+        let workspace = profile.workspace.map(|workspace| workspace.root);
+        let executable = match std::env::current_exe() {
+            Ok(executable) => executable,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        let selector = content_selector(&root_package);
+        self.spawn(OperationKind::Update, move |_context| {
+            OperationResult::Update(vapor_studio_core::update_profile_composition(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+            ))
+        });
+        self.status = "Updating the selected composition through Vapor Shell…".to_owned();
+    }
+
+    pub(super) fn preview_selected_composition(&mut self) {
+        if !self.require_saved_workspace("resolve this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
+        let selector = content_selector(&root_package);
+        let workspace = profile.workspace.map(|workspace| workspace.root);
+        self.preview_composition(selector, workspace, "Resolving this profile against workspace, cache, and installed content…");
+    }
+
+    pub(super) fn preview_source_composition(&mut self, selector: String) {
+        if !self.require_open_workspace("preview this source composition") {
+            return;
+        }
+        let workspace = Some(PathBuf::from(self.workspace_root.trim()));
+        self.preview_composition(selector, workspace, "Resolving this source composition against workspace, cache, and installed content…");
+    }
+
+    pub(super) fn preview_composition(
+        &mut self,
+        selector: String,
+        workspace: Option<PathBuf>,
+        status: &str,
+    ) {
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        self.composition_preview = None;
+        self.spawn(OperationKind::Resolve, move |_context| {
+            OperationResult::CompositionPreview(vapor_studio_core::preview_profile_composition(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+            ))
+        });
+        self.status = status.to_owned();
+    }
+
+    pub(super) fn verify_selected_installation(&mut self) {
+        let Some(root_package) = self
+            .profiles
+            .get(self.active_profile)
+            .and_then(|profile| profile.root_package.clone())
+        else {
+            return;
+        };
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = error.to_string();
+                return;
+            }
+        };
+        let selectors = self.profiles[self.active_profile]
+            .resolved_graph
+            .as_ref()
+            .map(|graph| {
+                graph
+                    .nodes
+                    .iter()
+                    .map(|node| content_selector(&node.content))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![content_selector(&root_package)]);
+        self.spawn(OperationKind::Verify, move |_context| {
+            OperationResult::Verify(vapor_studio_core::verify_installation(
+                &executable,
+                &content_selector(&root_package),
+                &selectors,
+            ))
+        });
+        self.status = "Verifying installed composition…".to_owned();
+    }
+
+    pub(super) fn repair_selected_installation(&mut self) {
+        if !self.require_saved_workspace("repair this workspace composition") {
+            return;
+        }
+        let Some(root_package) = self
+            .profiles
+            .get(self.active_profile)
+            .and_then(|profile| profile.root_package.clone())
+        else {
+            return;
+        };
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = error.to_string();
+                return;
+            }
+        };
+        let workspace = self.profiles[self.active_profile]
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root.clone());
+        let selector = content_selector(&root_package);
+        let graph_selectors = self.profiles[self.active_profile]
+            .resolved_graph
+            .as_ref()
+            .map(|graph| {
+                graph
+                    .nodes
+                    .iter()
+                    .map(|node| content_selector(&node.content))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        self.spawn(OperationKind::Repair, move |_context| {
+            OperationResult::Repair(vapor_studio_core::repair_profile_composition(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+                &graph_selectors,
+            ))
+        });
+        self.status = "Repairing installed composition…".to_owned();
+    }
+
+    pub(super) fn run_installed_selected(&mut self) {
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        let selector = content_selector(&root_package);
+        let workspace = profile.workspace.map(|workspace| workspace.root);
+        let arguments = profile.launch.arguments;
+        self.spawn(OperationKind::RunInstalled, move |_context| {
+            OperationResult::Message(vapor_studio_core::run_installed_profile(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+                &arguments,
+            ))
+        });
+        self.status = "Launching the installed composition for this profile…".to_owned();
+    }
+
+    pub(super) fn launch_default_profile(&mut self) {
+        if self.profiles[self.active_profile].root_package.is_none() {
+            let executable = match std::env::current_exe() {
+                Ok(value) => value,
+                Err(error) => {
+                    self.status = format!("Could not locate the Studio executable: {error}");
+                    return;
+                }
+            };
+            match vapor_studio_core::default_packagepack_selector(&executable, "default") {
+                Ok(id) => {
+                    self.profiles[self.active_profile].root_package =
+                        Some(ContentIdentity { id, version: None })
+                }
+                Err(error) => {
+                    self.status = format!("This app has no default playable composition: {error}");
+                    return;
+                }
+            }
+        }
+        self.run_installed_selected();
+    }
+
+    pub(super) fn run_selected(&mut self) {
+        if !self.require_open_workspace("build and play this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
+        let Some(workspace) = profile.workspace.map(|workspace| workspace.root) else {
+            return;
+        };
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        let selector = content_selector(&root_package);
+        let arguments = profile.launch.arguments;
+        self.spawn(OperationKind::Run, move |_context| {
+            OperationResult::RunProfile(vapor_studio_core::run_source_profile(
+                &executable,
+                &workspace,
+                &selector,
+                &arguments,
+            ))
+        });
+        self.status =
+            "Installing source changes and launching this profile through Vapor Shell…".to_owned();
+    }
+
+}
