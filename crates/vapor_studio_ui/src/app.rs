@@ -27,6 +27,7 @@ enum OperationResult {
     Workspace(Result<VaporWorkspace, String>),
     WorkspaceSelection(Result<WorkspaceSelectionData, String>),
     RememberedSources(Result<Vec<PathBuf>, String>),
+    AdoptedContentProject(Result<(String, Vec<vapor_studio_core::SourceContent>), String>),
     Discovery(
         Result<Vec<vapor_studio_core::SourceContent>, String>,
         Result<Vec<vapor_studio_core::CatalogContent>, String>,
@@ -65,6 +66,7 @@ fn operation_failure(result: &OperationResult) -> Option<String> {
         OperationResult::Workspace(Err(error))
         | OperationResult::WorkspaceSelection(Err(error))
         | OperationResult::RememberedSources(Err(error))
+        | OperationResult::AdoptedContentProject(Err(error))
         | OperationResult::CompositionPreview(Err(error))
         | OperationResult::Message(Err(error))
         | OperationResult::WorkspaceFiles(Err(error))
@@ -127,6 +129,7 @@ pub struct StudioApp {
     starter_workspace_organization: String,
     starter_workspace_name: String,
     new_workspace_file_path: String,
+    adopt_project_path: String,
     registered_sources: Vec<PathBuf>,
     active_source: Option<PathBuf>,
     contents: Vec<vapor_studio_core::SourceContent>,
@@ -263,6 +266,7 @@ impl StudioApp {
             starter_workspace_organization: "my-workshop".to_owned(),
             starter_workspace_name: "my-game".to_owned(),
             new_workspace_file_path: String::new(),
+            adopt_project_path: String::new(),
             registered_sources: Vec::new(),
             active_source: None,
             status: "Choose a workspace or discover content in this folder.".to_owned(),
@@ -316,6 +320,7 @@ impl StudioApp {
                 OperationResult::WorkshopPublish(Ok(_))
                     | OperationResult::WorkshopAcquisition(Ok(_))
                     | OperationResult::ContentWorkspace(Ok(_))
+                    | OperationResult::AdoptedContentProject(Ok(_))
                     | OperationResult::SourceCompositionSaved(Ok(_))
             );
             let refresh_after_manifest_save = matches!(
@@ -343,6 +348,11 @@ impl StudioApp {
                 OperationResult::RememberedSources(Ok(known)) => {
                     self.registered_sources = known;
                     self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
+                }
+                OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
+                    self.contents = contents;
+                    self.adopt_project_path.clear();
+                    self.status = summary;
                 }
                 OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
                     self.activate_workspace(root, contents, catalog, files)
@@ -406,7 +416,8 @@ impl StudioApp {
                 | OperationResult::FileSaved(Err(error))
                 | OperationResult::ContentWorkspace(Err(error))
                 | OperationResult::SourceCompositionLoaded(Err(error))
-                | OperationResult::SourceCompositionSaved(Err(error)) => self.status = error,
+                | OperationResult::SourceCompositionSaved(Err(error))
+                | OperationResult::AdoptedContentProject(Err(error)) => self.status = error,
                 OperationResult::Verify(Err(error)) => {
                     let artifacts = match self.profiles[self.active_profile].installation.clone() {
                         vapor_studio_core::InstallationState::Installed { artifacts, .. }
@@ -795,6 +806,7 @@ impl StudioApp {
         self.workspace_editor_toml_diagnostic = None;
         self.workspace_editor_dirty = false;
         self.new_workspace_file_path.clear();
+        self.adopt_project_path.clear();
         self.section = Section::Workspace;
         self.status = catalog_error.map_or_else(
             || format!("Opened workspace {} · {} source items · {} local catalog entries.", self.workspace_root, self.contents.len(), self.catalog.len()),
@@ -1485,6 +1497,7 @@ impl StudioApp {
             | OperationKind::Discover
             | OperationKind::OpenWorkspace
             | OperationKind::RememberWorkspace
+            | OperationKind::AdoptContentProject
             | OperationKind::DiscoverWorkspace => OperationPhase::Resolving,
             OperationKind::CreateWorkspace => OperationPhase::Building,
             OperationKind::CreateWorkspaceFile | OperationKind::SaveComposition => OperationPhase::Building,
@@ -1643,6 +1656,7 @@ impl StudioApp {
         self.workspace_editor_toml_diagnostic = None;
         self.workspace_editor_dirty = false;
         self.new_workspace_file_path.clear();
+        self.adopt_project_path.clear();
         self.discover();
     }
 
@@ -1892,6 +1906,33 @@ impl StudioApp {
         });
         self.status =
             "Creating the maintained Engine, Game, and Packagepack starter workspace…".to_owned();
+    }
+
+    pub(super) fn adopt_content_project(&mut self) {
+        if !self.require_saved_workspace("adopt a content project") {
+            return;
+        }
+        let project_path = self.adopt_project_path.trim().to_owned();
+        if project_path.is_empty() {
+            self.status = "Enter a project folder path relative to the open Workspace.".to_owned();
+            return;
+        }
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        let root = PathBuf::from(self.workspace_root.trim());
+        self.spawn(OperationKind::AdoptContentProject, move |_context| {
+            OperationResult::AdoptedContentProject(
+                vapor_studio_core::adopt_workspace_content_project(
+                    &executable, &root, std::path::Path::new(&project_path),
+                ),
+            )
+        });
+        self.status = format!("Validating and adopting {project_path}…");
     }
 
     pub(super) fn remember_open_workspace(&mut self) {

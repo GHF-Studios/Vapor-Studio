@@ -137,6 +137,27 @@ impl StudioApp {
                 }
             });
         }
+        if !self.workspace_root.trim().is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("Adopt existing content project");
+                ui.add_enabled(
+                    !self.running && !self.workspace_editor_dirty,
+                    egui::TextEdit::singleline(&mut self.adopt_project_path)
+                        .desired_width(260.0)
+                        .hint_text("folder path relative to Workspace"),
+                );
+                if ui
+                    .add_enabled(
+                        !self.running && !self.workspace_editor_dirty,
+                        egui::Button::new("Adopt project"),
+                    )
+                    .on_hover_text("Adds one selected folder to the Vapor content registry after validating its role manifest and identity. It does not move files or edit Cargo membership.")
+                    .clicked()
+                {
+                    self.adopt_content_project();
+                }
+            });
+        }
         ui.horizontal_wrapped(|ui| {
             if ui.add_enabled(!self.running && !self.workspace_editor_dirty && !self.workspace_root.trim().is_empty(), egui::Button::new("Validate content"))
                 .on_disabled_hover_text("Save or reload the open file first; validation reads workspace files from disk.")

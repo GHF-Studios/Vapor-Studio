@@ -176,3 +176,16 @@ pub fn remember_workspace(workspace_root: &Path) -> Result<Vec<PathBuf>, String>
         .map_err(|error| error.to_string())?;
     Ok(state.known)
 }
+
+/// Register an existing content project through Vapor Shell without moving it.
+pub fn adopt_workspace_content_project(
+    application_executable: &Path,
+    workspace_root: &Path,
+    project_path: &Path,
+) -> Result<(String, Vec<SourceContent>), String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    let summary = content::adopt_source_project(&paths, project_path)?;
+    let contents = discover_source_content(application_executable, workspace_root)?;
+    Ok((summary, contents))
+}
