@@ -1,6 +1,6 @@
 use super::StudioApp;
 use super::catalog::discover_workspace_and_catalog;
-use super::operation_protocol::OperationResult;
+use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
 use super::workspace_files::discover_workspace_files;
 use crate::navigation::Section;
 use std::{fs, path::PathBuf};
@@ -122,16 +122,19 @@ impl StudioApp {
 
     pub(super) fn activate_workspace(
         &mut self,
-        root: PathBuf,
-        contents: Vec<vapor_studio_core::SourceContent>,
-        catalog: Result<Vec<vapor_studio_core::CatalogContent>, String>,
-        files: Vec<PathBuf>,
+        selection: WorkspaceOpenSnapshot,
     ) {
+        let WorkspaceOpenSnapshot {
+            root,
+            source_content,
+            local_catalog,
+            workspace_files,
+        } = selection;
         let workspace_changed = self.profile.items[self.profile.active_index]
             .workspace
             .as_ref()
             .is_none_or(|workspace| workspace.root != root);
-        let catalog_error = catalog.as_ref().err().cloned();
+        let catalog_error = local_catalog.as_ref().err().cloned();
         self.workspace.root = root.display().to_string();
         self.workspace.root_draft = self.workspace.root.clone();
         self.authoring.clear_workspace_context();
@@ -143,12 +146,12 @@ impl StudioApp {
             profile.installation = vapor_studio_core::InstallationState::Unknown;
         }
         self.workspace.clear_file_context();
-        self.catalog.sources = contents;
-        self.catalog.items = catalog.unwrap_or_default();
+        self.catalog.sources = source_content;
+        self.catalog.items = local_catalog.unwrap_or_default();
         self.catalog.selected = None;
         self.profile_composition.clear_context();
         self.invalidate_workshop_review();
-        self.workspace.files = files;
+        self.workspace.files = workspace_files;
         self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.workspace.pending_unregistration = None;
         self.section = Section::Workspace;
@@ -191,7 +194,12 @@ impl StudioApp {
                     let contents = vapor_studio_core::discover_source_content(&executable, &root)?;
                     let catalog =
                         vapor_studio_core::discover_content_catalog(&executable, Some(&root));
-                    discover_workspace_files(&root).map(|files| (root, contents, catalog, files))
+                    discover_workspace_files(&root).map(|files| WorkspaceOpenSnapshot {
+                        root,
+                        source_content: contents,
+                        local_catalog: catalog,
+                        workspace_files: files,
+                    })
                 });
             OperationResult::WorkspaceSelection(result)
         });

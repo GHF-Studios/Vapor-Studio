@@ -21,8 +21,8 @@ impl StudioApp {
             OperationResult::UnregisteredProjectScan(Ok(scan)) => {
                 self.apply_unregistered_project_scan(scan)
             }
-            OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
-                self.activate_workspace(root, contents, catalog, files)
+            OperationResult::WorkspaceSelection(Ok(selection)) => {
+                self.activate_workspace(selection)
             }
             OperationResult::Discovery(source_result, catalog_result) => {
                 self.apply_catalog_discovery(source_result, catalog_result)

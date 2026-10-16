@@ -1,4 +1,4 @@
-use super::operation_protocol::OperationResult;
+use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
 use super::workspace_files::discover_workspace_files;
 use super::StudioApp;
 use std::{fs, path::PathBuf};
@@ -134,7 +134,12 @@ impl StudioApp {
                             Some(&root),
                         );
                         discover_workspace_files(&root)
-                            .map(|files| (root.clone(), contents, catalog, files))
+                            .map(|files| WorkspaceOpenSnapshot {
+                                root: root.clone(),
+                                source_content: contents,
+                                local_catalog: catalog,
+                                workspace_files: files,
+                            })
                     })
                     .map_err(|error| {
                         format!(

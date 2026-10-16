@@ -2,9 +2,16 @@ use std::path::PathBuf;
 use vapor_core::VaporWorkspace;
 use vapor_studio_core::ContentIdentity;
 
+pub(super) struct WorkspaceOpenSnapshot {
+    pub(super) root: PathBuf,
+    pub(super) source_content: Vec<vapor_studio_core::SourceContent>,
+    pub(super) local_catalog: Result<Vec<vapor_studio_core::CatalogContent>, String>,
+    pub(super) workspace_files: Vec<PathBuf>,
+}
+
 pub(super) enum OperationResult {
     Workspace(Result<VaporWorkspace, String>),
-    WorkspaceSelection(Result<WorkspaceSelectionData, String>),
+    WorkspaceSelection(Result<WorkspaceOpenSnapshot, String>),
     RememberedSources(Result<Vec<PathBuf>, String>),
     AdoptedContentProject(Result<(String, Vec<vapor_studio_core::SourceContent>), String>),
     UnregisteredContentProject(
@@ -40,13 +47,6 @@ pub(super) enum OperationResult {
     WorkshopSubscriptions(Result<Vec<vapor_studio_core::WorkshopSubscription>, String>),
     WorkshopSubscriptionChange(Result<(), String>, String, bool),
 }
-
-pub(super) type WorkspaceSelectionData = (
-    PathBuf,
-    Vec<vapor_studio_core::SourceContent>,
-    Result<Vec<vapor_studio_core::CatalogContent>, String>,
-    Vec<PathBuf>,
-);
 
 impl OperationResult {
     pub(super) fn failure(&self) -> Option<String> {
