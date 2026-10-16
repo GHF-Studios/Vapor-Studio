@@ -18,6 +18,7 @@ links to each manifest and to Packagepack graph editing/profile selection. The
 Packagepack composer also exposes version requirements, optional edges, and
 dependency reasons; Vapor Shell validates them before saving.
 
-Studio's Workspace screen can adopt an existing in-workspace content project by
-its relative folder path. Vapor validates the content role manifest and identity,
-then registers that folder without moving it or changing Cargo membership.
+Studio's Workspace screen can find valid, unregistered content-project folders
+and show scan diagnostics. The creator explicitly chooses which candidate to
+adopt. Vapor validates its role manifest and identity, then registers the folder
+without moving it or changing Cargo membership.

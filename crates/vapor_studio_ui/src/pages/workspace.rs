@@ -139,24 +139,30 @@ impl StudioApp {
         }
         if !self.workspace_root.trim().is_empty() {
             ui.horizontal(|ui| {
-                ui.label("Adopt existing content project");
-                ui.add_enabled(
-                    !self.running && !self.workspace_editor_dirty,
-                    egui::TextEdit::singleline(&mut self.adopt_project_path)
-                        .desired_width(260.0)
-                        .hint_text("folder path relative to Workspace"),
-                );
+                ui.label("Existing unregistered content");
                 if ui
-                    .add_enabled(
-                        !self.running && !self.workspace_editor_dirty,
-                        egui::Button::new("Adopt project"),
-                    )
-                    .on_hover_text("Adds one selected folder to the Vapor content registry after validating its role manifest and identity. It does not move files or edit Cargo membership.")
+                    .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Find projects"))
+                    .on_hover_text("Scans explicit role manifests and lists valid candidates. Nothing is registered until you choose Adopt.")
                     .clicked()
                 {
-                    self.adopt_content_project();
+                    self.scan_unregistered_content_projects();
                 }
             });
+            for candidate in self.unregistered_projects.candidates.clone() {
+                ui.horizontal(|ui| {
+                    ui.label(&candidate.id);
+                    ui.weak(format!("{} · {}", candidate.kind, candidate.path.display()));
+                    if ui
+                        .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Adopt"))
+                        .clicked()
+                    {
+                        self.adopt_content_project(candidate.path.clone());
+                    }
+                });
+            }
+            for diagnostic in &self.unregistered_projects.diagnostics {
+                ui.colored_label(egui::Color32::YELLOW, diagnostic);
+            }
         }
         ui.horizontal_wrapped(|ui| {
             if ui.add_enabled(!self.running && !self.workspace_editor_dirty && !self.workspace_root.trim().is_empty(), egui::Button::new("Validate content"))

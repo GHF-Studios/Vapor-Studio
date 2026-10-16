@@ -40,8 +40,10 @@ pub use vapor_steam::{
 };
 
 pub use workspace::{
-    SourceComposition, SourceCompositionLink, SourceContent, adopt_workspace_content_project, create_basic_content_workspace,
+    SourceComposition, SourceCompositionLink, SourceContent, UnregisteredProjectCandidate,
+    UnregisteredProjectScan, adopt_workspace_content_project, create_basic_content_workspace,
     create_content_workspace, discover_source_content, load_source_composition,
-    save_source_composition, remember_workspace, source_dependency_allowed, validate_profile_source,
+    save_source_composition, remember_workspace, scan_unregistered_content_projects,
+    source_dependency_allowed, validate_profile_source,
     validate_workspace_source,
 };

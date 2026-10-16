@@ -15,7 +15,11 @@ pub struct SourceContent {
     pub dependencies: Vec<String>,
 }
 
-pub use vapor_shell::content::{CompositionLink as SourceCompositionLink, SourceComposition};
+pub use vapor_shell::content::{
+    CompositionLink as SourceCompositionLink, SourceComposition,
+    SourceProjectCandidate as UnregisteredProjectCandidate,
+    SourceProjectScan as UnregisteredProjectScan,
+};
 
 pub fn load_source_composition(
     application_executable: &Path,
@@ -188,4 +192,14 @@ pub fn adopt_workspace_content_project(
     let summary = content::adopt_source_project(&paths, project_path)?;
     let contents = discover_source_content(application_executable, workspace_root)?;
     Ok((summary, contents))
+}
+
+/// Find valid, unregistered content folders without changing the Workspace.
+pub fn scan_unregistered_content_projects(
+    application_executable: &Path,
+    workspace_root: &Path,
+) -> Result<UnregisteredProjectScan, String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    content::scan_unregistered_source_projects(&paths)
 }

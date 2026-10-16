@@ -28,6 +28,7 @@ enum OperationResult {
     WorkspaceSelection(Result<WorkspaceSelectionData, String>),
     RememberedSources(Result<Vec<PathBuf>, String>),
     AdoptedContentProject(Result<(String, Vec<vapor_studio_core::SourceContent>), String>),
+    UnregisteredProjectScan(Result<vapor_studio_core::UnregisteredProjectScan, String>),
     Discovery(
         Result<Vec<vapor_studio_core::SourceContent>, String>,
         Result<Vec<vapor_studio_core::CatalogContent>, String>,
@@ -67,6 +68,7 @@ fn operation_failure(result: &OperationResult) -> Option<String> {
         | OperationResult::WorkspaceSelection(Err(error))
         | OperationResult::RememberedSources(Err(error))
         | OperationResult::AdoptedContentProject(Err(error))
+        | OperationResult::UnregisteredProjectScan(Err(error))
         | OperationResult::CompositionPreview(Err(error))
         | OperationResult::Message(Err(error))
         | OperationResult::WorkspaceFiles(Err(error))
@@ -129,7 +131,7 @@ pub struct StudioApp {
     starter_workspace_organization: String,
     starter_workspace_name: String,
     new_workspace_file_path: String,
-    adopt_project_path: String,
+    unregistered_projects: vapor_studio_core::UnregisteredProjectScan,
     registered_sources: Vec<PathBuf>,
     active_source: Option<PathBuf>,
     contents: Vec<vapor_studio_core::SourceContent>,
@@ -266,7 +268,7 @@ impl StudioApp {
             starter_workspace_organization: "my-workshop".to_owned(),
             starter_workspace_name: "my-game".to_owned(),
             new_workspace_file_path: String::new(),
-            adopt_project_path: String::new(),
+            unregistered_projects: vapor_studio_core::UnregisteredProjectScan::default(),
             registered_sources: Vec::new(),
             active_source: None,
             status: "Choose a workspace or discover content in this folder.".to_owned(),
@@ -344,6 +346,7 @@ impl StudioApp {
                 }
                 OperationResult::Workspace(Err(error)) => self.status = error,
                 OperationResult::WorkspaceSelection(Err(error)) => self.status = error,
+                OperationResult::UnregisteredProjectScan(Err(error)) => self.status = error,
                 OperationResult::RememberedSources(Err(error)) => self.status = error,
                 OperationResult::RememberedSources(Ok(known)) => {
                     self.registered_sources = known;
@@ -351,8 +354,18 @@ impl StudioApp {
                 }
                 OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
                     self.contents = contents;
-                    self.adopt_project_path.clear();
+                    self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
                     self.status = summary;
+                }
+                OperationResult::UnregisteredProjectScan(Ok(scan)) => {
+                    self.status = format!(
+                        "Found {} adoptable content project{} and {} diagnostic{}.",
+                        scan.candidates.len(),
+                        if scan.candidates.len() == 1 { "" } else { "s" },
+                        scan.diagnostics.len(),
+                        if scan.diagnostics.len() == 1 { "" } else { "s" },
+                    );
+                    self.unregistered_projects = scan;
                 }
                 OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
                     self.activate_workspace(root, contents, catalog, files)
@@ -806,7 +819,7 @@ impl StudioApp {
         self.workspace_editor_toml_diagnostic = None;
         self.workspace_editor_dirty = false;
         self.new_workspace_file_path.clear();
-        self.adopt_project_path.clear();
+        self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.section = Section::Workspace;
         self.status = catalog_error.map_or_else(
             || format!("Opened workspace {} · {} source items · {} local catalog entries.", self.workspace_root, self.contents.len(), self.catalog.len()),
@@ -1498,6 +1511,7 @@ impl StudioApp {
             | OperationKind::OpenWorkspace
             | OperationKind::RememberWorkspace
             | OperationKind::AdoptContentProject
+            | OperationKind::DiscoverContentProjects
             | OperationKind::DiscoverWorkspace => OperationPhase::Resolving,
             OperationKind::CreateWorkspace => OperationPhase::Building,
             OperationKind::CreateWorkspaceFile | OperationKind::SaveComposition => OperationPhase::Building,
@@ -1656,7 +1670,7 @@ impl StudioApp {
         self.workspace_editor_toml_diagnostic = None;
         self.workspace_editor_dirty = false;
         self.new_workspace_file_path.clear();
-        self.adopt_project_path.clear();
+        self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.discover();
     }
 
@@ -1908,13 +1922,8 @@ impl StudioApp {
             "Creating the maintained Engine, Game, and Packagepack starter workspace…".to_owned();
     }
 
-    pub(super) fn adopt_content_project(&mut self) {
-        if !self.require_saved_workspace("adopt a content project") {
-            return;
-        }
-        let project_path = self.adopt_project_path.trim().to_owned();
-        if project_path.is_empty() {
-            self.status = "Enter a project folder path relative to the open Workspace.".to_owned();
+    pub(super) fn scan_unregistered_content_projects(&mut self) {
+        if !self.require_saved_workspace("scan for unregistered content") {
             return;
         }
         let executable = match std::env::current_exe() {
@@ -1925,14 +1934,35 @@ impl StudioApp {
             }
         };
         let root = PathBuf::from(self.workspace_root.trim());
+        self.spawn(OperationKind::DiscoverContentProjects, move |_context| {
+            OperationResult::UnregisteredProjectScan(
+                vapor_studio_core::scan_unregistered_content_projects(&executable, &root),
+            )
+        });
+        self.status = "Finding unregistered content manifests in this Workspace…".to_owned();
+    }
+
+    pub(super) fn adopt_content_project(&mut self, project_path: PathBuf) {
+        if !self.require_saved_workspace("adopt a content project") {
+            return;
+        }
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        let root = PathBuf::from(self.workspace_root.trim());
+        let display_path = project_path.display().to_string();
         self.spawn(OperationKind::AdoptContentProject, move |_context| {
             OperationResult::AdoptedContentProject(
                 vapor_studio_core::adopt_workspace_content_project(
-                    &executable, &root, std::path::Path::new(&project_path),
+                    &executable, &root, &project_path,
                 ),
             )
         });
-        self.status = format!("Validating and adopting {project_path}…");
+        self.status = format!("Validating and adopting {display_path}…");
     }
 
     pub(super) fn remember_open_workspace(&mut self) {

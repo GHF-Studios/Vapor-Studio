@@ -70,6 +70,7 @@ fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str
         OpenWorkspace => "Open workspace",
         RememberWorkspace => "Add workspace to Vapor sources",
         AdoptContentProject => "Adopt existing content project",
+        DiscoverContentProjects => "Find unregistered content",
         DiscoverWorkspace => "Read workspace files",
         OpenWorkspaceFile => "Open file",
         SaveWorkspaceFile => "Save file",
