@@ -144,6 +144,10 @@ impl eframe::App for StudioApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string("workspace_root", self.workspace.root.clone());
+        storage.set_string(
+            "workspace_editor_drafts",
+            self.workspace.save_editor_drafts().unwrap_or_default(),
+        );
         let document = ProfileDocument {
             schema_version: CURRENT_SCHEMA_VERSION,
             profiles: self.profile.items.clone(),

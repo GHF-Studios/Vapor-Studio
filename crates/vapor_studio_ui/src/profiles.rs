@@ -155,7 +155,9 @@ impl StudioApp {
             );
             return;
         }
-        if self.workspace.editor_dirty && current_workspace.as_deref() != workspace.as_deref() {
+        if self.workspace.has_dirty_documents()
+            && current_workspace.as_deref() != workspace.as_deref()
+        {
             self.status =
                 "Save or discard workspace edits before assigning content from another workspace."
                     .to_owned();

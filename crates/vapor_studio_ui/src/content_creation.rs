@@ -1,4 +1,5 @@
 use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
+use super::workspace_ops::WorkspaceDocument;
 use super::workspace_files::discover_workspace_files;
 use super::StudioApp;
 use std::{fs, path::PathBuf};
@@ -14,12 +15,15 @@ impl StudioApp {
     ) {
         self.invalidate_workshop_review();
         self.workspace.files = files;
-        self.workspace.selected_file = Some(manifest);
+        self.workspace.selected_file = Some(manifest.clone());
         self.workspace.files_open = true;
-        self.workspace.editor = contents.clone();
-        self.workspace.editor_original = contents;
-        self.refresh_workspace_editor_toml_diagnostic();
-        self.workspace.editor_dirty = false;
+        self.workspace.editor_documents.insert(
+            manifest,
+            WorkspaceDocument {
+                original: contents.clone(),
+                contents,
+            },
+        );
         self.section = Section::Workspace;
         self.status = "Created content and opened its manifest.".to_owned();
     }

@@ -50,7 +50,7 @@ impl StudioApp {
                 self.authoring.manifest_metadata_dirty |= changed;
                 ui.horizontal(|ui| {
                     if ui.add_enabled(
-                        !self.operation.running && !self.workspace.editor_dirty && self.authoring.manifest_metadata_dirty,
+                        !self.operation.running && !self.workspace.has_dirty_documents() && self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save Workshop metadata"),
                     ).clicked() {
                         self.save_source_workshop_metadata();
@@ -91,7 +91,7 @@ impl StudioApp {
                 });
                 ui.horizontal(|ui| {
                     if ui.add_enabled(
-                        !self.operation.running && !self.workspace.editor_dirty && self.authoring.manifest_metadata_dirty,
+                        !self.operation.running && !self.workspace.has_dirty_documents() && self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save runtime outputs"),
                     ).clicked() {
                         self.save_source_runtime_outputs();

@@ -3,6 +3,7 @@ use super::workspace_files::{
     create_new_workspace_file, discover_workspace_files, read_workspace_file,
     write_workspace_file,
 };
+use super::workspace_ops::WorkspaceDocument;
 use super::StudioApp;
 use std::path::{Path, PathBuf};
 use vapor_studio_core::OperationKind;
@@ -10,19 +11,24 @@ use vapor_studio_core::OperationKind;
 impl StudioApp {
     pub(super) fn sync_saved_workspace_manifest(&mut self, manifest: &Path, source: &str) {
         if let Ok(relative) = manifest.strip_prefix(Path::new(self.workspace.root.trim())) {
-            let relative = relative.to_path_buf();
-            if self.workspace.selected_file.as_ref() == Some(&relative) {
-                self.workspace.editor = source.to_owned();
-                self.workspace.editor_original = source.to_owned();
-                self.workspace.editor_dirty = false;
-                self.refresh_workspace_editor_toml_diagnostic();
+            if let Some(document) = self.workspace.editor_documents.get_mut(relative) {
+                document.contents = source.to_owned();
+                document.original = source.to_owned();
             }
         }
     }
 
     pub(super) fn apply_workspace_files(&mut self, files: Vec<PathBuf>) {
         self.workspace.files = files;
+        let restored = self
+            .workspace
+            .restore_editor_drafts(&PathBuf::from(self.workspace.root.trim()));
         self.status = format!("Found {} workspace files.", self.workspace.files.len());
+        if restored {
+            self.workspace.files_open = true;
+            self.status.push(' ');
+            self.status.push_str(&self.workspace.editor_recovery_summary());
+        }
     }
 
     pub(super) fn apply_workspace_file_created(&mut self, path: PathBuf) {
@@ -33,31 +39,34 @@ impl StudioApp {
         }
         self.workspace.selected_file = Some(path.clone());
         self.workspace.files_open = true;
-        self.workspace.editor.clear();
-        self.workspace.editor_original.clear();
-        self.refresh_workspace_editor_toml_diagnostic();
-        self.workspace.editor_dirty = false;
+        self.workspace.editor_documents.insert(
+            path.clone(),
+            WorkspaceDocument {
+                original: String::new(),
+                contents: String::new(),
+            },
+        );
         self.workspace.new_file_path.clear();
         self.status = format!("Created {}.", path.display());
     }
 
     pub(super) fn apply_workspace_file_opened(&mut self, path: PathBuf, contents: String) {
-        self.workspace.selected_file = Some(path);
+        self.workspace.selected_file = Some(path.clone());
         self.workspace.files_open = true;
-        self.workspace.editor = contents.clone();
-        self.workspace.editor_original = contents;
-        self.refresh_workspace_editor_toml_diagnostic();
-        self.workspace.editor_dirty = false;
+        self.workspace.editor_documents.insert(
+            path,
+            WorkspaceDocument {
+                original: contents.clone(),
+                contents,
+            },
+        );
         self.status = "Opened workspace file.".to_owned();
     }
 
     pub(super) fn apply_workspace_file_saved(&mut self, path: PathBuf) {
         self.invalidate_workshop_review();
-        if self.workspace.selected_file.as_ref() == Some(&path) {
-            self.workspace.editor_original
-                .clone_from(&self.workspace.editor);
-            self.refresh_workspace_editor_toml_diagnostic();
-            self.workspace.editor_dirty = false;
+        if let Some(document) = self.workspace.editor_documents.get_mut(&path) {
+            document.original.clone_from(&document.contents);
         }
         self.status = format!("Saved {}.", path.display());
     }
@@ -73,33 +82,19 @@ impl StudioApp {
         self.status = "Reading workspace files…".to_owned();
     }
 
-    pub(super) fn refresh_workspace_editor_toml_diagnostic(&mut self) {
-        let is_manifest = self.workspace.selected_file
-            .as_deref()
-            .is_some_and(|path| {
-                let name = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default();
-                name == "Vapor.toml" || name.ends_with(".vapor.toml") || name == "Cargo.toml"
-            });
-        self.workspace.editor_toml_diagnostic = is_manifest.then(|| {
-            self.workspace
-                .editor
-                .parse::<toml::Value>()
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        });
-    }
-
     pub(super) fn open_workspace_file(&mut self, path: PathBuf) {
         if self.authoring.manifest_metadata_dirty {
             self.status = "Save or discard structured manifest edits before opening another file.".to_owned();
             return;
         }
-        if self.workspace.editor_dirty {
-            self.status = "Save or discard the current editor changes before opening another file."
-                .to_owned();
+        if self.workspace.editor_documents.contains_key(&path) {
+            self.workspace.selected_file = Some(path.clone());
+            self.workspace.files_open = true;
+            self.status = format!("Switched to {}.", path.display());
+            return;
+        }
+        if self.workspace.editor_documents.len() >= 16 {
+            self.status = "Close an editor tab before opening another file (16 open tabs maximum).".to_owned();
             return;
         }
         if !self.require_workspace_association("open a workspace file") {
@@ -121,12 +116,14 @@ impl StudioApp {
         let Some(path) = self.workspace.selected_file.clone() else {
             return;
         };
+        let Some(document) = self.workspace.active_document().cloned() else {
+            return;
+        };
         let root = PathBuf::from(self.workspace.root.trim());
-        let expected_contents = self.workspace.editor_original.clone();
-        let contents = self.workspace.editor.clone();
         self.spawn(OperationKind::SaveWorkspaceFile, move |_context| {
             OperationResult::FileSaved(
-                write_workspace_file(&root, &path, &expected_contents, &contents).map(|()| path),
+                write_workspace_file(&root, &path, &document.original, &document.contents)
+                    .map(|()| path),
             )
         });
         self.status = "Saving workspace file…".to_owned();
@@ -146,6 +143,23 @@ impl StudioApp {
             )
         });
         self.status = "Reloading workspace file from disk…".to_owned();
+    }
+
+    pub(super) fn close_workspace_document(&mut self, path: &Path) {
+        if self
+            .workspace
+            .editor_documents
+            .get(path)
+            .is_some_and(WorkspaceDocument::is_dirty)
+        {
+            self.status = "Save the file before closing its tab so the draft stays recoverable.".to_owned();
+            return;
+        }
+        self.workspace.editor_documents.remove(path);
+        if self.workspace.selected_file.as_deref() == Some(path) {
+            self.workspace.selected_file = self.workspace.editor_documents.keys().next().cloned();
+        }
+        self.workspace.files_open = self.workspace.selected_file.is_some();
     }
 
     pub(super) fn create_workspace_file(&mut self) {

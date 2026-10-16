@@ -57,7 +57,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running
-                            && self.workspace.editor_dirty
+                            && self.workspace.active_document_is_dirty()
                             && !self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save"),
                     )
@@ -77,10 +77,53 @@ impl StudioApp {
                 {
                     self.reload_workspace_file();
                 }
-                if self.workspace.editor_dirty {
+                if self.workspace.active_document_is_dirty() {
                     ui.colored_label(egui::Color32::YELLOW, "Unsaved");
                 }
             });
+            let open_tabs = self
+                .workspace
+                .editor_documents
+                .iter()
+                .map(|(path, document)| (path.clone(), document.is_dirty()))
+                .collect::<Vec<_>>();
+            let mut select_tab = None;
+            let mut close_tab = None;
+            egui::ScrollArea::horizontal().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (path, dirty) in &open_tabs {
+                        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+                        let label = if *dirty { format!("{name} •") } else { name.to_owned() };
+                        if ui
+                            .add_enabled(
+                                !self.operation.running,
+                                egui::Button::selectable(
+                                    self.workspace.selected_file.as_ref() == Some(path),
+                                    label,
+                                ),
+                            )
+                            .on_hover_text(path.display().to_string())
+                            .clicked()
+                        {
+                            select_tab = Some(path.clone());
+                        }
+                        if ui
+                            .add_enabled(!*dirty && !self.operation.running, egui::Button::new("×"))
+                            .on_disabled_hover_text("Save this tab before closing it.")
+                            .clicked()
+                        {
+                            close_tab = Some(path.clone());
+                        }
+                    }
+                });
+            });
+            if let Some(path) = select_tab {
+                self.workspace.selected_file = Some(path);
+                self.workspace.files_open = true;
+            }
+            if let Some(path) = close_tab {
+                self.close_workspace_document(&path);
+            }
             ui.columns(3, |columns| {
                 columns[0].heading("Project");
                 let tree = workspace_tree(&self.workspace.files);
@@ -93,7 +136,7 @@ impl StudioApp {
                             ui,
                             &tree,
                             self.workspace.selected_file.as_ref(),
-                            !self.operation.running && !self.has_unsaved_workspace_edits(),
+                            !self.operation.running && !self.authoring.manifest_metadata_dirty,
                             &PathBuf::new(),
                             0,
                             &mut open_file,
@@ -103,44 +146,48 @@ impl StudioApp {
                 if let Some(path) = open_file {
                     self.open_workspace_file(path);
                 }
-                let changed = columns[1]
-                    .add_enabled_ui(
-                        self.workspace.selected_file.is_some()
-                            && !self.operation.running
-                            && !self.authoring.manifest_metadata_dirty,
-                        |ui| {
-                            egui::TextEdit::multiline(&mut self.workspace.editor)
-                                .code_editor()
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(24)
-                                .show(ui)
-                        },
-                    )
-                    .inner
-                    .response
-                    .changed();
-                self.workspace.editor_dirty |= changed;
-                if changed {
-                    self.refresh_workspace_editor_toml_diagnostic();
+                let can_edit = !self.operation.running && !self.authoring.manifest_metadata_dirty;
+                if let Some(document) = self.workspace.active_document_mut() {
+                    columns[1].add_enabled_ui(can_edit, |ui| {
+                        egui::TextEdit::multiline(&mut document.contents)
+                            .code_editor()
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(24)
+                            .show(ui)
+                    });
+                } else {
+                    columns[1].weak("Open a file from the project tree to begin editing.");
                 }
+                let selected_path = self.workspace.selected_file.clone();
+                let active_contents = self
+                    .workspace
+                    .active_document()
+                    .map(|document| document.contents.clone())
+                    .unwrap_or_default();
+                let active_dirty = self.workspace.active_document_is_dirty();
+                let diagnostic = selected_path.as_deref().and_then(|path| {
+                    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+                    (name == "Vapor.toml" || name.ends_with(".vapor.toml") || name == "Cargo.toml")
+                        .then(|| active_contents.parse::<toml::Value>().map(|_| ()).map_err(|error| error.to_string()))
+                });
                 columns[2].heading("Inspector");
                 columns[2].small(format!("Workspace\n{}", self.workspace.root));
-                if let Some(path) = &self.workspace.selected_file {
+                if let Some(path) = &selected_path {
                     columns[2].separator();
                     columns[2].label("File");
                     columns[2].small(path.display().to_string());
                     columns[2].label(format!("{} file", workspace_file_kind(path)));
                     columns[2].label(format!(
                         "{} lines · {} characters",
-                        self.workspace.editor.lines().count(),
-                        self.workspace.editor.chars().count()
+                        active_contents.lines().count(),
+                        active_contents.chars().count()
                     ));
-                    columns[2].label(if self.workspace.editor_dirty {
+                    columns[2].label(if active_dirty {
                         "Unsaved changes"
                     } else {
                         "Saved"
                     });
-                    if let Some(diagnostic) = &self.workspace.editor_toml_diagnostic {
+                    if let Some(diagnostic) = &diagnostic {
                         match diagnostic {
                             Ok(()) => {
                                 columns[2]
@@ -150,14 +197,16 @@ impl StudioApp {
                                 columns[2]
                                     .colored_label(egui::Color32::LIGHT_RED, "TOML syntax error")
                                     .on_hover_text(error);
+                            }
                         }
                     }
                 }
                 columns[2].separator();
-                columns[2].weak(workspace_file_guidance(path));
-            } else {
-                columns[2].weak("Select a file to inspect and edit it.");
-            }
+                if let Some(path) = &selected_path {
+                    columns[2].weak(workspace_file_guidance(path));
+                } else {
+                    columns[2].weak("Select a file to inspect and edit it.");
+                }
         });
     }
 }

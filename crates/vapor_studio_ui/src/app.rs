@@ -71,6 +71,9 @@ impl StudioApp {
         let saved_workspace = creation
             .storage
             .and_then(|storage| storage.get_string("workspace_root"));
+        let saved_editor_drafts = creation
+            .storage
+            .and_then(|storage| storage.get_string("workspace_editor_drafts"));
         let current_directory = std::env::current_dir().ok();
         let requested_workspace = workspace
             .or_else(|| saved_workspace.map(PathBuf::from))
@@ -118,13 +121,15 @@ impl StudioApp {
             workspace_root.clone()
         };
         let profile_name_draft = profiles[active_profile].name.clone();
+        let mut workspace_state = WorkspaceState::new(workspace_root, workspace_root_draft, root);
+        workspace_state.editor_draft_recovery = saved_editor_drafts;
         let mut app = Self {
             section: if play_mode {
                 Section::Library
             } else {
                 Section::Home
             },
-            workspace: WorkspaceState::new(workspace_root, workspace_root_draft, root),
+            workspace: workspace_state,
             profile: ProfileState::new(
                 profiles,
                 active_profile,
