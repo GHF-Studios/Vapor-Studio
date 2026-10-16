@@ -99,6 +99,48 @@ impl StudioApp {
                         if !content.dependencies.is_empty() {
                             ui.small(format!("Dependencies: {}", content.dependencies.join(" · ")));
                         }
+                        let workshop = &content.workshop;
+                        if workshop.app_id.is_some()
+                            || workshop.published_file_id.is_some()
+                            || workshop.visibility.is_some()
+                            || workshop.title.is_some()
+                            || workshop.description.is_some()
+                            || !workshop.tags.is_empty()
+                            || workshop.change_note.is_some()
+                        {
+                            ui.collapsing("Workshop publication metadata", |ui| {
+                                if let Some(app_id) = workshop.app_id {
+                                    ui.small(format!("Steam AppID: {app_id}"));
+                                } else {
+                                    ui.colored_label(
+                                        egui::Color32::YELLOW,
+                                        "Steam AppID not configured",
+                                    );
+                                }
+                                ui.small(format!(
+                                    "Published item: {}",
+                                    workshop.published_file_id.as_deref().unwrap_or("new item")
+                                ));
+                                if let Some(visibility) = &workshop.visibility {
+                                    ui.small(format!("Visibility: {visibility}"));
+                                }
+                                if let Some(title) = &workshop.title {
+                                    ui.small(format!("Workshop title: {title}"));
+                                }
+                                if let Some(description) = &workshop.description {
+                                    ui.small(format!("Description: {description}"));
+                                }
+                                if !workshop.tags.is_empty() {
+                                    ui.small(format!("Tags: {}", workshop.tags.join(", ")));
+                                }
+                                if let Some(change_note) = &workshop.change_note {
+                                    ui.small(format!("Default change note: {change_note}"));
+                                }
+                                ui.weak("This is authored intent; staging performs the authoritative package and publication checks.");
+                            });
+                        } else {
+                            ui.small("Workshop publication: not configured");
+                        }
                         ui.horizontal(|ui| {
                             let relative_manifest = content
                                 .manifest

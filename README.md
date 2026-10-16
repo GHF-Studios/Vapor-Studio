@@ -23,3 +23,10 @@ Studio's Workspace screen can find valid, unregistered content-project folders
 and show scan diagnostics. The creator explicitly chooses which candidate to
 adopt. Vapor validates its role manifest and identity, then registers the folder
 without moving it or changing Cargo membership.
+
+The Create screen can author optional Steam Workshop publication metadata
+alongside a new content project. These fields are written through Vapor Shell
+into that content role's manifest; creating a project does not stage or publish
+it. The Workspace project overview reads the same Shell-validated metadata back
+so creators can inspect the intended AppID, item identity, visibility, title,
+and tags before staging a review package.

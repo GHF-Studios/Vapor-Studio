@@ -15,7 +15,22 @@ pub struct SourceContent {
     pub binaries: Vec<String>,
     pub libraries: Vec<String>,
     pub dependencies: Vec<String>,
+    pub workshop: SourceWorkshopPolicy,
 }
+
+/// Publication intent authored in a content role manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SourceWorkshopPolicy {
+    pub app_id: Option<u32>,
+    pub published_file_id: Option<String>,
+    pub visibility: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub change_note: Option<String>,
+}
+
+pub use vapor_shell::content::WorkshopPolicyDraft;
 
 pub use vapor_shell::content::{
     CompositionLink as SourceCompositionLink, SourceComposition,
@@ -81,6 +96,15 @@ pub fn discover_source_content(
                 .iter()
                 .map(|dependency| format!("{} · {}", dependency.relationship(), dependency.id()))
                 .collect(),
+            workshop: SourceWorkshopPolicy {
+                app_id: artifact.workshop().app_id(),
+                published_file_id: artifact.workshop().published_file_id().map(ToOwned::to_owned),
+                visibility: artifact.workshop().visibility().map(ToOwned::to_owned),
+                title: artifact.workshop().title().map(ToOwned::to_owned),
+                description: artifact.workshop().description().map(ToOwned::to_owned),
+                tags: artifact.workshop().tags().to_vec(),
+                change_note: artifact.workshop().change_note().map(ToOwned::to_owned),
+            },
         })
         .collect())
 }
@@ -133,6 +157,7 @@ pub fn create_content_workspace(
     version: &str,
     kind: vapor_core::ContentKind,
     dependency_selectors: &[String],
+    workshop: &WorkshopPolicyDraft,
 ) -> Result<PathBuf, String> {
     let kind = match shell_content_kind(kind) {
         Some(kind) => kind,
@@ -142,7 +167,14 @@ pub fn create_content_workspace(
     };
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
-    content::create_source_project(&paths, id, version, kind, dependency_selectors)
+    content::create_source_project_with_workshop(
+        &paths,
+        id,
+        version,
+        kind,
+        dependency_selectors,
+        workshop,
+    )
 }
 
 /// Scaffold the maintained Engine/Game/Packagepack starter workspace.

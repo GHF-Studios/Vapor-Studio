@@ -54,6 +54,50 @@ impl StudioApp {
             ui.label("Version");
             ui.text_edit_singleline(&mut self.draft_content_version);
         });
+        egui::CollapsingHeader::new("Workshop publication metadata · optional")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label("These fields are authored into the role manifest. Creating content never publishes it.");
+                ui.horizontal(|ui| {
+                    ui.label("Steam AppID");
+                    ui.text_edit_singleline(&mut self.draft_workshop_app_id);
+                    ui.label("Existing PublishedFileId");
+                    ui.text_edit_singleline(&mut self.draft_workshop_published_file_id);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Visibility");
+                    egui::ComboBox::from_id_salt("new-content-workshop-visibility")
+                        .selected_text(if self.draft_workshop_visibility.is_empty() {
+                            "Not set"
+                        } else {
+                            &self.draft_workshop_visibility
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.draft_workshop_visibility, String::new(), "Not set");
+                            for visibility in ["private", "friends-only", "public"] {
+                                ui.selectable_value(
+                                    &mut self.draft_workshop_visibility,
+                                    visibility.to_owned(),
+                                    visibility,
+                                );
+                            }
+                        });
+                    ui.label("Title");
+                    ui.text_edit_singleline(&mut self.draft_workshop_title);
+                });
+                ui.label("Description");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.draft_workshop_description)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Tags · comma separated");
+                    ui.text_edit_singleline(&mut self.draft_workshop_tags);
+                    ui.label("Change note");
+                    ui.text_edit_singleline(&mut self.draft_workshop_change_note);
+                });
+            });
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(

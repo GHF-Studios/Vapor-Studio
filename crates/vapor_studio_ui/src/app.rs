@@ -122,6 +122,13 @@ pub struct StudioApp {
     draft_content_version: String,
     draft_content_kind: ContentKind,
     draft_dependencies: Vec<String>,
+    draft_workshop_app_id: String,
+    draft_workshop_published_file_id: String,
+    draft_workshop_visibility: String,
+    draft_workshop_title: String,
+    draft_workshop_description: String,
+    draft_workshop_tags: String,
+    draft_workshop_change_note: String,
     composition_edit_selector: String,
     composition_edit: Option<vapor_studio_core::SourceComposition>,
     composition_original_links: Option<Vec<vapor_studio_core::SourceCompositionLink>>,
@@ -264,6 +271,13 @@ impl StudioApp {
             draft_content_version: "0.1.0".to_owned(),
             draft_content_kind: ContentKind::Packagepack,
             draft_dependencies: Vec::new(),
+            draft_workshop_app_id: String::new(),
+            draft_workshop_published_file_id: String::new(),
+            draft_workshop_visibility: String::new(),
+            draft_workshop_title: String::new(),
+            draft_workshop_description: String::new(),
+            draft_workshop_tags: String::new(),
+            draft_workshop_change_note: String::new(),
             starter_workspace_path: String::new(),
             starter_workspace_organization: "my-workshop".to_owned(),
             starter_workspace_name: "my-game".to_owned(),
@@ -1864,6 +1878,35 @@ impl StudioApp {
         let id = self.draft_content_id.trim().to_owned();
         let version = self.draft_content_version.trim().to_owned();
         let selected = self.draft_dependencies.clone();
+        let app_id = match self.draft_workshop_app_id.trim() {
+            "" => None,
+            value => match value.parse::<u32>() {
+                Ok(value) if value > 0 => Some(value),
+                _ => {
+                    self.status = "Steam AppID must be a positive number.".to_owned();
+                    return;
+                }
+            },
+        };
+        let non_empty = |value: &str| {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_owned())
+        };
+        let workshop = vapor_studio_core::WorkshopPolicyDraft {
+            app_id,
+            published_file_id: non_empty(&self.draft_workshop_published_file_id),
+            visibility: non_empty(&self.draft_workshop_visibility),
+            title: non_empty(&self.draft_workshop_title),
+            description: non_empty(&self.draft_workshop_description),
+            tags: self
+                .draft_workshop_tags
+                .split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(ToOwned::to_owned)
+                .collect(),
+            change_note: non_empty(&self.draft_workshop_change_note),
+        };
         let kind = self.draft_content_kind;
         self.spawn(OperationKind::CreateContent, move |_context| {
             let result = vapor_studio_core::create_content_workspace(
@@ -1873,6 +1916,7 @@ impl StudioApp {
                 &version,
                 kind,
                 &selected,
+                &workshop,
             )
             .and_then(|output| {
                 let workspace = fs::canonicalize(&root)
