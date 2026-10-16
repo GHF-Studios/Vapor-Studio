@@ -1,7 +1,7 @@
 use super::{StudioApp, content_selector};
 use super::operations::OperationResult;
 use std::path::PathBuf;
-use vapor_studio_core::{ContentIdentity, OperationKind};
+use vapor_studio_core::{ContentIdentity, InstalledArtifactRecord, OperationKind};
 
 pub(super) struct ProfileCompositionState {
     preview: Option<vapor_studio_core::CompositionPreview>,
@@ -45,6 +45,75 @@ impl ProfileCompositionState {
 }
 
 impl StudioApp {
+    pub(super) fn apply_installed_composition(
+        &mut self,
+        composition: vapor_studio_core::InstalledComposition,
+        status: &str,
+    ) {
+        self.profile_composition.invalidate_preview();
+        let graph_fingerprint = vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
+        self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
+        self.profile.items[self.profile.active_index].installation =
+            vapor_studio_core::InstallationState::Installed {
+                artifacts: installed_records(composition.artifacts),
+                graph_fingerprint,
+            };
+        self.status = status.to_owned();
+    }
+
+    pub(super) fn apply_installation_check(
+        &mut self,
+        check: vapor_studio_core::InstallationCheck,
+    ) {
+        let graph_fingerprint = check
+            .graph
+            .as_ref()
+            .and_then(vapor_studio_core::fingerprint_resolved_graph);
+        if let Some(graph) = check.graph {
+            self.profile.items[self.profile.active_index].resolved_graph = Some(graph);
+        }
+        let checked = check.detail.len();
+        let detail = check.detail.join("; ");
+        let artifacts = installed_records(check.artifacts);
+        if check.ok {
+            self.profile.items[self.profile.active_index].installation =
+                vapor_studio_core::InstallationState::Installed {
+                    artifacts,
+                    graph_fingerprint,
+                };
+            self.status = format!("Installed composition verified. {checked} graph nodes checked.");
+        } else {
+            self.profile.items[self.profile.active_index].installation =
+                vapor_studio_core::InstallationState::NeedsRepair {
+                    detail: detail.clone(),
+                    artifacts,
+                };
+            self.status = format!("Installed composition needs repair: {detail}");
+        }
+    }
+
+    pub(super) fn apply_verification_error(&mut self, error: String) {
+        let artifacts = match self.profile.items[self.profile.active_index].installation.clone() {
+            vapor_studio_core::InstallationState::Installed { artifacts, .. }
+            | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. } => artifacts,
+            _ => Vec::new(),
+        };
+        self.profile.items[self.profile.active_index].installation =
+            vapor_studio_core::InstallationState::NeedsRepair {
+                detail: error.clone(),
+                artifacts,
+            };
+        self.status = format!("Could not verify the full composition: {error}");
+    }
+
+    pub(super) fn apply_composition_action_error(&mut self, error: String) {
+        self.profile.items[self.profile.active_index].installation =
+            vapor_studio_core::InstallationState::Partial {
+                detail: error.clone(),
+            };
+        self.status = error;
+    }
+
     pub(super) fn install_selected(&mut self) {
         if !self.require_saved_workspace("install this workspace composition") {
             return;
@@ -322,4 +391,18 @@ impl StudioApp {
             "Installing source changes and launching this profile through Vapor Shell…".to_owned();
     }
 
+}
+
+pub(super) fn installed_records(
+    artifacts: Vec<vapor_studio_core::InstalledArtifact>,
+) -> Vec<InstalledArtifactRecord> {
+    artifacts
+        .into_iter()
+        .map(|artifact| InstalledArtifactRecord {
+            id: artifact.id,
+            version: artifact.version,
+            root: artifact.root,
+            fingerprint: artifact.fingerprint,
+        })
+        .collect()
 }

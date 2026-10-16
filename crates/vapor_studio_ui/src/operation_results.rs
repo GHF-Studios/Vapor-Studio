@@ -2,7 +2,7 @@ use super::{StudioApp, catalog_content_selector};
 use super::operations::OperationResult;
 use crate::navigation::Section;
 use std::path::Path;
-use vapor_studio_core::{ContentIdentity, InstalledArtifactRecord};
+use vapor_studio_core::ContentIdentity;
 
 impl StudioApp {
     pub(super) fn apply_operation_result(&mut self, result: OperationResult) {
@@ -116,31 +116,11 @@ impl StudioApp {
             | OperationResult::SourceRuntimeOutputsSaved(Err(error))
             | OperationResult::UnregisteredContentProject(Err(error))
             | OperationResult::AdoptedContentProject(Err(error)) => self.status = error,
-            OperationResult::Verify(Err(error)) => {
-                let artifacts = match self.profile.items[self.profile.active_index].installation.clone() {
-                    vapor_studio_core::InstallationState::Installed { artifacts, .. }
-                    | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. } => {
-                        artifacts
-                    }
-                    _ => Vec::new(),
-                };
-                self.profile.items[self.profile.active_index].installation =
-                    vapor_studio_core::InstallationState::NeedsRepair {
-                        detail: error.clone(),
-                        artifacts,
-                    };
-                self.status = format!("Could not verify the full composition: {error}");
-            }
+            OperationResult::Verify(Err(error)) => self.apply_verification_error(error),
             OperationResult::Install(Err(error))
             | OperationResult::Update(Err(error))
             | OperationResult::RunProfile(Err(error))
-            | OperationResult::Repair(Err(error)) => {
-                self.profile.items[self.profile.active_index].installation =
-                    vapor_studio_core::InstallationState::Partial {
-                        detail: error.clone(),
-                    };
-                self.status = error;
-            }
+            | OperationResult::Repair(Err(error)) => self.apply_composition_action_error(error),
             OperationResult::Message(Ok(message)) => self.status = message,
             OperationResult::CompositionPreview(Ok(preview)) => {
                 self.status = if preview.ready() {
@@ -371,99 +351,32 @@ impl StudioApp {
                 self.status = "Saved runtime outputs through Vapor Shell. Studio is refreshing the catalog and active profile.".to_owned();
             }
             OperationResult::Install(Ok(composition)) => {
-                self.profile_composition.invalidate_preview();
-                let graph_fingerprint =
-                    vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
-                self.profile.items[self.profile.active_index].installation =
-                    vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint,
-                    };
-                self.status =
-                    "Installed the complete resolved composition through Vapor Shell."
-                        .to_owned();
+                self.apply_installed_composition(
+                    composition,
+                    "Installed the complete resolved composition through Vapor Shell.",
+                );
             }
             OperationResult::Update(Ok(composition)) => {
-                self.profile_composition.invalidate_preview();
-                let graph_fingerprint =
-                    vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
-                self.profile.items[self.profile.active_index].installation =
-                    vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint,
-                    };
-                self.status = "Updated the selected composition from its current workspace or cache sources.".to_owned();
+                self.apply_installed_composition(
+                    composition,
+                    "Updated the selected composition from its current workspace or cache sources.",
+                );
             }
             OperationResult::RunProfile(Ok(composition)) => {
-                self.profile_composition.invalidate_preview();
-                let graph_fingerprint =
-                    vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
-                self.profile.items[self.profile.active_index].installation =
-                    vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint,
-                    };
-                self.status = "Finished playing the selected source composition.".to_owned();
+                self.apply_installed_composition(
+                    composition,
+                    "Finished playing the selected source composition.",
+                );
             }
             OperationResult::Repair(Ok(composition)) => {
-                self.profile_composition.invalidate_preview();
-                let graph_fingerprint =
-                    vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
-                self.profile.items[self.profile.active_index].installation =
-                    vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint,
-                    };
-                self.status =
-                    "Repaired the selected composition through Vapor Shell.".to_owned();
+                self.apply_installed_composition(
+                    composition,
+                    "Repaired the selected composition through Vapor Shell.",
+                );
             }
             OperationResult::Verify(Ok(check)) => {
-                let graph_fingerprint = check
-                    .graph
-                    .as_ref()
-                    .and_then(vapor_studio_core::fingerprint_resolved_graph);
-                if let Some(graph) = check.graph {
-                    self.profile.items[self.profile.active_index].resolved_graph = Some(graph);
-                }
-                let checked = check.detail.len();
-                let detail = check.detail.join("; ");
-                let artifacts = installed_records(check.artifacts);
-                if check.ok {
-                    self.profile.items[self.profile.active_index].installation =
-                        vapor_studio_core::InstallationState::Installed {
-                            artifacts,
-                            graph_fingerprint,
-                        };
-                    self.status = format!(
-                        "Installed composition verified. {checked} graph nodes checked."
-                    );
-                } else {
-                    self.profile.items[self.profile.active_index].installation =
-                        vapor_studio_core::InstallationState::NeedsRepair {
-                            detail: detail.clone(),
-                            artifacts,
-                        };
-                    self.status = format!("Installed composition needs repair: {detail}");
-                }
+                self.apply_installation_check(check);
             }
         }
     }
-}
-
-fn installed_records(
-    artifacts: Vec<vapor_studio_core::InstalledArtifact>,
-) -> Vec<InstalledArtifactRecord> {
-    artifacts
-        .into_iter()
-        .map(|artifact| InstalledArtifactRecord {
-            id: artifact.id,
-            version: artifact.version,
-            root: artifact.root,
-            fingerprint: artifact.fingerprint,
-        })
-        .collect()
 }
