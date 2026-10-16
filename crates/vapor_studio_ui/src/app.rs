@@ -133,6 +133,8 @@ pub struct StudioApp {
     profile_recovery: Option<String>,
     profile_recovery_backup: Option<String>,
     active_profile: usize,
+    profile_name_draft: String,
+    confirm_profile_removal: bool,
     new_profile_name: String,
     search_query: String,
     draft_content_id: String,
@@ -262,6 +264,7 @@ impl StudioApp {
         } else {
             workspace_root.clone()
         };
+        let profile_name_draft = profiles[active_profile].name.clone();
         let mut app = Self {
             section: if play_mode {
                 Section::Library
@@ -281,6 +284,8 @@ impl StudioApp {
                 None
             },
             active_profile,
+            profile_name_draft,
+            confirm_profile_removal: false,
             new_profile_name: String::new(),
             search_query: String::new(),
             contents: Vec::new(),
@@ -1926,6 +1931,8 @@ impl StudioApp {
             return;
         }
         self.active_profile = index;
+        self.profile_name_draft = self.profiles[index].name.clone();
+        self.confirm_profile_removal = false;
         self.workspace_root = self.profiles[index]
             .workspace
             .as_ref()
@@ -2048,11 +2055,50 @@ impl StudioApp {
             }
         };
         self.active_profile = index;
+        self.profile_name_draft = self.profiles[index].name.clone();
+        self.confirm_profile_removal = false;
         self.new_profile_name.clear();
         self.status = format!(
             "Created profile {}.",
             self.profiles[self.active_profile].name
         );
+    }
+
+    fn rename_active_profile(&mut self) {
+        match vapor_studio_core::rename_profile(
+            &mut self.profiles,
+            self.active_profile,
+            &self.profile_name_draft,
+        ) {
+            Ok(()) => {
+                self.profile_name_draft = self.profiles[self.active_profile].name.clone();
+                self.status = format!("Renamed profile to {}.", self.profile_name_draft);
+            }
+            Err(error) => {
+                self.profile_name_draft = self.profiles[self.active_profile].name.clone();
+                self.status = error;
+            }
+        }
+    }
+
+    fn remove_active_profile(&mut self) {
+        if self.running || self.workspace_editor_dirty || self.manifest_metadata_dirty {
+            self.status = "Finish or discard the current operation and edits before removing a profile.".to_owned();
+            return;
+        }
+        let index = self.active_profile;
+        let removed = match vapor_studio_core::remove_profile(&mut self.profiles, index) {
+            Ok(profile) => profile,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
+        };
+        self.confirm_profile_removal = false;
+        self.profile_name_draft.clear();
+        let next_index = index.min(self.profiles.len() - 1);
+        self.select_profile(next_index);
+        self.status = format!("Removed profile {}.", removed.name);
     }
 
     pub(super) fn duplicate_active_profile(&mut self) {

@@ -221,6 +221,42 @@ pub fn add_profile(
     Ok(profiles.len() - 1)
 }
 
+/// Rename one profile while preserving case-insensitive name uniqueness.
+pub fn rename_profile(
+    profiles: &mut [CompositionProfile],
+    index: usize,
+    name: &str,
+) -> Result<(), String> {
+    if index >= profiles.len() {
+        return Err("The selected profile no longer exists.".to_owned());
+    }
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Enter a non-empty profile name.".to_owned());
+    }
+    if profiles.iter().enumerate().any(|(other_index, other)| {
+        other_index != index && other.name.eq_ignore_ascii_case(name)
+    }) {
+        return Err("A profile with that name already exists.".to_owned());
+    }
+    profiles[index].name = name.to_owned();
+    Ok(())
+}
+
+/// Remove one profile without allowing a profile set to become empty.
+pub fn remove_profile(
+    profiles: &mut Vec<CompositionProfile>,
+    index: usize,
+) -> Result<CompositionProfile, String> {
+    if profiles.len() <= 1 {
+        return Err("Studio must keep at least one profile.".to_owned());
+    }
+    if index >= profiles.len() {
+        return Err("The selected profile no longer exists.".to_owned());
+    }
+    Ok(profiles.remove(index))
+}
+
 /// Duplicate a composition's root, resolved graph, workspace, and launch settings.
 /// Installed artifacts remain app-owned and are therefore shared by the copy.
 pub fn duplicate_profile(

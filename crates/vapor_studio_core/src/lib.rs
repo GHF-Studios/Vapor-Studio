@@ -20,6 +20,7 @@ pub use profile::{
     InstalledArtifactRecord, LaunchSettings, ProfileDocument, ProfileRecovery,
     ResolvedCompositionGraph, ResolvedDependencyIdentity, ResolvedNodeIdentity,
     WorkspaceAssociation, add_profile, decode_profiles, duplicate_profile,
+    remove_profile, rename_profile,
     fingerprint_resolved_graph,
 };
 pub use publishing::{

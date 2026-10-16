@@ -61,6 +61,56 @@ impl StudioApp {
         };
         ui.separator();
         ui.heading(&profile.name);
+        ui.group(|ui| {
+            ui.label("Manage profile");
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut self.profile_name_draft);
+                if ui
+                    .add_enabled(
+                        !self.running
+                            && !self.workspace_editor_dirty
+                            && !self.manifest_metadata_dirty
+                            && self.profile_name_draft.trim() != profile.name,
+                        egui::Button::new("Rename"),
+                    )
+                    .clicked()
+                {
+                    self.rename_active_profile();
+                }
+                if ui
+                    .add_enabled(
+                        !self.running
+                            && !self.workspace_editor_dirty
+                            && !self.manifest_metadata_dirty
+                            && self.profiles.len() > 1,
+                        egui::Button::new("Remove profile"),
+                    )
+                    .clicked()
+                {
+                    self.confirm_profile_removal = true;
+                }
+            });
+            if self.confirm_profile_removal {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    format!(
+                        "Remove {} from Studio? Installed content and workspace files remain untouched.",
+                        profile.name
+                    ),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!self.running, egui::Button::new("Confirm removal"))
+                        .clicked()
+                    {
+                        self.remove_active_profile();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.confirm_profile_removal = false;
+                    }
+                });
+            }
+        });
         if let Some(root) = &profile.root_package {
             ui.label(format!("Root: {}", content_identity(root)));
         } else {
