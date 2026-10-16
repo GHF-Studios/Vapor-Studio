@@ -49,6 +49,7 @@ impl StudioApp {
         });
         self.draw_workshop_browser(ui);
         ui.separator();
-        self.draw_content_list(ui);
+        self.draw_catalog_list(ui);
+        self.draw_content_detail(ui);
     }
 }
