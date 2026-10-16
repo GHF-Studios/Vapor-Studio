@@ -1,4 +1,5 @@
 use super::super::operation_center::operation_kind_label;
+use super::super::components::design::{page_header, primary_button};
 use super::super::{Section, StudioApp, content_selector};
 use eframe::egui;
 use vapor_studio_core::InstallationState;
@@ -6,8 +7,7 @@ use vapor_studio_core::InstallationState;
 impl StudioApp {
     pub(in crate::app) fn draw_home(&mut self, ui: &mut egui::Ui) {
         let profile = self.profile.items[self.profile.active_index].clone();
-        ui.heading("Your space");
-        ui.label("Play a composition or pick up where you left off creating.");
+        page_header(ui, "Start", "Your space", "Play your selected composition or continue working on content.");
         ui.add_space(8.0);
 
         let card_style = ui.style().clone();
@@ -33,15 +33,17 @@ impl StudioApp {
                     } else {
                         "Set up composition"
                     };
-                    if ui.add_enabled(
-                        !self.operation.running
-                            && !matches!(profile.installation,
-                                InstallationState::OutOfDate { .. }
-                                    | InstallationState::Partial { .. }
-                                    | InstallationState::NeedsRepair { .. })
-                            && (installed || source_ready || !self.has_unsaved_workspace_edits()),
-                        egui::Button::new(action),
-                    ).clicked() {
+                    let can_play = !self.operation.running
+                        && !matches!(profile.installation,
+                            InstallationState::OutOfDate { .. }
+                                | InstallationState::Partial { .. }
+                                | InstallationState::NeedsRepair { .. })
+                        && (installed || source_ready || !self.has_unsaved_workspace_edits());
+                    let mut play_clicked = false;
+                    ui.add_enabled_ui(can_play, |ui| {
+                        play_clicked = primary_button(ui, action).clicked();
+                    });
+                    if play_clicked {
                         if installed {
                             self.run_installed_selected();
                         } else if source_ready {
@@ -56,7 +58,7 @@ impl StudioApp {
                             | InstallationState::Partial { .. }
                             | InstallationState::NeedsRepair { .. }) {
                         ui.colored_label(egui::Color32::YELLOW,
-                            "This installation needs review before it can be played. Open Library for verification or repair.");
+                            "This installation needs review before it can be played. Open Profiles for verification or repair.");
                     }
                 } else {
                     if !self.workspace.unregistered_projects.candidates.is_empty() {

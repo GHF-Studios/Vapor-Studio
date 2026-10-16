@@ -1,10 +1,10 @@
+use super::StudioApp;
 use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
 use super::workspace_editor::WorkspaceDocument;
 use super::workspace_files::discover_workspace_files;
-use super::StudioApp;
+use crate::navigation::Section;
 use std::{fs, path::PathBuf};
 use vapor_studio_core::OperationKind;
-use crate::navigation::Section;
 
 impl StudioApp {
     pub(super) fn apply_content_workspace_created(
@@ -134,20 +134,23 @@ impl StudioApp {
             .and_then(|root| {
                 vapor_studio_core::discover_source_content(&open_executable, &root)
                     .and_then(|contents| {
-                        let unregistered_projects = vapor_studio_core::scan_unregistered_content_projects(&open_executable, &root);
+                        let unregistered_projects =
+                            vapor_studio_core::scan_unregistered_content_projects(
+                                &open_executable,
+                                &root,
+                            );
                         let catalog = vapor_studio_core::discover_content_catalog(
                             &open_executable,
                             Some(&root),
                         );
-                        discover_workspace_files(&root)
-                            .map(|files| WorkspaceOpenSnapshot {
-                                root: root.clone(),
-                                landing_section: crate::navigation::Section::Workspace,
-                                source_content: contents,
-                                unregistered_projects,
-                                local_catalog: catalog,
-                                workspace_files: files,
-                            })
+                        discover_workspace_files(&root).map(|files| WorkspaceOpenSnapshot {
+                            root: root.clone(),
+                            landing_section: crate::navigation::Section::Workspace,
+                            source_content: contents,
+                            unregistered_projects,
+                            local_catalog: catalog,
+                            workspace_files: files,
+                        })
                     })
                     .map_err(|error| {
                         format!(

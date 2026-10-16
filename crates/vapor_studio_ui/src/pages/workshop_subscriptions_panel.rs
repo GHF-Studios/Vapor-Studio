@@ -1,22 +1,30 @@
 use super::super::StudioApp;
+use super::super::components::design::{empty_state, section_header};
 use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_workshop_subscriptions_panel(&mut self, ui: &mut egui::Ui) {
+        section_header(ui, "Your Steam subscriptions", "Steam subscription downloads and Vapor Library imports are separate steps.");
         ui.horizontal(|ui| {
-            ui.heading("Steam Workshop");
-            if ui.add_enabled(!self.operation.running, egui::Button::new("My subscriptions")).clicked() {
+            if ui
+                .add_enabled(
+                    !self.operation.running,
+                    egui::Button::new(if self.workshop.subscriptions_loaded { "Refresh subscriptions" } else { "Load subscriptions" }),
+                )
+                .clicked()
+            {
                 self.refresh_workshop_subscriptions();
             }
         });
-        ui.label("Steam subscriptions are separate from Vapor cache imports. A subscribed item is not playable until its content is imported and composed.");
         if !self.workshop.subscriptions_loaded {
-            ui.weak("Load your Steam Workshop subscriptions to review download state and import them into Vapor Library.");
+            empty_state(ui, "Subscriptions have not been loaded", "Connect to Steam to review subscribed items, Steam download state, and which items are already available in Vapor.", |_| {});
         } else if self.workshop.subscriptions.is_empty() {
-            ui.weak("This Steam account has no Workshop subscriptions for Vapor.");
+            empty_state(ui, "No Vapor Workshop subscriptions", "Items you subscribe to in Steam Workshop will appear here.", |_| {});
         }
         if !self.workshop.subscriptions.is_empty() {
-            ui.collapsing(format!("My subscriptions ({})", self.workshop.subscriptions.len()), |ui| {
+            egui::CollapsingHeader::new(format!("My subscriptions ({})", self.workshop.subscriptions.len()))
+                .default_open(true)
+                .show(ui, |ui| {
                 for id in self.workshop.subscriptions.iter().cloned().collect::<Vec<_>>() {
                     let details = self.workshop.subscription_details.get(&id).cloned();
                     let title = details
@@ -32,7 +40,7 @@ impl StudioApp {
                     let locally_available = self.catalog.items.iter().any(|content| {
                         content.published_file_id.as_deref() == Some(id.as_str())
                     });
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let mut selected = self.workshop.selected_items.contains(&id);
                         if ui
                             .add_enabled(

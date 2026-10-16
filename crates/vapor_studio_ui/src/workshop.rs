@@ -1,12 +1,24 @@
-use super::{StudioApp, catalog_content_selector};
 use super::operation_protocol::OperationResult;
-use std::{path::PathBuf, time::{Duration, Instant}};
+use super::{StudioApp, catalog_content_selector};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use vapor_studio_core::OperationKind;
 
 const WORKSHOP_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const WORKSHOP_PROGRESS_POLL_MAX_INTERVAL: Duration = Duration::from_secs(30);
 
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
+pub(super) enum WorkshopTab {
+    #[default]
+    Browse,
+    Subscriptions,
+    Imports,
+}
+
 pub(super) struct WorkshopState {
+    pub(super) tab: WorkshopTab,
     pub(super) preview: Option<vapor_studio_core::WorkshopPackagePreview>,
     pub(super) published_file_id: String,
     pub(super) publisher_account: String,
@@ -16,8 +28,10 @@ pub(super) struct WorkshopState {
     pub(super) pending_acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
     pub(super) search_query: String,
     pub(super) results: Vec<vapor_studio_core::WorkshopItem>,
+    pub(super) focused_result: Option<String>,
     pub(super) results_query: Option<String>,
     pub(super) subscriptions: std::collections::BTreeSet<String>,
+    pub(super) focused_subscription: Option<String>,
     pub(super) subscriptions_loaded: bool,
     pub(super) subscription_details:
         std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
@@ -30,6 +44,7 @@ pub(super) struct WorkshopState {
 impl Default for WorkshopState {
     fn default() -> Self {
         Self {
+            tab: WorkshopTab::default(),
             preview: None,
             published_file_id: String::new(),
             publisher_account: String::new(),
@@ -39,8 +54,10 @@ impl Default for WorkshopState {
             pending_acquisitions: Vec::new(),
             search_query: String::new(),
             results: Vec::new(),
+            focused_result: None,
             results_query: None,
             subscriptions: Default::default(),
+            focused_subscription: None,
             subscriptions_loaded: false,
             subscription_details: Default::default(),
             subscription_poll_interval: WORKSHOP_PROGRESS_POLL_INTERVAL,
@@ -53,7 +70,10 @@ impl Default for WorkshopState {
 
 enum RepreviewRequest {
     ActiveProfile,
-    Source { selector: String, workspace_root: PathBuf },
+    Source {
+        selector: String,
+        workspace_root: PathBuf,
+    },
 }
 
 impl StudioApp {
@@ -79,7 +99,11 @@ impl StudioApp {
 
     pub(super) fn apply_workshop_subscriptions_error(&mut self, error: String) {
         self.status = error;
-        let downloading = self.workshop.subscription_details.values().any(|item| item.downloading);
+        let downloading = self
+            .workshop
+            .subscription_details
+            .values()
+            .any(|item| item.downloading);
         if downloading {
             let interval = self
                 .workshop
@@ -150,6 +174,20 @@ impl StudioApp {
         self.workshop.page = page.page;
         self.workshop.total_results = page.total_results;
         self.workshop.results = page.items;
+        if self
+            .workshop
+            .focused_result
+            .as_ref()
+            .is_none_or(|focused| {
+                !self.workshop.results.iter().any(|item| &item.published_file_id == focused)
+            })
+        {
+            self.workshop.focused_result = self
+                .workshop
+                .results
+                .first()
+                .map(|item| item.published_file_id.clone());
+        }
         self.workshop.results_query = Some(query);
         self.status = format!(
             "Steam Workshop returned {} items on page {} of {}.",
@@ -169,13 +207,20 @@ impl StudioApp {
             .iter()
             .map(|item| item.published_file_id.clone())
             .collect();
+        if self.workshop.focused_subscription.as_ref().is_none_or(|focused| {
+            !self.workshop.subscriptions.contains(focused)
+        }) {
+            self.workshop.focused_subscription = subscriptions
+                .first()
+                .map(|item| item.published_file_id.clone());
+        }
         self.workshop.subscription_details = subscriptions
             .into_iter()
             .map(|item| (item.published_file_id.clone(), item))
             .collect();
         self.workshop.subscription_poll_interval = WORKSHOP_PROGRESS_POLL_INTERVAL;
-        self.workshop.next_subscription_poll = downloading
-            .then(|| Instant::now() + WORKSHOP_PROGRESS_POLL_INTERVAL);
+        self.workshop.next_subscription_poll =
+            downloading.then(|| Instant::now() + WORKSHOP_PROGRESS_POLL_INTERVAL);
         self.status = format!(
             "Loaded {} Steam Workshop subscriptions.",
             self.workshop.subscriptions.len()
@@ -298,7 +343,12 @@ impl StudioApp {
     }
 
     pub(super) fn download_selected_workshop_items(&mut self) {
-        let ids = self.workshop.selected_items.iter().cloned().collect::<Vec<_>>();
+        let ids = self
+            .workshop
+            .selected_items
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
         self.download_workshop_items(ids, None);
     }
 
@@ -306,10 +356,7 @@ impl StudioApp {
         &mut self,
         published_file_ids: Vec<String>,
     ) {
-        self.download_workshop_items(
-            published_file_ids,
-            Some(RepreviewRequest::ActiveProfile),
-        );
+        self.download_workshop_items(published_file_ids, Some(RepreviewRequest::ActiveProfile));
     }
 
     pub(in crate::app) fn download_source_composition_dependencies(
@@ -320,7 +367,10 @@ impl StudioApp {
     ) {
         self.download_workshop_items(
             published_file_ids,
-            Some(RepreviewRequest::Source { selector, workspace_root }),
+            Some(RepreviewRequest::Source {
+                selector,
+                workspace_root,
+            }),
         );
     }
 
@@ -330,7 +380,8 @@ impl StudioApp {
         repreview_after_acquisition: Option<RepreviewRequest>,
     ) {
         if self.operation.running {
-            self.status = "Finish the current operation before importing Workshop content.".to_owned();
+            self.status =
+                "Finish the current operation before importing Workshop content.".to_owned();
             return;
         }
         if published_file_ids.is_empty() {
@@ -355,9 +406,13 @@ impl StudioApp {
         if let Some(request) = repreview_after_acquisition {
             match request {
                 RepreviewRequest::ActiveProfile => {
-                    self.profile_composition.request_repreview_after_catalog_refresh();
+                    self.profile_composition
+                        .request_repreview_after_catalog_refresh();
                 }
-                RepreviewRequest::Source { selector, workspace_root } => {
+                RepreviewRequest::Source {
+                    selector,
+                    workspace_root,
+                } => {
                     self.profile_composition
                         .request_source_repreview_after_catalog_refresh(selector, workspace_root);
                 }
@@ -369,9 +424,7 @@ impl StudioApp {
                 &published_file_ids,
             ))
         });
-        self.status = format!(
-            "Importing {count} public Workshop item(s) into Vapor's cache…"
-        );
+        self.status = format!("Importing {count} public Workshop item(s) into Vapor's cache…");
     }
 
     pub(in crate::app) fn search_workshop(&mut self) {
@@ -394,9 +447,8 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn refresh_workshop_subscriptions(&mut self) {
-        self.workshop.next_subscription_poll = Some(
-            Instant::now() + self.workshop.subscription_poll_interval,
-        );
+        self.workshop.next_subscription_poll =
+            Some(Instant::now() + self.workshop.subscription_poll_interval);
         self.spawn(OperationKind::LoadWorkshopSubscriptions, move |_context| {
             OperationResult::WorkshopSubscriptions(vapor_studio_core::workshop_subscriptions(
                 vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
@@ -406,7 +458,11 @@ impl StudioApp {
     }
 
     pub(super) fn poll_workshop_download_progress(&mut self) {
-        let downloading = self.workshop.subscription_details.values().any(|item| item.downloading);
+        let downloading = self
+            .workshop
+            .subscription_details
+            .values()
+            .any(|item| item.downloading);
         let due = self
             .workshop
             .next_subscription_poll
@@ -479,5 +535,4 @@ impl StudioApp {
         }
         .to_owned();
     }
-
 }

@@ -2,10 +2,7 @@ use super::super::StudioApp;
 use eframe::egui;
 
 impl StudioApp {
-    pub(super) fn draw_profile_launch_panel(
-        &mut self,
-        ui: &mut eframe::egui::Ui,
-    ) {
+    pub(super) fn draw_profile_launch_panel(&mut self, ui: &mut eframe::egui::Ui) {
         ui.separator();
         ui.label("Launch arguments");
         ui.weak("Each row is passed as one argument to the installed Engine.");
@@ -31,7 +28,10 @@ impl StudioApp {
             });
         }
         if let Some(index) = remove_argument {
-            self.profile.items[active_profile].launch.arguments.remove(index);
+            self.profile.items[active_profile]
+                .launch
+                .arguments
+                .remove(index);
         }
         if ui
             .add_enabled(can_edit, egui::Button::new("Add argument"))

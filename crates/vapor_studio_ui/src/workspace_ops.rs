@@ -124,10 +124,7 @@ impl StudioApp {
         self.status = "Refreshing the local content catalog through Vapor Shell…".to_owned();
     }
 
-    pub(super) fn activate_workspace(
-        &mut self,
-        selection: WorkspaceOpenSnapshot,
-    ) {
+    pub(super) fn activate_workspace(&mut self, selection: WorkspaceOpenSnapshot) {
         let WorkspaceOpenSnapshot {
             root,
             landing_section,
@@ -178,11 +175,14 @@ impl StudioApp {
             |error| format!("Opened workspace {} · {} source items. Local cache/install catalog could not load: {error}", self.workspace.root, self.catalog.sources.len()),
         );
         if let Some(error) = project_scan_error {
-            self.status.push_str(&format!(" Content project scan could not complete: {error}"));
+            self.status.push_str(&format!(
+                " Content project scan could not complete: {error}"
+            ));
         }
         if restored_editor_drafts {
             self.status.push(' ');
-            self.status.push_str(&self.workspace.editor.recovery_summary());
+            self.status
+                .push_str(&self.workspace.editor.recovery_summary());
         }
     }
 
@@ -193,7 +193,9 @@ impl StudioApp {
     pub(super) fn open_workspace_path_to(&mut self, path: PathBuf, landing_section: Section) {
         if self.authoring.manifest_metadata_dirty {
             self.workspace.root_draft = self.workspace.root.clone();
-            self.status = "Save or discard the structured manifest edits before changing workspaces.".to_owned();
+            self.status =
+                "Save or discard the structured manifest edits before changing workspaces."
+                    .to_owned();
             return;
         }
         if self.workspace.editor.has_dirty_documents() {
@@ -218,10 +220,12 @@ impl StudioApp {
             let result = fs::canonicalize(&selected)
                 .map_err(|error| format!("{}: {error}", selected.display()))
                 .and_then(|root| {
-                    VaporWorkspace::load(&root)
-                        .map_err(|error| format!("{} is not a valid Vapor Workspace: {error}", root.display()))?;
+                    VaporWorkspace::load(&root).map_err(|error| {
+                        format!("{} is not a valid Vapor Workspace: {error}", root.display())
+                    })?;
                     let contents = vapor_studio_core::discover_source_content(&executable, &root)?;
-                    let unregistered_projects = vapor_studio_core::scan_unregistered_content_projects(&executable, &root);
+                    let unregistered_projects =
+                        vapor_studio_core::scan_unregistered_content_projects(&executable, &root);
                     let catalog =
                         vapor_studio_core::discover_content_catalog(&executable, Some(&root));
                     discover_workspace_files(&root).map(|files| WorkspaceOpenSnapshot {
@@ -237,12 +241,6 @@ impl StudioApp {
         });
         self.status = format!("Opening workspace {}…", path.display());
     }
-
-
-
-
-
-
 
     pub(super) fn require_saved_workspace(&mut self, action: &str) -> bool {
         if !self.has_unsaved_workspace_edits() {

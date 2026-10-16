@@ -3,53 +3,42 @@ use super::super::content_selector;
 use eframe::egui;
 
 impl StudioApp {
-    pub(super) fn draw_profile_selector_panel(
-        &mut self,
-        ui: &mut eframe::egui::Ui,
-    ) {
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                    egui::Button::new("Duplicate active profile"),
-                )
-                .on_disabled_hover_text(
-                    "Save or discard workspace file and structured metadata drafts before duplicating a profile.",
-                )
-                .clicked()
-            {
-                self.duplicate_active_profile();
-            }
-            ui.weak(
-                "Copies the selected root and launch settings; installed artifacts remain shared.",
-            );
-        });
-
-        for index in 0..self.profile.items.len() {
-            let profile = &self.profile.items[index];
-            let name = profile.name.clone();
-            let root = profile
-                .root_package
-                .as_ref()
-                .map(content_selector)
-                .unwrap_or_else(|| "No Packagepack selected".to_owned());
-            let selected = index == self.profile.active_index;
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(
+    pub(super) fn draw_profile_selector_panel(&mut self, ui: &mut eframe::egui::Ui) {
+        egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
+            for index in 0..self.profile.items.len() {
+                let profile = &self.profile.items[index];
+                let name = profile.name.clone();
+                let root = profile
+                    .root_package
+                    .as_ref()
+                    .map(content_selector)
+                    .unwrap_or_else(|| "No composition selected".to_owned());
+                let status = match &profile.installation {
+                    vapor_studio_core::InstallationState::Unknown => "Not checked",
+                    vapor_studio_core::InstallationState::NotInstalled => "Not installed",
+                    vapor_studio_core::InstallationState::Installed { .. } => "Ready to play",
+                    vapor_studio_core::InstallationState::OutOfDate { .. } => "Update available",
+                    vapor_studio_core::InstallationState::Partial { .. } => "Needs repair",
+                    vapor_studio_core::InstallationState::NeedsRepair { .. } => "Needs repair",
+                };
+                let selected = index == self.profile.active_index;
+                let style = ui.style().clone();
+                egui::Frame::group(&style).show(ui, |ui| {
+                    let response = ui.add_enabled(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
-                        egui::Button::selectable(selected, name),
-                    )
-                    .on_disabled_hover_text(
-                        "Save or discard workspace file and structured metadata drafts before switching profiles.",
-                    )
-                    .clicked()
-                {
-                    self.select_profile(index);
-                }
-                ui.label(root);
-            });
-        }
+                        egui::Button::selectable(selected, egui::RichText::new(name).strong()),
+                    );
+                    if response
+                        .on_disabled_hover_text("Save or discard workspace edits before switching profiles.")
+                        .clicked()
+                    {
+                        self.select_profile(index);
+                    }
+                    ui.label(root);
+                    ui.small(status);
+                });
+            }
+        });
     }
 }
 
@@ -60,7 +49,10 @@ impl StudioApp {
         profile: &vapor_studio_core::CompositionProfile,
     ) {
         ui.group(|ui| {
-            ui.label("Manage profile");
+            ui.horizontal(|ui| {
+                ui.strong("Profile settings");
+                ui.weak("Name and launch configuration");
+            });
             ui.horizontal(|ui| {
                 ui.text_edit_singleline(&mut self.profile.name_draft);
                 if ui

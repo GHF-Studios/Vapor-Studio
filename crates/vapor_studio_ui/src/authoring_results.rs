@@ -46,7 +46,9 @@ impl StudioApp {
         self.authoring.workshop_metadata_edit = Some(metadata);
         self.authoring.runtime_outputs_edit = None;
         self.authoring.manifest_metadata_dirty = false;
-        self.status = "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell.".to_owned();
+        self.status =
+            "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell."
+                .to_owned();
     }
 
     pub(super) fn apply_source_workshop_saved(

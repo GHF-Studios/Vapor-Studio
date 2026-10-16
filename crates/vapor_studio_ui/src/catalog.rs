@@ -77,10 +77,14 @@ impl StudioApp {
                 return;
             }
         };
-        self.spawn(vapor_studio_core::OperationKind::Discover, move |_context| {
-            let (source, catalog, unregistered) = discover_workspace_and_catalog(&executable, root.as_deref());
-            OperationResult::Discovery(source, catalog, unregistered)
-        });
+        self.spawn(
+            vapor_studio_core::OperationKind::Discover,
+            move |_context| {
+                let (source, catalog, unregistered) =
+                    discover_workspace_and_catalog(&executable, root.as_deref());
+                OperationResult::Discovery(source, catalog, unregistered)
+            },
+        );
     }
 
     pub(super) fn apply_catalog_discovery(
@@ -103,7 +107,10 @@ impl StudioApp {
             Ok(catalog) => {
                 let count = catalog.len();
                 self.catalog.items = catalog;
-                self.status = if self.profile.items[self.profile.active_index].workspace.is_some() {
+                self.status = if self.profile.items[self.profile.active_index]
+                    .workspace
+                    .is_some()
+                {
                     source_error.map(|error| format!("Found {count} local items, but workspace sources could not load: {error}"))
                         .unwrap_or_else(|| format!("Discovered {count} local content identities across workspace, cache, and installation."))
                 } else {
@@ -126,11 +133,14 @@ impl StudioApp {
             }
             Err(error) => {
                 self.workspace.unregistered_scan_completed = false;
-                self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+                self.workspace.unregistered_projects =
+                    vapor_studio_core::UnregisteredProjectScan::default();
                 if !self.status.is_empty() {
                     self.status.push(' ');
                 }
-                self.status.push_str(&format!("Workspace project scan could not complete: {error}"));
+                self.status.push_str(&format!(
+                    "Workspace project scan could not complete: {error}"
+                ));
             }
         }
         if self.workspace.unregistered_scan_completed {
@@ -158,18 +168,13 @@ impl StudioApp {
             }
             None => {}
         }
-        if self
-            .catalog
-            .selected
-            .as_ref()
-            .is_some_and(|identity| {
-                !self
-                    .catalog
-                    .items
-                    .iter()
-                    .any(|content| catalog_content_selector(content) == *identity)
-            })
-        {
+        if self.catalog.selected.as_ref().is_some_and(|identity| {
+            !self
+                .catalog
+                .items
+                .iter()
+                .any(|content| catalog_content_selector(content) == *identity)
+        }) {
             self.catalog.selected = None;
         }
     }
@@ -258,7 +263,10 @@ pub(super) fn workspace_candidate_matches_filters(
     kind_filter: Option<&str>,
     query: &str,
 ) -> bool {
-    if !matches!(source_filter, CatalogSourceFilter::All | CatalogSourceFilter::Workspace) {
+    if !matches!(
+        source_filter,
+        CatalogSourceFilter::All | CatalogSourceFilter::Workspace
+    ) {
         return false;
     }
     let kind = candidate.kind.to_string();
@@ -269,5 +277,9 @@ pub(super) fn workspace_candidate_matches_filters(
     query.is_empty()
         || candidate.id.to_lowercase().contains(&query)
         || kind.to_lowercase().contains(&query)
-        || candidate.path.to_string_lossy().to_lowercase().contains(&query)
+        || candidate
+            .path
+            .to_string_lossy()
+            .to_lowercase()
+            .contains(&query)
 }

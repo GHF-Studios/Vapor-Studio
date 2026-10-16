@@ -1,21 +1,28 @@
 use super::super::StudioApp;
+use super::super::components::design::{empty_state, section_header};
 use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_workshop_acquisition_panel(&mut self, ui: &mut egui::Ui) {
-        ui.separator();
-        ui.label("Download a known public item");
+        section_header(ui, "Vapor Library copies", "Import downloads an item into Vapor's local cache. Installing it into a profile is a separate action.");
         ui.horizontal(|ui| {
-            ui.add_enabled(!self.operation.running, egui::TextEdit::singleline(&mut self.workshop.published_file_id)
-                .hint_text("PublishedFileId")
-                .desired_width(220.0));
-            if ui.add_enabled(!self.operation.running, egui::Button::new("Download item")).clicked() {
+            ui.add_enabled(
+                !self.operation.running,
+                egui::TextEdit::singleline(&mut self.workshop.published_file_id)
+                    .hint_text("PublishedFileId")
+                    .desired_width(220.0),
+            );
+            if ui
+                .add_enabled(!self.operation.running, egui::Button::new("Download item"))
+                .clicked()
+            {
                 self.download_workshop_item();
             }
         });
-        if !self.workshop.pending_acquisitions.is_empty() {
-            ui.separator();
-            ui.heading("Imported into Vapor Library");
+        if self.workshop.pending_acquisitions.is_empty() {
+            empty_state(ui, "Nothing imported in this session", "Items imported from Workshop become available in the local content catalog and can then be selected for a composition.", |_| {});
+        } else {
+            section_header(ui, "Recently imported", "These copies are in Vapor's cache; they have not necessarily been installed into a play profile.");
             for acquisition in self.workshop.pending_acquisitions.clone() {
                 ui.group(|ui| {
                     ui.label(format!(

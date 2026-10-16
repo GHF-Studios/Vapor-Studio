@@ -18,7 +18,10 @@ pub(super) fn discover_workspace_files(root: &Path) -> Result<Vec<PathBuf>, Stri
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if name.starts_with('.')
-                || matches!(name.as_ref(), "target" | "node_modules" | "vendor" | "output")
+                || matches!(
+                    name.as_ref(),
+                    "target" | "node_modules" | "vendor" | "output"
+                )
             {
                 continue;
             }
@@ -59,7 +62,9 @@ pub(super) fn read_workspace_file(root: &Path, relative: &Path) -> Result<String
     let path = safe_workspace_file(root, relative)?;
     let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
     if metadata.len() > 4 * 1024 * 1024 {
-        return Err("files larger than 4 MiB cannot be opened in the Studio text editor".to_owned());
+        return Err(
+            "files larger than 4 MiB cannot be opened in the Studio text editor".to_owned(),
+        );
     }
     fs::read_to_string(&path).map_err(|error| {
         format!(
@@ -77,9 +82,10 @@ pub(super) fn write_workspace_file(
 ) -> Result<(), String> {
     let path = safe_workspace_file(root, relative)?;
     let _lock = WorkspaceFileEditLock::acquire(workspace_edit_lock_path(&path))?;
-    let metadata = fs::metadata(&path).map_err(|error| format!("{}: {error}", relative.display()))?;
-    let current = fs::read_to_string(&path)
-        .map_err(|error| format!("{}: {error}", relative.display()))?;
+    let metadata =
+        fs::metadata(&path).map_err(|error| format!("{}: {error}", relative.display()))?;
+    let current =
+        fs::read_to_string(&path).map_err(|error| format!("{}: {error}", relative.display()))?;
     if current != expected_contents {
         return Err(format!(
             "{} changed on disk after it was opened; reload it before saving to avoid overwriting those edits",
@@ -98,8 +104,12 @@ pub(super) fn write_workspace_file(
         use std::io::Write;
         file.write_all(contents.as_bytes())
             .map_err(|error| format!("could not write {}: {error}", relative.display()))?;
-        fs::set_permissions(&temporary, metadata.permissions())
-            .map_err(|error| format!("could not preserve permissions for {}: {error}", relative.display()))?;
+        fs::set_permissions(&temporary, metadata.permissions()).map_err(|error| {
+            format!(
+                "could not preserve permissions for {}: {error}",
+                relative.display()
+            )
+        })?;
         file.sync_all()
             .map_err(|error| format!("could not sync {}: {error}", relative.display()))?;
         let latest = fs::read_to_string(&path)
@@ -110,12 +120,22 @@ pub(super) fn write_workspace_file(
                 relative.display()
             ));
         }
-        fs::rename(&path, &backup)
-            .map_err(|error| format!("could not preserve original {}: {error}", relative.display()))?;
+        fs::rename(&path, &backup).map_err(|error| {
+            format!(
+                "could not preserve original {}: {error}",
+                relative.display()
+            )
+        })?;
         if let Err(error) = fs::rename(&temporary, &path) {
             return Err(match fs::rename(&backup, &path) {
-                Ok(()) => format!("could not replace {}: {error}; original restored", relative.display()),
-                Err(restore) => format!("could not replace {}: {error}; restoring original also failed: {restore}", relative.display()),
+                Ok(()) => format!(
+                    "could not replace {}: {error}; original restored",
+                    relative.display()
+                ),
+                Err(restore) => format!(
+                    "could not replace {}: {error}; restoring original also failed: {restore}",
+                    relative.display()
+                ),
             });
         }
         let _ = fs::remove_file(&backup);
@@ -144,7 +164,11 @@ fn sibling_edit_path(path: &Path, suffix: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    path.with_file_name(format!(".{name}.{}.{}.studio-{suffix}", std::process::id(), nonce))
+    path.with_file_name(format!(
+        ".{name}.{}.{}.studio-{suffix}",
+        std::process::id(),
+        nonce
+    ))
 }
 
 struct WorkspaceFileEditLock {
@@ -158,8 +182,16 @@ impl WorkspaceFileEditLock {
             .write(true)
             .create_new(true)
             .open(&path)
-            .map_err(|error| format!("cannot acquire workspace file edit lock '{}': {error}", path.display()))?;
-        Ok(Self { path, file: Some(file) })
+            .map_err(|error| {
+                format!(
+                    "cannot acquire workspace file edit lock '{}': {error}",
+                    path.display()
+                )
+            })?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
     }
 }
 
@@ -205,7 +237,10 @@ pub(super) fn create_new_workspace_file(root: &Path, relative: &Path) -> Result<
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if let Err(error) = fs::create_dir(&parent) {
                     cleanup_created_directories(&created_directories);
-                    return Err(format!("could not create folder {}: {error}", parent.display()));
+                    return Err(format!(
+                        "could not create folder {}: {error}",
+                        parent.display()
+                    ));
                 }
                 created_directories.push(parent.clone());
             }

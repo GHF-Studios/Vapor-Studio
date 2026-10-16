@@ -1,3 +1,4 @@
+pub(crate) mod design;
 mod catalog_list;
-mod content_detail;
 pub(crate) mod composition_preview;
+mod content_detail;

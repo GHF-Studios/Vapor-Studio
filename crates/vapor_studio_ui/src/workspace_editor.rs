@@ -1,9 +1,8 @@
+use super::StudioApp;
 use super::operation_protocol::OperationResult;
 use super::workspace_files::{
-    create_new_workspace_file, discover_workspace_files, read_workspace_file,
-    write_workspace_file,
+    create_new_workspace_file, discover_workspace_files, read_workspace_file, write_workspace_file,
 };
-use super::StudioApp;
 use std::{
     collections::BTreeMap,
     fs,
@@ -47,7 +46,8 @@ impl WorkspaceEditorState {
     }
 
     pub(super) fn active_document_is_dirty(&self) -> bool {
-        self.active_document().is_some_and(WorkspaceDocument::is_dirty)
+        self.active_document()
+            .is_some_and(WorkspaceDocument::is_dirty)
     }
 
     pub(super) fn has_dirty_documents(&self) -> bool {
@@ -56,7 +56,11 @@ impl WorkspaceEditorState {
 
     pub(super) fn recovery_summary(&self) -> String {
         let open = self.documents.len();
-        let dirty = self.documents.values().filter(|document| document.is_dirty()).count();
+        let dirty = self
+            .documents
+            .values()
+            .filter(|document| document.is_dirty())
+            .count();
         format!("Recovered {open} editor tab(s), including {dirty} unsaved draft(s).")
     }
 
@@ -64,31 +68,36 @@ impl WorkspaceEditorState {
         if self.documents.is_empty() || root.trim().is_empty() {
             return None;
         }
-        let documents = self.documents.iter().map(|(path, document)| {
-            (
-                path.to_string_lossy().into_owned(),
-                document.original.clone(),
-                document.contents.clone(),
-            )
-        }).collect::<Vec<_>>();
+        let documents = self
+            .documents
+            .iter()
+            .map(|(path, document)| {
+                (
+                    path.to_string_lossy().into_owned(),
+                    document.original.clone(),
+                    document.contents.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
         serde_json::to_string(&(
             root.to_owned(),
             self.selected_file
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
             documents,
-        )).ok()
+        ))
+        .ok()
     }
 
     pub(super) fn restore_editor_drafts(&mut self, root: &Path) -> bool {
         let Some(encoded) = self.draft_recovery.take() else {
             return false;
         };
-        let Ok((saved_root, selected, documents)) = serde_json::from_str::<(
-            String,
-            Option<String>,
-            Vec<(String, String, String)>,
-        )>(&encoded) else {
+        let Ok((saved_root, selected, documents)) =
+            serde_json::from_str::<(String, Option<String>, Vec<(String, String, String)>)>(
+                &encoded,
+            )
+        else {
             return false;
         };
         let same_root = matches!(
@@ -102,7 +111,9 @@ impl WorkspaceEditorState {
         for (path, original, contents) in documents {
             let path = PathBuf::from(path);
             if path.is_absolute()
-                || path.components().any(|part| !matches!(part, std::path::Component::Normal(_)))
+                || path
+                    .components()
+                    .any(|part| !matches!(part, std::path::Component::Normal(_)))
                 || !self.files.contains(&path)
             {
                 return false;
@@ -143,11 +154,15 @@ impl StudioApp {
             .workspace
             .editor
             .restore_editor_drafts(Path::new(self.workspace.root.trim()));
-        self.status = format!("Found {} workspace files.", self.workspace.editor.files.len());
+        self.status = format!(
+            "Found {} workspace files.",
+            self.workspace.editor.files.len()
+        );
         if restored {
             self.workspace.editor.files_open = true;
             self.status.push(' ');
-            self.status.push_str(&self.workspace.editor.recovery_summary());
+            self.status
+                .push_str(&self.workspace.editor.recovery_summary());
         }
     }
 
@@ -232,7 +247,8 @@ impl StudioApp {
 
     pub(super) fn open_workspace_file(&mut self, path: PathBuf) {
         if self.authoring.manifest_metadata_dirty {
-            self.status = "Save or discard structured manifest edits before opening another file.".to_owned();
+            self.status =
+                "Save or discard structured manifest edits before opening another file.".to_owned();
             return;
         }
         if self.workspace.editor.documents.contains_key(&path) {
@@ -242,7 +258,8 @@ impl StudioApp {
             return;
         }
         if self.workspace.editor.documents.len() >= 16 {
-            self.status = "Close an editor tab before opening another file (16 open tabs maximum).".to_owned();
+            self.status = "Close an editor tab before opening another file (16 open tabs maximum)."
+                .to_owned();
             return;
         }
         if !self.require_workspace_association("open a workspace file") {
@@ -299,13 +316,8 @@ impl StudioApp {
                 documents
                     .into_iter()
                     .map(|(path, document)| {
-                        write_workspace_file(
-                            &root,
-                            &path,
-                            &document.original,
-                            &document.contents,
-                        )
-                        .map(|()| path)
+                        write_workspace_file(&root, &path, &document.original, &document.contents)
+                            .map(|()| path)
                     })
                     .collect(),
             )
@@ -337,12 +349,14 @@ impl StudioApp {
             .get(path)
             .is_some_and(WorkspaceDocument::is_dirty)
         {
-            self.status = "Save the file before closing its tab so the draft stays recoverable.".to_owned();
+            self.status =
+                "Save the file before closing its tab so the draft stays recoverable.".to_owned();
             return;
         }
         self.workspace.editor.documents.remove(path);
         if self.workspace.editor.selected_file.as_deref() == Some(path) {
-            self.workspace.editor.selected_file = self.workspace.editor.documents.keys().next().cloned();
+            self.workspace.editor.selected_file =
+                self.workspace.editor.documents.keys().next().cloned();
         }
         self.workspace.editor.files_open = self.workspace.editor.selected_file.is_some();
     }

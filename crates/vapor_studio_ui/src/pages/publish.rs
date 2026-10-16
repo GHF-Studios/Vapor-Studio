@@ -1,15 +1,25 @@
-use super::super::root_publishing::root_publish_confirmation;
+use super::super::root_publishing::{PublishTab, root_publish_confirmation};
+use super::super::components::design::page_header;
 use super::super::{Section, StudioApp, source_content_selector};
 use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
 impl StudioApp {
     pub(in crate::app) fn draw_publish(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Publish");
-        ui.label("Review the exact destination and payload before an external upload.");
+        page_header(ui, "Share", "Publish", "Review the destination and exact payload before sending anything outside this device.");
 
+        ui.horizontal(|ui| {
+            if ui.add(egui::Button::selectable(self.root_publishing.tab == PublishTab::WorkshopContent, "Workshop content")).clicked() {
+                self.root_publishing.tab = PublishTab::WorkshopContent;
+            }
+            if ui.add(egui::Button::selectable(self.root_publishing.tab == PublishTab::VaporApp, "Vapor app release")).clicked() {
+                self.root_publishing.tab = PublishTab::VaporApp;
+            }
+        });
+
+        if self.root_publishing.tab == PublishTab::WorkshopContent {
         ui.group(|ui| {
-            ui.heading("Steam Workshop content");
+            ui.heading("Publish a Workshop item");
             ui.label("Stage an authored item from Discover. The staged review remains available here while you inspect its identity, files, dependencies, and target.");
             let Some(preview) = self.workshop.preview.clone() else {
                 ui.weak("No Workshop artifact is staged for review.");
@@ -154,39 +164,44 @@ impl StudioApp {
                 }
             });
         });
-
+        } else {
         ui.group(|ui| {
-            ui.heading("Vapor app on Steam");
-            ui.label("Review the exact package, Steam account, and branch before a SteamPipe upload.");
+            ui.heading("Publish a Vapor app build");
+            ui.label("SteamPipe uploads a Vapor application release to the Steam app and depot shown below.");
             ui.label(format!(
                 "Steam AppID {ROOT_STEAM_APP_ID} · DepotID {ROOT_STEAM_DEPOT_ID}",
             ));
 
             let mut settings_changed = false;
-            ui.horizontal(|ui| {
-                ui.label("Publisher account");
-                settings_changed |= ui.add_enabled(
-                    !self.operation.running,
-                    egui::TextEdit::singleline(&mut self.root_publishing.account)
-                        .hint_text("Steamworks account name"),
-                ).changed();
-            });
-            ui.horizontal(|ui| {
-                ui.label("Build description");
-                settings_changed |= ui.add_enabled(
-                    !self.operation.running,
-                    egui::TextEdit::singleline(&mut self.root_publishing.description)
-                        .hint_text("Vapor root package"),
-                ).changed();
-            });
-            ui.horizontal(|ui| {
-                ui.label("Set live on beta branch (optional)");
-                settings_changed |= ui.add_enabled(
-                    !self.operation.running,
-                    egui::TextEdit::singleline(&mut self.root_publishing.set_live_branch)
-                        .hint_text("leave empty to upload without changing a branch"),
-                ).changed();
-            });
+            egui::Grid::new("root-publish-settings")
+                .num_columns(2)
+                .spacing([14.0, 9.0])
+                .show(ui, |ui| {
+                    ui.label("Publisher account");
+                    settings_changed |= ui.add_enabled(
+                        !self.operation.running,
+                        egui::TextEdit::singleline(&mut self.root_publishing.account)
+                            .desired_width(320.0)
+                            .hint_text("Steamworks account name"),
+                    ).changed();
+                    ui.end_row();
+                    ui.label("Build description");
+                    settings_changed |= ui.add_enabled(
+                        !self.operation.running,
+                        egui::TextEdit::singleline(&mut self.root_publishing.description)
+                            .desired_width(420.0)
+                            .hint_text("Vapor root package"),
+                    ).changed();
+                    ui.end_row();
+                    ui.label("Beta branch");
+                    settings_changed |= ui.add_enabled(
+                        !self.operation.running,
+                        egui::TextEdit::singleline(&mut self.root_publishing.set_live_branch)
+                            .desired_width(320.0)
+                            .hint_text("Leave empty to upload without changing a branch"),
+                    ).changed();
+                    ui.end_row();
+                });
             ui.weak("SteamCMD handles password and Steam Guard prompts locally. Leaving the branch empty keeps this upload from changing what players receive.");
             if settings_changed {
                 self.invalidate_root_publish_review();
@@ -255,5 +270,6 @@ impl StudioApp {
                 ui.label(&self.root_publishing.status);
             }
         });
+        }
     }
 }

@@ -3,7 +3,6 @@ use crate::navigation::{CatalogSourceFilter, Section};
 use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, WorkspaceAssociation};
 
-
 pub(super) struct ProfileState {
     pub(super) items: Vec<vapor_studio_core::CompositionProfile>,
     pub(super) active_index: usize,
@@ -36,7 +35,10 @@ impl ProfileState {
 
 impl StudioApp {
     pub(super) fn use_workshop_as_profile_root(&mut self, published_file_id: &str) {
-        let Some(acquisition) = self.workshop.pending_acquisitions.iter()
+        let Some(acquisition) = self
+            .workshop
+            .pending_acquisitions
+            .iter()
             .find(|acquisition| acquisition.id == published_file_id)
         else {
             return;
@@ -56,7 +58,10 @@ impl StudioApp {
         self.section = Section::Library;
     }
 
-    pub(super) fn use_available_workshop_package_as_profile_root(&mut self, published_file_id: &str) {
+    pub(super) fn use_available_workshop_package_as_profile_root(
+        &mut self,
+        published_file_id: &str,
+    ) {
         let matches = self
             .catalog
             .items
@@ -77,7 +82,8 @@ impl StudioApp {
         if matches.len() > 1 {
             self.catalog.selected = Some(catalog_content_selector(&content));
             self.catalog.source_filter = CatalogSourceFilter::Workshop;
-            self.catalog.kind_filter = Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
+            self.catalog.kind_filter =
+                Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
             self.catalog.search_query = published_file_id.to_owned();
             self.section = Section::Discover;
             self.status = format!(
@@ -85,7 +91,9 @@ impl StudioApp {
             );
             return;
         }
-        let workspace = content.locations.iter()
+        let workspace = content
+            .locations
+            .iter()
             .find(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
             .map(|location| location.root.clone());
         let identity = ContentIdentity {
@@ -128,7 +136,8 @@ impl StudioApp {
         self.invalidate_workshop_review();
         self.workspace.pending_unregistration = None;
         self.workspace.clear_file_context();
-        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.unregistered_projects =
+            vapor_studio_core::UnregisteredProjectScan::default();
         self.discover();
     }
 
@@ -145,10 +154,12 @@ impl StudioApp {
             .workspace
             .as_ref()
             .map(|association| association.root.clone());
-        if self.catalog.items.iter().any(|content| {
-            content.identity() == identity
-                && !content.is_unambiguous()
-        }) {
+        if self
+            .catalog
+            .items
+            .iter()
+            .any(|content| content.identity() == identity && !content.is_unambiguous())
+        {
             self.status = format!(
                 "Cannot select {}: its local workspace, cache, or installed records disagree. Review the catalog conflicts first.",
                 content_selector(&identity)
@@ -203,8 +214,7 @@ impl StudioApp {
         let name = self.profile.new_name.trim();
         let workspace = (!self.workspace.root.trim().is_empty())
             .then(|| PathBuf::from(self.workspace.root.trim()));
-        let index = match vapor_studio_core::add_profile(&mut self.profile.items, name, workspace)
-        {
+        let index = match vapor_studio_core::add_profile(&mut self.profile.items, name, workspace) {
             Ok(index) => index,
             Err(error) => {
                 self.status = error;
@@ -228,11 +238,13 @@ impl StudioApp {
             &self.profile.name_draft,
         ) {
             Ok(()) => {
-                self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
+                self.profile.name_draft =
+                    self.profile.items[self.profile.active_index].name.clone();
                 self.status = format!("Renamed profile to {}.", self.profile.name_draft);
             }
             Err(error) => {
-                self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
+                self.profile.name_draft =
+                    self.profile.items[self.profile.active_index].name.clone();
                 self.status = error;
             }
         }
@@ -240,7 +252,9 @@ impl StudioApp {
 
     pub(super) fn remove_active_profile(&mut self) {
         if self.operation.running || self.has_unsaved_workspace_edits() {
-            self.status = "Finish or discard the current operation and edits before removing a profile.".to_owned();
+            self.status =
+                "Finish or discard the current operation and edits before removing a profile."
+                    .to_owned();
             return;
         }
         let index = self.profile.active_index;
@@ -264,16 +278,20 @@ impl StudioApp {
             return;
         }
         let source_name = self.profile.items[self.profile.active_index].name.clone();
-        let index =
-            match vapor_studio_core::duplicate_profile(&mut self.profile.items, self.profile.active_index) {
-                Ok(index) => index,
-                Err(error) => {
-                    self.status = error;
-                    return;
-                }
-            };
+        let index = match vapor_studio_core::duplicate_profile(
+            &mut self.profile.items,
+            self.profile.active_index,
+        ) {
+            Ok(index) => index,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
+        };
         self.select_profile(index);
-        self.status = format!("Duplicated {source_name} as {}.", self.profile.items[index].name);
+        self.status = format!(
+            "Duplicated {source_name} as {}.",
+            self.profile.items[index].name
+        );
     }
-
- }
+}

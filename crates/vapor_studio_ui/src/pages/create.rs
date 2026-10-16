@@ -1,10 +1,10 @@
 use super::super::StudioApp;
+use super::super::components::design::{ACCENT, page_header};
 use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_create(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Create content");
-        ui.label("Start from a workspace, choose what you are making, then add only the details that content needs.");
+        page_header(ui, "Author", "Create", "Start a content project from a template, then add its identity and required relationships.");
         egui::CollapsingHeader::new("Start from a complete playable workspace")
             .default_open(self.workspace.root.trim().is_empty())
             .show(ui, |ui| {
@@ -48,6 +48,7 @@ impl StudioApp {
 
         if !self.authoring.create_details_open {
             ui.group(|ui| {
+                ui.label(egui::RichText::new("STEP 1 OF 2 · TEMPLATE").small().strong().color(ACCENT));
                 ui.heading("Choose a content template");
                 ui.label("Templates create one of Vapor's supported content roles. Packs describe compositions; code projects provide runtime behavior.");
                 let templates = [
@@ -70,7 +71,10 @@ impl StudioApp {
                                 ui.set_min_width(175.0);
                                 ui.set_max_width(220.0);
                                 let selected = self.authoring.draft_content_kind == *kind;
-                                if ui.selectable_label(selected, *title).clicked() && !selected {
+                                if ui.add_sized(
+                                    [ui.available_width(), 34.0],
+                                    egui::Button::selectable(selected, egui::RichText::new(*title).strong()),
+                                ).clicked() && !selected {
                                     self.authoring.draft_content_kind = *kind;
                                     self.authoring.draft_dependencies.clear();
                                 }
@@ -109,12 +113,15 @@ impl StudioApp {
             if ui.small_button("← Templates").clicked() {
                 self.authoring.create_details_open = false;
             }
+            ui.label(egui::RichText::new("STEP 2 OF 2 · DETAILS").small().strong().color(ACCENT));
             ui.heading(format!("New {} project", self.authoring.draft_content_kind));
         });
         ui.label("Set identity and required dependencies. Workshop details are optional and can be added later.");
         ui.separator();
         let role_constraints = match self.authoring.draft_content_kind {
-            vapor_core::ContentKind::Packagepack => "Choose exactly one Engine or Enginepack; optionally choose at most one Game or Gamepack.",
+            vapor_core::ContentKind::Packagepack => {
+                "Choose exactly one Engine or Enginepack; optionally choose at most one Game or Gamepack."
+            }
             vapor_core::ContentKind::Game => "Choose exactly one Engine.",
             vapor_core::ContentKind::Enginepack => "Choose exactly one Engine.",
             vapor_core::ContentKind::Gamepack => "Choose exactly one Game.",
@@ -140,11 +147,13 @@ impl StudioApp {
                 "Choose a supported Vapor content role to create a project."
             }
         };
-        let required_role_group =
-            vapor_studio_core::source_required_dependency_choice_group(self.authoring.draft_content_kind);
+        let required_role_group = vapor_studio_core::source_required_dependency_choice_group(
+            self.authoring.draft_content_kind,
+        );
         let required_role_selected = required_role_group.is_none_or(|required_group| {
             self.catalog.sources.iter().any(|content| {
-                self.authoring.draft_dependencies
+                self.authoring
+                    .draft_dependencies
                     .iter()
                     .any(|selected| selected == &super::super::source_content_selector(content))
                     && super::super::source_content_kind(&content.kind).is_some_and(|kind| {
@@ -156,24 +165,32 @@ impl StudioApp {
             })
         });
         ui.small(source_shape);
-        ui.horizontal(|ui| {
-            ui.label("Content ID");
-            ui.text_edit_singleline(&mut self.authoring.draft_content_id);
-        });
-        ui.horizontal(|ui| {
-            ui.label("Version");
-            ui.text_edit_singleline(&mut self.authoring.draft_content_version);
-        });
+        egui::Grid::new("new-content-identity")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Content ID");
+                ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_content_id).desired_width(320.0));
+                ui.end_row();
+                ui.label("Version");
+                ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_content_version).desired_width(180.0));
+                ui.end_row();
+            });
         egui::CollapsingHeader::new("Workshop publication metadata · optional")
             .default_open(false)
             .show(ui, |ui| {
                 ui.label("These fields are authored into the role manifest. Creating content never publishes it.");
-                ui.horizontal(|ui| {
-                    ui.label("Steam AppID");
-                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_app_id);
-                    ui.label("Existing PublishedFileId");
-                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_published_file_id);
-                });
+                egui::Grid::new("new-content-workshop-identity")
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label("Steam AppID");
+                        ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_workshop_app_id).desired_width(180.0));
+                        ui.end_row();
+                        ui.label("PublishedFileId");
+                        ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_workshop_published_file_id).desired_width(320.0));
+                        ui.end_row();
+                    });
                 ui.horizontal(|ui| {
                     ui.label("Visibility");
                     egui::ComboBox::from_id_salt("new-content-workshop-visibility")

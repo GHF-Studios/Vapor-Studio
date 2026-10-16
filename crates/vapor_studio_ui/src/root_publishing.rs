@@ -6,12 +6,20 @@ use vapor_studio_core::OperationKind;
 
 #[derive(Default)]
 pub(super) struct RootPublishingState {
+    pub(super) tab: PublishTab,
     pub(super) account: String,
     pub(super) description: String,
     pub(super) set_live_branch: String,
     pub(super) confirmation: String,
     pub(super) preview: Option<vapor_sdk_core::root::types::RootPublishReport>,
     pub(super) status: String,
+}
+
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
+pub(super) enum PublishTab {
+    #[default]
+    WorkshopContent,
+    VaporApp,
 }
 
 impl StudioApp {

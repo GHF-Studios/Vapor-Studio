@@ -1,24 +1,17 @@
 use super::StudioApp;
+use super::components::design::{StatusTone, status_text};
 use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new(if self.operation.running {
-            "Operation running"
-        } else {
-            "Operations and activity"
-        })
-        .default_open(self.operation.running)
-        .show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
             if let Some(operation) = &self.operation.active_operation {
-                ui.horizontal(|ui| {
-                    if self.operation.running {
-                        ui.spinner();
-                    }
-                    ui.strong(operation_kind_label(&operation.kind));
-                    ui.label(operation_phase_label(&operation.phase));
-                    ui.label(&self.status);
-                });
+                if self.operation.running {
+                    ui.spinner();
+                }
+                ui.strong(operation_kind_label(&operation.kind));
+                ui.weak(operation_phase_label(&operation.phase));
+                ui.label(&self.status);
                 if let Some(progress) = &operation.progress {
                     if let Some(total) = progress.total {
                         let fraction = if total == 0 {
@@ -26,30 +19,57 @@ impl StudioApp {
                         } else {
                             (progress.completed as f32 / total as f32).clamp(0.0, 1.0)
                         };
-                        ui.add(egui::ProgressBar::new(fraction).text(format!(
-                            "{} / {} {}",
-                            progress.completed, total, progress.unit
-                        )));
+                        ui.add(
+                            egui::ProgressBar::new(fraction)
+                                .desired_width(150.0)
+                                .text(format!(
+                                    "{} / {} {}",
+                                    progress.completed, total, progress.unit
+                                )),
+                        );
                     } else {
-                        ui.label(format!("{} {}", progress.completed, progress.unit));
+                        ui.weak(format!("{} {}", progress.completed, progress.unit));
                     }
                 }
-                if let Some(profile_id) = &operation.profile_id {
-                    ui.small(format!("Profile {profile_id}"));
-                }
+            } else if let Some(last) = self.operation.operation_history.front() {
+                let tone = match &last.event.status {
+                    vapor_studio_core::OperationStatus::Succeeded { summary }
+                        if summary == &self.status => StatusTone::Positive,
+                    vapor_studio_core::OperationStatus::Failed { message }
+                        if message == &self.status => StatusTone::Error,
+                    vapor_studio_core::OperationStatus::Cancelled if self.status == "Cancelled" => {
+                        StatusTone::Caution
+                    }
+                    _ => StatusTone::Neutral,
+                };
+                status_text(ui, &self.status, tone);
+                ui.weak(format!(
+                    "Last · {} · {}",
+                    operation_kind_label(&last.event.kind),
+                    super::operations::elapsed_label(last.completed_at_unix),
+                ));
             } else {
-                ui.label(&self.status);
-            }
-            for operation in self.operation.operation_history.iter().take(5) {
-                ui.horizontal(|ui| {
-                    ui.small(operation_kind_label(&operation.event.kind));
-                    ui.small(operation_status_label(&operation.event.status));
-                    ui.weak(super::operations::elapsed_label(
-                        operation.completed_at_unix,
-                    ));
-                });
+                ui.strong("Ready");
+                status_text(ui, &self.status, StatusTone::Neutral);
             }
         });
+        egui::CollapsingHeader::new("Recent activity")
+            .default_open(false)
+            .show(ui, |ui| {
+                if self.operation.operation_history.is_empty() {
+                    ui.weak("No operations have been recorded yet.");
+                } else {
+                    for operation in self.operation.operation_history.iter().take(10) {
+                        ui.horizontal(|ui| {
+                            ui.strong(operation_kind_label(&operation.event.kind));
+                            ui.label(operation_status_label(&operation.event.status));
+                            ui.weak(super::operations::elapsed_label(
+                                operation.completed_at_unix,
+                            ));
+                        });
+                    }
+                }
+            });
     }
 }
 

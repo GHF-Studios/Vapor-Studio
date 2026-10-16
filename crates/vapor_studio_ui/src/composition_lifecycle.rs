@@ -1,11 +1,14 @@
-use super::{StudioApp, content_selector};
 use super::operation_protocol::OperationResult;
+use super::{StudioApp, content_selector};
 use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, InstalledArtifactRecord, OperationKind};
 
 pub(super) enum RepreviewAfterCatalogRefresh {
     ActiveProfile,
-    Source { selector: String, workspace_root: PathBuf },
+    Source {
+        selector: String,
+        workspace_root: PathBuf,
+    },
 }
 
 pub(super) struct ProfileCompositionState {
@@ -118,9 +121,7 @@ impl StudioApp {
                     artifacts: installed_records(composition.artifacts),
                     verified: false,
                 };
-            self.status = format!(
-                "Profile lock differs from the installed content: {detail}"
-            );
+            self.status = format!("Profile lock differs from the installed content: {detail}");
             return;
         }
 
@@ -150,9 +151,8 @@ impl StudioApp {
                     artifacts: installed_records(composition.artifacts),
                     verified: false,
                 };
-            self.status = format!(
-                "{detail} Review the installed graph, then update or explicitly adopt it."
-            );
+            self.status =
+                format!("{detail} Review the installed graph, then update or explicitly adopt it.");
             return;
         }
         self.apply_installed_composition(
@@ -161,10 +161,7 @@ impl StudioApp {
         );
     }
 
-    pub(super) fn apply_installation_check(
-        &mut self,
-        check: vapor_studio_core::InstallationCheck,
-    ) {
+    pub(super) fn apply_installation_check(&mut self, check: vapor_studio_core::InstallationCheck) {
         let checked = check.detail.len();
         let detail = check.detail.join("; ");
         let artifacts = installed_records(check.artifacts);
@@ -180,7 +177,9 @@ impl StudioApp {
                 if saved_graph.is_some_and(|saved| {
                     !vapor_studio_core::resolved_graph_matches(saved, &actual_graph)
                 }) {
-                    let message = "Verified installed content differs from this profile's saved graph.".to_owned();
+                    let message =
+                        "Verified installed content differs from this profile's saved graph."
+                            .to_owned();
                     self.profile.items[self.profile.active_index].installation =
                         vapor_studio_core::InstallationState::OutOfDate {
                             detail: message.clone(),
@@ -212,7 +211,9 @@ impl StudioApp {
     }
 
     pub(super) fn adopt_installed_profile_graph(&mut self) {
-        let state = self.profile.items[self.profile.active_index].installation.clone();
+        let state = self.profile.items[self.profile.active_index]
+            .installation
+            .clone();
         let vapor_studio_core::InstallationState::OutOfDate {
             actual_graph,
             artifacts,
@@ -222,8 +223,7 @@ impl StudioApp {
         else {
             return;
         };
-        let graph_fingerprint =
-            vapor_studio_core::fingerprint_resolved_graph(&actual_graph);
+        let graph_fingerprint = vapor_studio_core::fingerprint_resolved_graph(&actual_graph);
         self.profile.items[self.profile.active_index].resolved_graph = Some(actual_graph);
         self.profile.items[self.profile.active_index].installation =
             vapor_studio_core::InstallationState::Installed {
@@ -234,7 +234,10 @@ impl StudioApp {
     }
 
     pub(super) fn apply_verification_error(&mut self, error: String) {
-        let artifacts = match self.profile.items[self.profile.active_index].installation.clone() {
+        let artifacts = match self.profile.items[self.profile.active_index]
+            .installation
+            .clone()
+        {
             vapor_studio_core::InstallationState::Installed { artifacts, .. }
             | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. }
             | vapor_studio_core::InstallationState::OutOfDate { artifacts, .. } => artifacts,
@@ -330,7 +333,11 @@ impl StudioApp {
         };
         let selector = content_selector(&root_package);
         let workspace = profile.workspace.map(|workspace| workspace.root);
-        self.preview_composition(selector, workspace, "Resolving this profile against workspace, cache, and installed content…");
+        self.preview_composition(
+            selector,
+            workspace,
+            "Resolving this profile against workspace, cache, and installed content…",
+        );
     }
 
     pub(super) fn preview_source_composition(&mut self, selector: String) {
@@ -338,7 +345,11 @@ impl StudioApp {
             return;
         }
         let workspace = Some(PathBuf::from(self.workspace.root.trim()));
-        self.preview_composition(selector, workspace, "Resolving this source composition against workspace, cache, and installed content…");
+        self.preview_composition(
+            selector,
+            workspace,
+            "Resolving this source composition against workspace, cache, and installed content…",
+        );
     }
 
     pub(super) fn preview_composition(
@@ -479,7 +490,10 @@ impl StudioApp {
     }
 
     pub(super) fn launch_default_profile(&mut self) {
-        if self.profile.items[self.profile.active_index].root_package.is_none() {
+        if self.profile.items[self.profile.active_index]
+            .root_package
+            .is_none()
+        {
             let executable = match std::env::current_exe() {
                 Ok(value) => value,
                 Err(error) => {
@@ -534,7 +548,6 @@ impl StudioApp {
         self.status =
             "Installing source changes and launching this profile through Vapor Shell…".to_owned();
     }
-
 }
 
 pub(super) fn installed_records(

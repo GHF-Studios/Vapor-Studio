@@ -1,5 +1,5 @@
-use super::{StudioApp, content_selector, source_content_selector};
 use super::operation_protocol::OperationResult;
+use super::{StudioApp, content_selector, source_content_selector};
 use std::path::PathBuf;
 use vapor_studio_core::OperationKind;
 
@@ -15,7 +15,8 @@ impl StudioApp {
         contents: Vec<vapor_studio_core::SourceContent>,
     ) {
         self.catalog.sources = contents;
-        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.unregistered_projects =
+            vapor_studio_core::UnregisteredProjectScan::default();
         self.workspace.unregistered_scan_completed = false;
         self.status = summary;
     }
@@ -27,7 +28,8 @@ impl StudioApp {
         identity: vapor_studio_core::ContentIdentity,
     ) {
         self.catalog.sources = contents;
-        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.unregistered_projects =
+            vapor_studio_core::UnregisteredProjectScan::default();
         self.workspace.unregistered_scan_completed = false;
         self.workspace.pending_unregistration = None;
         self.invalidate_profiles_for_source_content(&identity);
@@ -65,7 +67,9 @@ impl StudioApp {
         let operation_selector = selector.clone();
         self.spawn(OperationKind::Validate, move |_context| {
             OperationResult::Message(vapor_studio_core::validate_profile_source(
-                &executable, &root, &operation_selector,
+                &executable,
+                &root,
+                &operation_selector,
             ))
         });
         self.status = format!("Validating {selector} through Vapor Shell…");
@@ -159,7 +163,9 @@ impl StudioApp {
         self.spawn(OperationKind::AdoptContentProject, move |_context| {
             OperationResult::AdoptedContentProject(
                 vapor_studio_core::adopt_workspace_content_project(
-                    &executable, &root, &project_path,
+                    &executable,
+                    &root,
+                    &project_path,
                 ),
             )
         });
@@ -201,7 +207,12 @@ impl StudioApp {
             self.status = "Open a workspace before adding it to Vapor sources.".to_owned();
             return;
         }
-        if self.workspace.registered_sources.iter().any(|source| source == &root) {
+        if self
+            .workspace
+            .registered_sources
+            .iter()
+            .any(|source| source == &root)
+        {
             self.status = "This workspace is already registered with Vapor.".to_owned();
             return;
         }

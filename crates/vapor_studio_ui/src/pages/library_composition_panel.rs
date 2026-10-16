@@ -1,5 +1,6 @@
 use super::super::StudioApp;
 use super::super::content_selector;
+use super::super::components::design::empty_state;
 use eframe::egui;
 use vapor_studio_core::InstallationState;
 
@@ -9,13 +10,24 @@ impl StudioApp {
         ui: &mut eframe::egui::Ui,
         profile: &vapor_studio_core::CompositionProfile,
     ) {
-        if let Some(root) = &profile.root_package {
-            ui.label(format!("Root: {}", content_selector(root)));
-        } else {
-            ui.weak("Choose a Packagepack from Discover to create a launchable composition.");
-        }
-
-        if let Some(root) = &profile.root_package {
+        let Some(root) = &profile.root_package else {
+            empty_state(
+                ui,
+                "No composition selected",
+                "Choose a Packagepack to make this profile playable. It remains separate from the source files in your workspace.",
+                |ui| {
+                    if ui.button("Browse available content").clicked() {
+                        self.section = super::super::Section::Discover;
+                    }
+                    if ui.button("Create a Packagepack").clicked() {
+                        self.section = super::super::Section::Create;
+                        self.authoring.draft_content_kind = vapor_core::ContentKind::Packagepack;
+                    }
+                },
+            );
+            return;
+        };
+        {
             let selector = content_selector(root);
             let editable_source = self.catalog.sources.iter().any(|content| {
                 content.id == root.id
@@ -23,10 +35,14 @@ impl StudioApp {
             });
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits() && editable_source,
+                    !self.operation.running
+                        && !self.has_unsaved_workspace_edits()
+                        && editable_source,
                     egui::Button::new("Edit source graph"),
                 )
-                .on_disabled_hover_text("Only a Packagepack authored in the active workspace can be edited here.")
+                .on_disabled_hover_text(
+                    "Only a Packagepack authored in the active workspace can be edited here.",
+                )
                 .clicked()
             {
                 self.authoring.composition_edit_selector = selector.clone();
@@ -47,7 +63,9 @@ impl StudioApp {
             {
                 self.preview_selected_composition();
             }
-            let preview = self.profile_composition.preview()
+            let preview = self
+                .profile_composition
+                .preview()
                 .filter(|preview| preview.selector == selector)
                 .cloned();
             if let Some(preview) = preview {
@@ -109,7 +127,7 @@ impl StudioApp {
                         }
                     });
             });
-        } else if profile.root_package.is_some() {
+        } else {
             ui.weak("Install this composition to resolve and record its exact dependency graph.");
         }
     }

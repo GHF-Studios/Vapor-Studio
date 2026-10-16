@@ -1,17 +1,25 @@
-use super::super::{StudioApp, catalog_matches_filters};
 use super::super::catalog::DiscoverTab;
+use super::super::components::design::{empty_state, page_header, section_header};
+use super::super::{StudioApp, catalog_matches_filters};
 use crate::navigation::CatalogSourceFilter;
 use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_discover(&mut self, ui: &mut egui::Ui) {
-        ui.label("Find something to play, install, or bring into your workspace.");
+        page_header(ui, "Content", "Discover", "Browse content on this device or find packages in Steam Workshop.");
         ui.horizontal(|ui| {
-            self.draw_profile_target_selector(ui);
-        });
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.catalog.discover_tab, DiscoverTab::Local, "On this device");
-            ui.selectable_value(&mut self.catalog.discover_tab, DiscoverTab::Workshop, "Steam Workshop");
+            ui.add(egui::Button::selectable(
+                self.catalog.discover_tab == DiscoverTab::Local,
+                "On this device",
+            ))
+            .clicked()
+            .then(|| self.catalog.discover_tab = DiscoverTab::Local);
+            ui.add(egui::Button::selectable(
+                self.catalog.discover_tab == DiscoverTab::Workshop,
+                "Steam Workshop",
+            ))
+            .clicked()
+            .then(|| self.catalog.discover_tab = DiscoverTab::Workshop);
         });
         ui.separator();
         if self.catalog.discover_tab == DiscoverTab::Workshop {
@@ -48,23 +56,32 @@ impl StudioApp {
                 self.discover();
             }
         });
-        let matching_catalog_items = self.catalog.items
+        let matching_catalog_items = self
+            .catalog
+            .items
             .iter()
-            .filter(|content| catalog_matches_filters(
-                content,
-                self.catalog.source_filter,
-                self.catalog.kind_filter.as_deref(),
-                &self.catalog.search_query,
-            ))
+            .filter(|content| {
+                catalog_matches_filters(
+                    content,
+                    self.catalog.source_filter,
+                    self.catalog.kind_filter.as_deref(),
+                    &self.catalog.search_query,
+                )
+            })
             .count();
-        let matching_workspace_projects = self.workspace.unregistered_projects.candidates
+        let matching_workspace_projects = self
+            .workspace
+            .unregistered_projects
+            .candidates
             .iter()
-            .filter(|candidate| super::super::catalog::workspace_candidate_matches_filters(
-                candidate,
-                self.catalog.source_filter,
-                self.catalog.kind_filter.as_deref(),
-                &self.catalog.search_query,
-            ))
+            .filter(|candidate| {
+                super::super::catalog::workspace_candidate_matches_filters(
+                    candidate,
+                    self.catalog.source_filter,
+                    self.catalog.kind_filter.as_deref(),
+                    &self.catalog.search_query,
+                )
+            })
             .count();
         ui.horizontal(|ui| {
             ui.weak(format!(
@@ -118,8 +135,55 @@ impl StudioApp {
             });
             return;
         }
-        self.draw_workspace_candidates(ui);
-        self.draw_catalog_list(ui);
-        self.draw_content_detail(ui);
+        let selected_is_visible = self.catalog.selected.as_ref().is_some_and(|identity| {
+            self.catalog.items.iter().any(|content| {
+                super::super::catalog_content_selector(content) == *identity
+                    && catalog_matches_filters(
+                        content,
+                        self.catalog.source_filter,
+                        self.catalog.kind_filter.as_deref(),
+                        &self.catalog.search_query,
+                    )
+            })
+        });
+        if ui.available_width() < 820.0 {
+            section_header(ui, "Available content", "Local sources and authored projects in the active workspace.");
+            self.draw_workspace_candidates(ui);
+            self.draw_catalog_list(ui);
+            ui.separator();
+            section_header(ui, "Details", "Select a content version to review its source, dependencies, and available actions.");
+            if selected_is_visible {
+                self.draw_content_detail(ui);
+            } else {
+                empty_state(
+                    ui,
+                    "Choose content to inspect",
+                    "The detail panel will show where a version came from and whether it can be selected, installed, or published.",
+                    |_| {},
+                );
+            }
+        } else {
+            ui.columns(2, |columns| {
+                columns[0].set_min_width(360.0);
+                section_header(&mut columns[0], "Available content", "Local sources and authored projects in the active workspace.");
+                egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
+                    self.draw_workspace_candidates(ui);
+                    self.draw_catalog_list(ui);
+                });
+
+                columns[1].set_min_width(360.0);
+                section_header(&mut columns[1], "Details", "Select a content version to review its source, dependencies, and available actions.");
+                if selected_is_visible {
+                    self.draw_content_detail(&mut columns[1]);
+                } else {
+                    empty_state(
+                        &mut columns[1],
+                        "Choose content to inspect",
+                        "The detail panel will show where a version came from and whether it can be selected, installed, or published.",
+                        |_| {},
+                    );
+                }
+            });
+        }
     }
 }

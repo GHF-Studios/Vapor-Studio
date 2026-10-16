@@ -5,6 +5,17 @@ use vapor_studio_core::{
     ContentIdentity, InstallationState, ResolvedCompositionGraph, ResolvedNodeIdentity,
 };
 
+#[derive(Clone, Copy)]
+enum ProfilePrimaryAction {
+    PlayInstalled,
+    Repair,
+    Verify,
+    Update,
+    ReviewPlan,
+    BuildAndPlay,
+    Install,
+}
+
 fn identity_label(identity: &ContentIdentity) -> String {
     identity.version.as_deref().map_or_else(
         || identity.id.clone(),
@@ -12,9 +23,7 @@ fn identity_label(identity: &ContentIdentity) -> String {
     )
 }
 
-fn canonical_dependencies(
-    node: &ResolvedNodeIdentity,
-) -> Vec<(String, ContentIdentity)> {
+fn canonical_dependencies(node: &ResolvedNodeIdentity) -> Vec<(String, ContentIdentity)> {
     let mut dependencies = node
         .dependencies
         .iter()
@@ -46,11 +55,13 @@ fn graph_difference_lines(
     if saved.effective_game != installed.effective_game {
         differences.push(format!(
             "Game changed: {} → {}",
-            saved.effective_game
+            saved
+                .effective_game
                 .as_ref()
                 .map(identity_label)
                 .unwrap_or_else(|| "none".to_owned()),
-            installed.effective_game
+            installed
+                .effective_game
                 .as_ref()
                 .map(identity_label)
                 .unwrap_or_else(|| "none".to_owned()),
@@ -104,7 +115,8 @@ fn graph_difference_lines(
         }
     }
     if differences.is_empty() {
-        differences.push("No graph differences were found; verify the installed files again.".to_owned());
+        differences
+            .push("No graph differences were found; verify the installed files again.".to_owned());
     }
     differences
 }
@@ -115,46 +127,88 @@ impl StudioApp {
         ui: &mut eframe::egui::Ui,
         profile: &vapor_studio_core::CompositionProfile,
     ) {
+        let has_root = profile.root_package.is_some();
+        let has_source = profile.workspace.is_some();
+        let root_plan_node = profile.root_package.as_ref().and_then(|root| {
+            let selector = content_selector(root);
+            self.profile_composition.preview()
+                .filter(|preview| preview.selector == selector && preview.ready())
+                .and_then(|preview| preview.nodes.last())
+        });
+        let preview_ready = root_plan_node.is_some();
+        let root_installed = root_plan_node.is_some_and(|node| node.already_installed);
+        let root_has_refresh_source = root_plan_node.is_some_and(|node| {
+            node.source != vapor_studio_core::CompositionPreviewSource::Installed
+        });
+        let root_is_workspace_source = root_plan_node.is_some_and(|node| {
+            node.source == vapor_studio_core::CompositionPreviewSource::Workspace
+        });
+        let installed = matches!(&profile.installation, InstallationState::Installed { .. });
+        let needs_repair = matches!(&profile.installation,
+            InstallationState::NeedsRepair { .. } | InstallationState::Partial { .. });
+        let out_of_date = matches!(&profile.installation, InstallationState::OutOfDate { .. });
+        let primary_action = if !has_root {
+            None
+        } else if installed && !needs_repair && !out_of_date {
+            Some(("Play installed", ProfilePrimaryAction::PlayInstalled))
+        } else if needs_repair {
+            Some((
+                if preview_ready && root_has_refresh_source {
+                    "Repair composition"
+                } else {
+                    "Verify installation"
+                },
+                if preview_ready && root_has_refresh_source {
+                    ProfilePrimaryAction::Repair
+                } else {
+                    ProfilePrimaryAction::Verify
+                },
+            ))
+        } else if out_of_date {
+            Some((
+                if preview_ready && root_has_refresh_source {
+                    "Update composition"
+                } else {
+                    "Review update plan"
+                },
+                if preview_ready && root_has_refresh_source {
+                    ProfilePrimaryAction::Update
+                } else {
+                    ProfilePrimaryAction::ReviewPlan
+                },
+            ))
+        } else if root_is_workspace_source && has_source {
+            Some(("Build and play source", ProfilePrimaryAction::BuildAndPlay))
+        } else if preview_ready && !root_installed && root_has_refresh_source {
+            Some(("Install composition", ProfilePrimaryAction::Install))
+        } else {
+            Some(("Preview dependency plan", ProfilePrimaryAction::ReviewPlan))
+        };
+        if let Some((label, action)) = primary_action {
+            let can_start = !self.operation.running
+                && (matches!(action, ProfilePrimaryAction::PlayInstalled)
+                    || !self.has_unsaved_workspace_edits());
+            let mut clicked = false;
+            ui.add_enabled_ui(can_start, |ui| {
+                clicked = super::super::components::design::primary_button(ui, label).clicked();
+            });
+            if clicked {
+                match action {
+                    ProfilePrimaryAction::PlayInstalled => self.run_installed_selected(),
+                    ProfilePrimaryAction::Repair => self.repair_selected_installation(),
+                    ProfilePrimaryAction::Verify => self.verify_selected_installation(),
+                    ProfilePrimaryAction::Update => self.update_selected(),
+                    ProfilePrimaryAction::ReviewPlan => self.preview_selected_composition(),
+                    ProfilePrimaryAction::BuildAndPlay => self.run_selected(),
+                    ProfilePrimaryAction::Install => self.install_selected(),
+                }
+            }
+        }
         ui.horizontal_wrapped(|ui| {
-            let has_root = profile.root_package.is_some();
-            let has_source = profile.workspace.is_some();
-            let root_plan_node = profile.root_package.as_ref().and_then(|root| {
-                let selector = content_selector(root);
-                self.profile_composition.preview()
-                    .filter(|preview| preview.selector == selector && preview.ready())
-                    .and_then(|preview| preview.nodes.last())
-            });
-            let preview_ready = root_plan_node.is_some();
-            let root_installed = root_plan_node.is_some_and(|node| node.already_installed);
-            let root_has_refresh_source = root_plan_node.is_some_and(|node| {
-                node.source != vapor_studio_core::CompositionPreviewSource::Installed
-            });
-            let root_is_workspace_source = root_plan_node.is_some_and(|node| {
-                node.source == vapor_studio_core::CompositionPreviewSource::Workspace
-            });
-            let installed = matches!(&profile.installation, InstallationState::Installed { .. });
-            let needs_repair = matches!(&profile.installation,
-                InstallationState::NeedsRepair { .. } | InstallationState::Partial { .. });
-            let out_of_date = matches!(&profile.installation, InstallationState::OutOfDate { .. });
             if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && has_source, egui::Button::new("Validate source"))
                 .on_disabled_hover_text("Source validation needs this profile to be associated with a workspace. Cached or seeded compositions validate during install.")
                 .clicked() { self.validate_selected_source(); }
-            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && preview_ready && !installed && !root_installed && root_has_refresh_source, egui::Button::new("Install composition"))
-                .on_disabled_hover_text("Preview a ready plan with an installable workspace or cache root. An already installed root needs verification, playback, or an update.")
-                .clicked() { self.install_selected(); }
-            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && (installed || out_of_date) && preview_ready && root_has_refresh_source, egui::Button::new("Update composition"))
-                .on_disabled_hover_text("Update uses the ready plan's current workspace or cached sources.")
-                .clicked() { self.update_selected(); }
-            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && has_source && root_is_workspace_source, egui::Button::new("Build and play source"))
-                .on_disabled_hover_text("The selected Packagepack must resolve from this workspace before source build/play is available.")
-                .clicked() { self.run_selected(); }
-            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed) && !needs_repair && !out_of_date, egui::Button::new("Play installed"))
-                .on_disabled_hover_text("Verify or repair this composition before playing it.")
-                .clicked() { self.run_installed_selected(); }
             if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify graph")).clicked() { self.verify_selected_installation(); }
-            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && preview_ready && root_has_refresh_source && needs_repair, egui::Button::new("Repair"))
-                .on_disabled_hover_text("Repair needs a ready workspace or cached source to replace damaged installed files.")
-                .clicked() { self.repair_selected_installation(); }
         });
 
         ui.label("Installation");
@@ -190,7 +244,10 @@ impl StudioApp {
                 artifacts,
                 verified,
             } => {
-                ui.colored_label(egui::Color32::YELLOW, "Installed content differs from this profile's saved graph");
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    "Installed content differs from this profile's saved graph",
+                );
                 ui.label(detail);
                 if !verified {
                     ui.label("Verify the installed files before adopting this graph.");
@@ -273,8 +330,7 @@ impl StudioApp {
 mod graph_difference_tests {
     use super::graph_difference_lines;
     use vapor_studio_core::{
-        ContentIdentity, ResolvedCompositionGraph, ResolvedDependencyIdentity,
-        ResolvedNodeIdentity,
+        ContentIdentity, ResolvedCompositionGraph, ResolvedDependencyIdentity, ResolvedNodeIdentity,
     };
 
     fn identity(id: &str, version: &str) -> ContentIdentity {
@@ -344,8 +400,20 @@ mod graph_difference_tests {
         installed.nodes[2].content = identity("org.other-engine", "2.0.0");
         installed.effective_engine = identity("org.other-engine", "2.0.0");
         let differences = graph_difference_lines(&saved, &installed);
-        assert!(differences.iter().any(|line| line.contains("payload, source, dependencies")));
-        assert!(differences.iter().any(|line| line.contains("Missing installed node")));
-        assert!(differences.iter().any(|line| line.contains("Added installed node")));
+        assert!(
+            differences
+                .iter()
+                .any(|line| line.contains("payload, source, dependencies"))
+        );
+        assert!(
+            differences
+                .iter()
+                .any(|line| line.contains("Missing installed node"))
+        );
+        assert!(
+            differences
+                .iter()
+                .any(|line| line.contains("Added installed node"))
+        );
     }
 }

@@ -1,13 +1,13 @@
 use super::super::StudioApp;
+use super::super::components::design::page_header;
 use eframe::egui;
 use std::path::PathBuf;
 use vapor_studio_core::SourceCompositionLink;
 
 impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Compose content graph");
-        ui.label("Edit the dependency graph of a locally authored content project.");
-        ui.weak("Vapor Shell owns validation and manifest writes. Studio shows the current source snapshot and the exact graph you are changing.");
+        page_header(ui, "Author", "Compose", "Build a content package by choosing its compatible projects and versions.");
+        ui.weak("Saving validates the graph and writes the source manifest through Vapor.");
 
         let source_projects = self
             .catalog

@@ -40,8 +40,8 @@ impl StudioApp {
         } else {
             ui.heading(format!("Content projects · {}", self.catalog.sources.len()));
             ui.label("Registered authored projects in this workspace. Select a role to validate, edit its dependencies, or manage its Workshop intent.");
-                for content in self.catalog.sources.clone() {
-                    ui.group(|ui| {
+            for content in self.catalog.sources.clone() {
+                ui.group(|ui| {
                         ui.horizontal(|ui| {
                             ui.strong(&content.id);
                             ui.weak(&content.kind);
@@ -102,7 +102,7 @@ impl StudioApp {
                         } else {
                             ui.small("Workshop publication: not configured");
                         }
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             let relative_manifest = content
                                 .manifest
                                 .strip_prefix(Path::new(self.workspace.root.trim()))
@@ -186,7 +186,7 @@ impl StudioApp {
                             }
                         });
                     });
-                }
+            }
         }
         if let Some(project) = self.workspace.pending_unregistration.clone() {
             ui.group(|ui| {
@@ -215,7 +215,10 @@ impl StudioApp {
         if !self.workspace.root.trim().is_empty() {
             let has_candidates = !self.workspace.unregistered_projects.candidates.is_empty();
             if has_candidates {
-                ui.heading(format!("Ready to adopt · {}", self.workspace.unregistered_projects.candidates.len()));
+                ui.heading(format!(
+                    "Ready to adopt · {}",
+                    self.workspace.unregistered_projects.candidates.len()
+                ));
                 ui.weak("Adoption adds a valid project to Vapor discovery. It does not move files, publish anything, or change Cargo membership.");
             }
             for candidate in self.workspace.unregistered_projects.candidates.clone() {
@@ -224,11 +227,22 @@ impl StudioApp {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.strong(&candidate.id);
-                            ui.small(format!("{} · {}", candidate.kind, candidate.path.strip_prefix(std::path::Path::new(self.workspace.root.trim())).unwrap_or(&candidate.path).display()));
+                            ui.small(format!(
+                                "{} · {}",
+                                candidate.kind,
+                                candidate
+                                    .path
+                                    .strip_prefix(std::path::Path::new(self.workspace.root.trim()))
+                                    .unwrap_or(&candidate.path)
+                                    .display()
+                            ));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
-                                .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Adopt project"))
+                                .add_enabled(
+                                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                    egui::Button::new("Adopt project"),
+                                )
                                 .clicked()
                             {
                                 self.adopt_content_project(candidate.path.clone());
@@ -240,10 +254,19 @@ impl StudioApp {
             if self.workspace.unregistered_scan_completed && !has_candidates {
                 ui.weak("No unregistered content manifests were found.");
             }
-            if !self.workspace.unregistered_scan_completed && !has_candidates && !self.catalog.sources.is_empty() {
+            if !self.workspace.unregistered_scan_completed
+                && !has_candidates
+                && !self.catalog.sources.is_empty()
+            {
                 ui.horizontal(|ui| {
                     ui.weak("A project scan has not completed yet.");
-                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Find projects")).clicked() {
+                    if ui
+                        .add_enabled(
+                            !self.operation.running && !self.has_unsaved_workspace_edits(),
+                            egui::Button::new("Find projects"),
+                        )
+                        .clicked()
+                    {
                         self.scan_unregistered_content_projects();
                     }
                 });

@@ -1,13 +1,14 @@
 use super::{Section, StudioApp};
+use super::components::design::{ACCENT, MUTED_TEXT};
 use eframe::egui;
 use vapor_studio_core::{CURRENT_SCHEMA_VERSION, ProfileDocument};
 
 impl StudioApp {
     pub(super) fn draw_profile_target_selector(&mut self, ui: &mut egui::Ui) {
-        ui.label("Play profile");
         let active_profile = self.profile.active_index;
         let mut requested_profile = None;
         egui::ComboBox::from_id_salt("active-profile")
+            .width(190.0)
             .selected_text(&self.profile.items[active_profile].name)
             .show_ui(ui, |ui| {
                 for (index, profile) in self.profile.items.iter().enumerate() {
@@ -23,10 +24,11 @@ impl StudioApp {
     }
 
     fn select_navigation_section(&mut self, ui: &mut egui::Ui, section: Section) {
-        if ui
-            .selectable_label(self.section == section, section.label())
-            .clicked()
-        {
+        let response = ui.add_sized(
+            [ui.available_width(), 32.0],
+            egui::Button::selectable(self.section == section, section.label()),
+        );
+        if response.clicked() {
             self.section = section;
             if section == Section::Workspace
                 && self.workspace.editor.files.is_empty()
@@ -38,62 +40,97 @@ impl StudioApp {
     }
 
     fn draw_navigation(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Vapor");
-        ui.weak("STUDIO");
-        ui.add_space(18.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("VAPOR")
+                    .size(21.0)
+                    .strong()
+                    .color(ACCENT),
+            );
+            ui.label(egui::RichText::new("STUDIO").small().strong());
+        });
+        ui.add_space(14.0);
         self.select_navigation_section(ui, Section::Home);
-        ui.add_space(10.0);
-        ui.small("PLAY");
+        ui.add_space(12.0);
+        ui.label(egui::RichText::new("PLAY").small().strong().color(MUTED_TEXT));
         self.select_navigation_section(ui, Section::Library);
         ui.add_space(8.0);
-        ui.small("CONTENT");
+        ui.label(egui::RichText::new("EXPLORE").small().strong().color(MUTED_TEXT));
         self.select_navigation_section(ui, Section::Discover);
         ui.add_space(8.0);
-        ui.small("AUTHOR");
+        ui.label(egui::RichText::new("CREATE").small().strong().color(MUTED_TEXT));
         self.select_navigation_section(ui, Section::Create);
         self.select_navigation_section(ui, Section::Workspace);
         self.select_navigation_section(ui, Section::Compose);
         ui.add_space(8.0);
-        ui.small("SHARE");
+        ui.label(egui::RichText::new("SHARE").small().strong().color(MUTED_TEXT));
         self.select_navigation_section(ui, Section::Publish);
-        ui.add_space(12.0);
-        ui.separator();
-        if self.workspace.root.trim().is_empty() {
-            ui.weak("No workspace open");
-        } else {
-            ui.small("OPEN WORKSPACE");
-            ui.label(
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            ui.small("Vapor Studio");
+            self.select_navigation_section(ui, Section::Diagnostics);
+            ui.label(egui::RichText::new("TOOLS").small().strong().color(MUTED_TEXT));
+            ui.separator();
+            let workspace_name = if self.workspace.root.trim().is_empty() {
+                "No workspace open".to_owned()
+            } else {
                 std::path::Path::new(&self.workspace.root)
                     .file_name()
                     .and_then(|name| name.to_str())
-                    .unwrap_or(&self.workspace.root),
-            );
-            if self.has_unsaved_workspace_edits() {
-                ui.colored_label(egui::Color32::YELLOW, "Unsaved changes");
-            }
-        }
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            if ui
-                .selectable_label(self.section == Section::Diagnostics, "Diagnostics")
-                .clicked()
-            {
-                self.section = Section::Diagnostics;
-            }
-            ui.separator();
-            ui.small("Vapor Studio");
+                    .unwrap_or(&self.workspace.root)
+                    .to_owned()
+            };
+            let style = ui.style().clone();
+            egui::Frame::group(&style).show(ui, |ui| {
+                ui.label(egui::RichText::new("CURRENT WORKSPACE").small().strong().color(MUTED_TEXT));
+                ui.label(egui::RichText::new(workspace_name).strong());
+                if !self.workspace.root.trim().is_empty() {
+                    ui.small(&self.workspace.root);
+                }
+                if self.has_unsaved_workspace_edits() {
+                    ui.colored_label(egui::Color32::from_rgb(242, 193, 91), "Unsaved edits");
+                } else if !self.workspace.root.trim().is_empty() {
+                    ui.weak("Workspace ready");
+                }
+                if ui.button(if self.workspace.root.trim().is_empty() { "Open workspace" } else { "Manage workspace" }).clicked() {
+                    self.section = Section::Workspace;
+                }
+            });
         });
     }
 
     fn draw_header(&mut self, ui: &mut egui::Ui) {
+        let show_workspace = matches!(
+            self.section,
+            Section::Discover | Section::Create | Section::Workspace | Section::Compose
+        );
+        let show_profile_picker = matches!(self.section, Section::Home | Section::Discover);
+        let show_profile_create = matches!(self.section, Section::Home | Section::Library);
         ui.horizontal(|ui| {
-            ui.heading(self.section.label());
-            if self.profile.recovery.is_some() {
-                ui.colored_label(egui::Color32::YELLOW, "Profile recovery needed");
-            }
-            let play_context = matches!(self.section, Section::Home | Section::Library);
-            if play_context {
+            ui.label(egui::RichText::new("VAPOR STUDIO").small().strong().color(MUTED_TEXT));
+            if show_workspace {
                 ui.separator();
+                ui.label(egui::RichText::new("WORKSPACE").small().strong().color(MUTED_TEXT));
+                let workspace_label = if self.workspace.root.trim().is_empty() {
+                    "Choose workspace"
+                } else {
+                    std::path::Path::new(&self.workspace.root)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(&self.workspace.root)
+                };
+                if ui.button(workspace_label).on_hover_text(&self.workspace.root).clicked() {
+                    self.section = Section::Workspace;
+                }
+            }
+            if show_profile_picker {
+                if self.profile.recovery.is_some() {
+                    ui.colored_label(egui::Color32::from_rgb(242, 193, 91), "Profile recovery needed");
+                }
+                ui.separator();
+                ui.label(egui::RichText::new("PROFILE").small().strong().color(MUTED_TEXT));
                 self.draw_profile_target_selector(ui);
+            }
+            if show_profile_create {
                 if ui
                     .add_enabled(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),

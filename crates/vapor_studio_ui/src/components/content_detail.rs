@@ -88,7 +88,8 @@ impl StudioApp {
                     }
                 }
                 let preview = self
-                    .workshop.preview
+                    .workshop
+                    .preview
                     .as_ref()
                     .filter(|preview| {
                         is_authored_here
@@ -104,12 +105,15 @@ impl StudioApp {
                             preview.id, preview.files, preview.bytes, preview.target
                         ));
                         if ui.button("Review in Publish").clicked() {
+                            self.root_publishing.tab = super::super::root_publishing::PublishTab::WorkshopContent;
                             self.section = Section::Publish;
                         }
                     });
                 }
                 if content.kind == vapor_core::ContentKind::Packagepack.as_str() {
-                    let profile_root = self.profile.items[self.profile.active_index].root_package.as_ref();
+                    let profile_root = self.profile.items[self.profile.active_index]
+                        .root_package
+                        .as_ref();
                     if profile_root.is_some_and(|root| {
                         root.id == content.id && root.version == content.version
                     }) {

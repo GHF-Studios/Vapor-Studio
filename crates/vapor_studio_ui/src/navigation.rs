@@ -34,7 +34,7 @@ impl CatalogSourceFilter {
             Self::Workspace => "Workspace source",
             Self::Cache => "Vapor cache",
             Self::Installed => "Installed",
-            Self::Workshop => "Workshop cache",
+            Self::Workshop => "Imported from Workshop",
         }
     }
 }
@@ -44,7 +44,7 @@ impl Section {
         match self {
             Self::Home => "Home",
             Self::Discover => "Discover",
-            Self::Library => "Play",
+            Self::Library => "Profiles",
             Self::Compose => "Compose",
             Self::Create => "Create",
             Self::Workspace => "Workspace",
