@@ -167,10 +167,10 @@ impl StudioApp {
                         && required_role_selected,
                     egui::Button::new("Create content project"),
                 )
-                .on_disabled_hover_text(if !required_role_selected {
-                    "Select the required Engine, Enginepack, Game, or Gamepack role first."
-                } else if self.workspace_root.trim().is_empty() {
+                .on_disabled_hover_text(if self.workspace_root.trim().is_empty() {
                     "Open a Vapor Workspace before creating content."
+                } else if !required_role_selected {
+                    "Select the required Engine, Enginepack, Game, or Gamepack role first."
                 } else {
                     "Save or reload the open file before creating content; Studio opens the new manifest afterward."
                 })
