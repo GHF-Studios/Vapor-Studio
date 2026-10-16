@@ -192,7 +192,7 @@ impl StudioApp {
         self.composition_preview = None;
         let root = self
             .profiles
-            .get(self.active_profile)
+            .get(self.profile.active_index)
             .and_then(|profile| profile.workspace.as_ref())
             .map(|workspace| workspace.root.clone());
         let executable = match std::env::current_exe() {
@@ -217,7 +217,7 @@ impl StudioApp {
             id: OperationId::fresh(),
             profile_id: self
                 .profiles
-                .get(self.active_profile)
+                .get(self.profile.active_index)
                 .map(|profile| profile.id.clone()),
             kind,
         };

@@ -105,14 +105,14 @@ impl StudioApp {
 
     pub(super) fn invalidate_profiles_for_source_content(&mut self, identity: &ContentIdentity) {
         self.invalidate_workshop_review();
-        for (index, profile) in self.profiles.iter_mut().enumerate() {
+        for (index, profile) in self.profile.items.iter_mut().enumerate() {
             let affected = profile.root_package.as_ref().is_some_and(|root| root == identity)
                 || profile.resolved_graph.as_ref()
                     .is_some_and(|graph| graph.nodes.iter().any(|node| &node.content == identity));
             if affected {
                 profile.resolved_graph = None;
                 profile.installation = vapor_studio_core::InstallationState::NotInstalled;
-                self.repreview_after_catalog_refresh |= index == self.active_profile;
+                self.repreview_after_catalog_refresh |= index == self.profile.active_index;
             }
         }
     }

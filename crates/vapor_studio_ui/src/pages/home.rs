@@ -19,8 +19,8 @@ impl StudioApp {
             if ui.button("Open workspace").clicked() { self.section = Section::Workspace; }
         });
         ui.separator();
-        ui.heading(&self.profiles[self.active_profile].name);
-        if let Some(root) = self.profiles[self.active_profile].root_package.as_ref() {
+        ui.heading(&self.profile.items[self.profile.active_index].name);
+        if let Some(root) = self.profile.items[self.profile.active_index].root_package.as_ref() {
             let content_id = root
                 .version
                 .as_deref()
@@ -28,7 +28,7 @@ impl StudioApp {
                 .unwrap_or_else(|| root.id.clone());
             ui.label(format!("Selected root: {content_id}"));
             let installed = matches!(
-                &self.profiles[self.active_profile].installation,
+                &self.profile.items[self.profile.active_index].installation,
                 vapor_studio_core::InstallationState::Installed { .. },
             );
             let source_ready = !self.workspace.editor_dirty

@@ -28,24 +28,18 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc::Receiver};
 use operations::OperationResult;
+use profiles::ProfileState;
 use workshop::WorkshopState;
 use workspace_ops::WorkspaceState;
 use vapor_core::{ContentKind, OperationEvent as CoreOperationEvent};
 use vapor_studio_core::{
-    CompositionProfile, ContentIdentity, OperationEvent, OperationId, OperationKind,
-    decode_profiles,
+    ContentIdentity, OperationEvent, OperationId, OperationKind, decode_profiles,
 };
 
 pub struct StudioApp {
     section: Section,
     workspace: WorkspaceState,
-    profiles: Vec<CompositionProfile>,
-    profile_recovery: Option<String>,
-    profile_recovery_backup: Option<String>,
-    active_profile: usize,
-    profile_name_draft: String,
-    confirm_profile_removal: bool,
-    new_profile_name: String,
+    profile: ProfileState,
     search_query: String,
     draft_content_id: String,
     draft_content_version: String,
@@ -154,19 +148,15 @@ impl StudioApp {
                 Section::Home
             },
             workspace: WorkspaceState::new(workspace_root, workspace_root_draft, root),
-            profiles,
-            profile_recovery: profile_recovery
-                .as_ref()
-                .map(|recovery| recovery.message.clone()),
-            profile_recovery_backup: if profile_recovery.is_some() {
-                saved_profiles
-            } else {
-                None
-            },
-            active_profile,
-            profile_name_draft,
-            confirm_profile_removal: false,
-            new_profile_name: String::new(),
+            profile: ProfileState::new(
+                profiles,
+                active_profile,
+                profile_name_draft,
+                profile_recovery
+                    .as_ref()
+                    .map(|recovery| recovery.message.clone()),
+                if profile_recovery.is_some() { saved_profiles } else { None },
+            ),
             search_query: String::new(),
             contents: Vec::new(),
             catalog: Vec::new(),

@@ -67,7 +67,7 @@ impl StudioApp {
                     Ok(catalog) => {
                         let count = catalog.len();
                         self.catalog = catalog;
-                        self.status = if self.profiles[self.active_profile].workspace.is_some()
+                        self.status = if self.profile.items[self.profile.active_index].workspace.is_some()
                         {
                             source_error.map(|error| format!("Found {count} local items, but workspace sources could not load: {error}"))
                                 .unwrap_or_else(|| format!("Discovered {count} local content identities across workspace, cache, and installation."))
@@ -119,14 +119,14 @@ impl StudioApp {
             | OperationResult::UnregisteredContentProject(Err(error))
             | OperationResult::AdoptedContentProject(Err(error)) => self.status = error,
             OperationResult::Verify(Err(error)) => {
-                let artifacts = match self.profiles[self.active_profile].installation.clone() {
+                let artifacts = match self.profile.items[self.profile.active_index].installation.clone() {
                     vapor_studio_core::InstallationState::Installed { artifacts, .. }
                     | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. } => {
                         artifacts
                     }
                     _ => Vec::new(),
                 };
-                self.profiles[self.active_profile].installation =
+                self.profile.items[self.profile.active_index].installation =
                     vapor_studio_core::InstallationState::NeedsRepair {
                         detail: error.clone(),
                         artifacts,
@@ -137,7 +137,7 @@ impl StudioApp {
             | OperationResult::Update(Err(error))
             | OperationResult::RunProfile(Err(error))
             | OperationResult::Repair(Err(error)) => {
-                self.profiles[self.active_profile].installation =
+                self.profile.items[self.profile.active_index].installation =
                     vapor_studio_core::InstallationState::Partial {
                         detail: error.clone(),
                     };
@@ -376,8 +376,8 @@ impl StudioApp {
                 self.composition_preview = None;
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                self.profiles[self.active_profile].installation =
+                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
+                self.profile.items[self.profile.active_index].installation =
                     vapor_studio_core::InstallationState::Installed {
                         artifacts: installed_records(composition.artifacts),
                         graph_fingerprint,
@@ -390,8 +390,8 @@ impl StudioApp {
                 self.composition_preview = None;
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                self.profiles[self.active_profile].installation =
+                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
+                self.profile.items[self.profile.active_index].installation =
                     vapor_studio_core::InstallationState::Installed {
                         artifacts: installed_records(composition.artifacts),
                         graph_fingerprint,
@@ -402,8 +402,8 @@ impl StudioApp {
                 self.composition_preview = None;
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                self.profiles[self.active_profile].installation =
+                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
+                self.profile.items[self.profile.active_index].installation =
                     vapor_studio_core::InstallationState::Installed {
                         artifacts: installed_records(composition.artifacts),
                         graph_fingerprint,
@@ -414,8 +414,8 @@ impl StudioApp {
                 self.composition_preview = None;
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-                self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                self.profiles[self.active_profile].installation =
+                self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
+                self.profile.items[self.profile.active_index].installation =
                     vapor_studio_core::InstallationState::Installed {
                         artifacts: installed_records(composition.artifacts),
                         graph_fingerprint,
@@ -429,13 +429,13 @@ impl StudioApp {
                     .as_ref()
                     .and_then(vapor_studio_core::fingerprint_resolved_graph);
                 if let Some(graph) = check.graph {
-                    self.profiles[self.active_profile].resolved_graph = Some(graph);
+                    self.profile.items[self.profile.active_index].resolved_graph = Some(graph);
                 }
                 let checked = check.detail.len();
                 let detail = check.detail.join("; ");
                 let artifacts = installed_records(check.artifacts);
                 if check.ok {
-                    self.profiles[self.active_profile].installation =
+                    self.profile.items[self.profile.active_index].installation =
                         vapor_studio_core::InstallationState::Installed {
                             artifacts,
                             graph_fingerprint,
@@ -444,7 +444,7 @@ impl StudioApp {
                         "Installed composition verified. {checked} graph nodes checked."
                     );
                 } else {
-                    self.profiles[self.active_profile].installation =
+                    self.profile.items[self.profile.active_index].installation =
                         vapor_studio_core::InstallationState::NeedsRepair {
                             detail: detail.clone(),
                             artifacts,

@@ -3,6 +3,37 @@ use crate::navigation::{CatalogSourceFilter, Section};
 use std::path::PathBuf;
 use vapor_studio_core::ContentIdentity;
 
+
+pub(super) struct ProfileState {
+    pub(super) items: Vec<vapor_studio_core::CompositionProfile>,
+    pub(super) active_index: usize,
+    pub(super) recovery: Option<String>,
+    pub(super) recovery_backup: Option<String>,
+    pub(super) name_draft: String,
+    pub(super) confirm_removal: bool,
+    pub(super) new_name: String,
+}
+
+impl ProfileState {
+    pub(super) fn new(
+        items: Vec<vapor_studio_core::CompositionProfile>,
+        active_index: usize,
+        name_draft: String,
+        recovery: Option<String>,
+        recovery_backup: Option<String>,
+    ) -> Self {
+        Self {
+            items,
+            active_index,
+            recovery,
+            recovery_backup,
+            name_draft,
+            confirm_removal: false,
+            new_name: String::new(),
+        }
+    }
+}
+
 impl StudioApp {
     pub(super) fn use_workshop_as_profile_root(&mut self) {
         let Some(acquisition) = self.workshop.pending_acquisition.as_ref() else {
@@ -63,7 +94,7 @@ impl StudioApp {
     }
 
     pub(super) fn select_profile(&mut self, index: usize) {
-        if self.running || index >= self.profiles.len() {
+        if self.running || index >= self.profile.items.len() {
             return;
         }
         if self.workspace.editor_dirty || self.manifest_metadata_dirty {
@@ -71,10 +102,10 @@ impl StudioApp {
                 "Save or discard workspace file or manifest metadata edits before switching profiles.".to_owned();
             return;
         }
-        self.active_profile = index;
-        self.profile_name_draft = self.profiles[index].name.clone();
-        self.confirm_profile_removal = false;
-        self.workspace.root = self.profiles[index]
+        self.profile.active_index = index;
+        self.profile.name_draft = self.profile.items[index].name.clone();
+        self.profile.confirm_removal = false;
+        self.workspace.root = self.profile.items[index]
             .workspace
             .as_ref()
             .map(|workspace| workspace.root.display().to_string())
@@ -120,7 +151,7 @@ impl StudioApp {
             self.status = "Save or discard structured manifest edits before changing the profile composition.".to_owned();
             return;
         }
-        let current_workspace = self.profiles[self.active_profile]
+        let current_workspace = self.profile.items[self.profile.active_index]
             .workspace
             .as_ref()
             .map(|association| association.root.clone());
@@ -141,7 +172,7 @@ impl StudioApp {
             return;
         }
         let workspace_changed = current_workspace != workspace;
-        let profile = &mut self.profiles[self.active_profile];
+        let profile = &mut self.profile.items[self.profile.active_index];
         profile.root_package = Some(identity.clone());
         profile.workspace = workspace.clone().map(|root| WorkspaceAssociation { root });
         profile.resolved_graph = None;
@@ -178,16 +209,16 @@ impl StudioApp {
         self.status = format!(
             "Selected {} for profile {}. Preview its dependency plan before installing.",
             content_selector(&identity),
-            self.profiles[self.active_profile].name,
+            self.profile.items[self.profile.active_index].name,
         );
         self.section = Section::Library;
     }
 
     pub(super) fn add_profile(&mut self) {
-        let name = self.new_profile_name.trim();
+        let name = self.profile.new_name.trim();
         let workspace = (!self.workspace.root.trim().is_empty())
             .then(|| PathBuf::from(self.workspace.root.trim()));
-        let index = match vapor_studio_core::add_profile(&mut self.profiles, name, workspace)
+        let index = match vapor_studio_core::add_profile(&mut self.profile.items, name, workspace)
         {
             Ok(index) => index,
             Err(error) => {
@@ -195,28 +226,28 @@ impl StudioApp {
                 return;
             }
         };
-        self.active_profile = index;
-        self.profile_name_draft = self.profiles[index].name.clone();
-        self.confirm_profile_removal = false;
-        self.new_profile_name.clear();
+        self.profile.active_index = index;
+        self.profile.name_draft = self.profile.items[index].name.clone();
+        self.profile.confirm_removal = false;
+        self.profile.new_name.clear();
         self.status = format!(
             "Created profile {}.",
-            self.profiles[self.active_profile].name
+            self.profile.items[self.profile.active_index].name
         );
     }
 
     pub(super) fn rename_active_profile(&mut self) {
         match vapor_studio_core::rename_profile(
-            &mut self.profiles,
-            self.active_profile,
-            &self.profile_name_draft,
+            &mut self.profile.items,
+            self.profile.active_index,
+            &self.profile.name_draft,
         ) {
             Ok(()) => {
-                self.profile_name_draft = self.profiles[self.active_profile].name.clone();
-                self.status = format!("Renamed profile to {}.", self.profile_name_draft);
+                self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
+                self.status = format!("Renamed profile to {}.", self.profile.name_draft);
             }
             Err(error) => {
-                self.profile_name_draft = self.profiles[self.active_profile].name.clone();
+                self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
                 self.status = error;
             }
         }
@@ -227,17 +258,17 @@ impl StudioApp {
             self.status = "Finish or discard the current operation and edits before removing a profile.".to_owned();
             return;
         }
-        let index = self.active_profile;
-        let removed = match vapor_studio_core::remove_profile(&mut self.profiles, index) {
+        let index = self.profile.active_index;
+        let removed = match vapor_studio_core::remove_profile(&mut self.profile.items, index) {
             Ok(profile) => profile,
             Err(error) => {
                 self.status = error;
                 return;
             }
         };
-        self.confirm_profile_removal = false;
-        self.profile_name_draft.clear();
-        let next_index = index.min(self.profiles.len() - 1);
+        self.profile.confirm_removal = false;
+        self.profile.name_draft.clear();
+        let next_index = index.min(self.profile.items.len() - 1);
         self.select_profile(next_index);
         self.status = format!("Removed profile {}.", removed.name);
     }
@@ -246,9 +277,9 @@ impl StudioApp {
         if self.running || self.workspace.editor_dirty {
             return;
         }
-        let source_name = self.profiles[self.active_profile].name.clone();
+        let source_name = self.profile.items[self.profile.active_index].name.clone();
         let index =
-            match vapor_studio_core::duplicate_profile(&mut self.profiles, self.active_profile) {
+            match vapor_studio_core::duplicate_profile(&mut self.profile.items, self.profile.active_index) {
                 Ok(index) => index,
                 Err(error) => {
                     self.status = error;
@@ -256,7 +287,7 @@ impl StudioApp {
                 }
             };
         self.select_profile(index);
-        self.status = format!("Duplicated {source_name} as {}.", self.profiles[index].name);
+        self.status = format!("Duplicated {source_name} as {}.", self.profile.items[index].name);
     }
 
  }

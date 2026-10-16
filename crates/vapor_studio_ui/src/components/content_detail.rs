@@ -234,7 +234,7 @@ impl StudioApp {
                     });
                 }
                 if content.kind == vapor_core::ContentKind::Packagepack.as_str() {
-                    let profile_root = self.profiles[self.active_profile].root_package.as_ref();
+                    let profile_root = self.profile.items[self.profile.active_index].root_package.as_ref();
                     if profile_root.is_some_and(|root| {
                         root.id == content.id && root.version == content.version
                     }) {

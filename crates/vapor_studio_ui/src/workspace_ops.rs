@@ -84,7 +84,7 @@ impl StudioApp {
         self.invalidate_workshop_review();
         let root = self
             .profiles
-            .get(self.active_profile)
+            .get(self.profile.active_index)
             .and_then(|profile| profile.workspace.as_ref())
             .map(|workspace| workspace.root.clone());
         let executable = match std::env::current_exe() {
@@ -108,7 +108,7 @@ impl StudioApp {
         catalog: Result<Vec<vapor_studio_core::CatalogContent>, String>,
         files: Vec<PathBuf>,
     ) {
-        let workspace_changed = self.profiles[self.active_profile]
+        let workspace_changed = self.profile.items[self.profile.active_index]
             .workspace
             .as_ref()
             .is_none_or(|workspace| workspace.root != root);
@@ -116,7 +116,7 @@ impl StudioApp {
         self.workspace.root = root.display().to_string();
         self.workspace.root_draft = self.workspace.root.clone();
         self.draft_dependencies.clear();
-        let profile = &mut self.profiles[self.active_profile];
+        let profile = &mut self.profile.items[self.profile.active_index];
         profile.workspace = Some(WorkspaceAssociation { root });
         if workspace_changed {
             profile.root_package = None;
@@ -217,7 +217,7 @@ impl StudioApp {
         }
         let Some(root_package) = self
             .profiles
-            .get(self.active_profile)
+            .get(self.profile.active_index)
             .and_then(|profile| profile.root_package.clone())
         else {
             return;
@@ -284,7 +284,7 @@ impl StudioApp {
         }
         if self
             .profiles
-            .get(self.active_profile)
+            .get(self.profile.active_index)
             .and_then(|profile| profile.workspace.as_ref())
             .is_some()
             && !self.workspace.root.trim().is_empty()

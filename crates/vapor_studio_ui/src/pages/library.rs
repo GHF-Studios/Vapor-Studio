@@ -24,8 +24,8 @@ impl StudioApp {
             );
         });
 
-        for index in 0..self.profiles.len() {
-            let profile = &self.profiles[index];
+        for index in 0..self.profile.items.len() {
+            let profile = &self.profile.items[index];
             let name = profile.name.clone();
             let root = profile
                 .root_package
@@ -38,7 +38,7 @@ impl StudioApp {
                         .unwrap_or_else(|| identity.id.clone())
                 })
                 .unwrap_or_else(|| "No Packagepack selected".to_owned());
-            let selected = index == self.active_profile;
+            let selected = index == self.profile.active_index;
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(
@@ -56,7 +56,7 @@ impl StudioApp {
             });
         }
 
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
         ui.separator();
@@ -64,13 +64,13 @@ impl StudioApp {
         ui.group(|ui| {
             ui.label("Manage profile");
             ui.horizontal(|ui| {
-                ui.text_edit_singleline(&mut self.profile_name_draft);
+                ui.text_edit_singleline(&mut self.profile.name_draft);
                 if ui
                     .add_enabled(
                         !self.running
                             && !self.workspace.editor_dirty
                             && !self.manifest_metadata_dirty
-                            && self.profile_name_draft.trim() != profile.name,
+                            && self.profile.name_draft.trim() != profile.name,
                         egui::Button::new("Rename"),
                     )
                     .clicked()
@@ -82,15 +82,15 @@ impl StudioApp {
                         !self.running
                             && !self.workspace.editor_dirty
                             && !self.manifest_metadata_dirty
-                            && self.profiles.len() > 1,
+                            && self.profile.items.len() > 1,
                         egui::Button::new("Remove profile"),
                     )
                     .clicked()
                 {
-                    self.confirm_profile_removal = true;
+                    self.profile.confirm_removal = true;
                 }
             });
-            if self.confirm_profile_removal {
+            if self.profile.confirm_removal {
                 ui.colored_label(
                     egui::Color32::YELLOW,
                     format!(
@@ -106,7 +106,7 @@ impl StudioApp {
                         self.remove_active_profile();
                     }
                     if ui.button("Cancel").clicked() {
-                        self.confirm_profile_removal = false;
+                        self.profile.confirm_removal = false;
                     }
                 });
             }
@@ -222,16 +222,16 @@ impl StudioApp {
         ui.separator();
         ui.label("Launch arguments");
         ui.weak("Each row is passed as one argument to the installed Engine.");
-        let active_profile = self.active_profile;
+        let active_profile = self.profile.active_index;
         let can_edit = !self.running;
         let mut remove_argument = None;
-        for index in 0..self.profiles[active_profile].launch.arguments.len() {
+        for index in 0..self.profile.items[active_profile].launch.arguments.len() {
             ui.horizontal(|ui| {
                 ui.label(format!("{}", index + 1));
                 ui.add_enabled(
                     can_edit,
                     egui::TextEdit::singleline(
-                        &mut self.profiles[active_profile].launch.arguments[index],
+                        &mut self.profile.items[active_profile].launch.arguments[index],
                     )
                     .desired_width(320.0),
                 );
@@ -244,13 +244,13 @@ impl StudioApp {
             });
         }
         if let Some(index) = remove_argument {
-            self.profiles[active_profile].launch.arguments.remove(index);
+            self.profile.items[active_profile].launch.arguments.remove(index);
         }
         if ui
             .add_enabled(can_edit, egui::Button::new("Add argument"))
             .clicked()
         {
-            self.profiles[active_profile]
+            self.profile.items[active_profile]
                 .launch
                 .arguments
                 .push(String::new());

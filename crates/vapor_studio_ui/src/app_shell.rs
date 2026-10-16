@@ -34,20 +34,20 @@ impl StudioApp {
 
     fn draw_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let previous_profile = self.active_profile;
+            let previous_profile = self.profile.active_index;
             ui.heading(self.section.label());
             ui.separator();
             ui.label("Profile");
             egui::ComboBox::from_id_salt("active-profile")
-                .selected_text(&self.profiles[self.active_profile].name)
+                .selected_text(&self.profile.items[self.profile.active_index].name)
                 .show_ui(ui, |ui| {
-                    for (index, profile) in self.profiles.iter().enumerate() {
-                        ui.selectable_value(&mut self.active_profile, index, &profile.name);
+                    for (index, profile) in self.profile.items.iter().enumerate() {
+                        ui.selectable_value(&mut self.profile.active_index, index, &profile.name);
                     }
                 });
-            if self.active_profile != previous_profile {
-                let requested_profile = self.active_profile;
-                self.active_profile = previous_profile;
+            if self.profile.active_index != previous_profile {
+                let requested_profile = self.profile.active_index;
+                self.profile.active_index = previous_profile;
                 self.select_profile(requested_profile);
             }
             ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Search content"))
@@ -59,7 +59,7 @@ impl StudioApp {
                 )
                 .clicked()
             {
-                self.new_profile_name = format!("Composition {}", self.profiles.len() + 1);
+                self.profile.new_name = format!("Composition {}", self.profile.items.len() + 1);
                 self.add_profile();
             }
             if self.running {
@@ -126,7 +126,7 @@ impl eframe::App for StudioApp {
                 }
             }
             self.draw_operation_center(ui);
-            if let Some(recovery) = &self.profile_recovery {
+            if let Some(recovery) = &self.profile.recovery {
                 ui.separator();
                 ui.colored_label(egui::Color32::YELLOW, recovery);
             }
@@ -141,16 +141,16 @@ impl eframe::App for StudioApp {
         storage.set_string("workspace_root", self.workspace.root.clone());
         let document = ProfileDocument {
             schema_version: CURRENT_SCHEMA_VERSION,
-            profiles: self.profiles.clone(),
+            profiles: self.profile.items.clone(),
         };
         if let Ok(encoded) = serde_json::to_string(&document) {
             storage.set_string("profiles", encoded);
         }
-        if let Some(original) = &self.profile_recovery_backup {
+        if let Some(original) = &self.profile.recovery_backup {
             storage.set_string("profiles.recovery_backup", original.clone());
         }
-        storage.set_string("active_profile", self.active_profile.to_string());
-        if let Some(profile) = self.profiles.get(self.active_profile) {
+        storage.set_string("active_profile", self.profile.active_index.to_string());
+        if let Some(profile) = self.profile.items.get(self.profile.active_index) {
             storage.set_string("active_profile_id", profile.id.clone());
         }
     }

@@ -8,7 +8,7 @@ impl StudioApp {
         if !self.require_saved_workspace("install this workspace composition") {
             return;
         }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
         let Some(root_package) = profile.root_package else {
@@ -41,7 +41,7 @@ impl StudioApp {
         if !self.require_saved_workspace("update this workspace composition") {
             return;
         }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
         let Some(root_package) = profile.root_package else {
@@ -70,7 +70,7 @@ impl StudioApp {
         if !self.require_saved_workspace("resolve this workspace composition") {
             return;
         }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
         let Some(root_package) = profile.root_package else {
@@ -116,7 +116,7 @@ impl StudioApp {
     pub(super) fn verify_selected_installation(&mut self) {
         let Some(root_package) = self
             .profiles
-            .get(self.active_profile)
+            .get(self.profile.active_index)
             .and_then(|profile| profile.root_package.clone())
         else {
             return;
@@ -128,7 +128,7 @@ impl StudioApp {
                 return;
             }
         };
-        let selectors = self.profiles[self.active_profile]
+        let selectors = self.profile.items[self.profile.active_index]
             .resolved_graph
             .as_ref()
             .map(|graph| {
@@ -155,7 +155,7 @@ impl StudioApp {
         }
         let Some(root_package) = self
             .profiles
-            .get(self.active_profile)
+            .get(self.profile.active_index)
             .and_then(|profile| profile.root_package.clone())
         else {
             return;
@@ -167,12 +167,12 @@ impl StudioApp {
                 return;
             }
         };
-        let workspace = self.profiles[self.active_profile]
+        let workspace = self.profile.items[self.profile.active_index]
             .workspace
             .as_ref()
             .map(|workspace| workspace.root.clone());
         let selector = content_selector(&root_package);
-        let graph_selectors = self.profiles[self.active_profile]
+        let graph_selectors = self.profile.items[self.profile.active_index]
             .resolved_graph
             .as_ref()
             .map(|graph| {
@@ -195,7 +195,7 @@ impl StudioApp {
     }
 
     pub(super) fn run_installed_selected(&mut self) {
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
         let Some(root_package) = profile.root_package else {
@@ -223,7 +223,7 @@ impl StudioApp {
     }
 
     pub(super) fn launch_default_profile(&mut self) {
-        if self.profiles[self.active_profile].root_package.is_none() {
+        if self.profile.items[self.profile.active_index].root_package.is_none() {
             let executable = match std::env::current_exe() {
                 Ok(value) => value,
                 Err(error) => {
@@ -233,7 +233,7 @@ impl StudioApp {
             };
             match vapor_studio_core::default_packagepack_selector(&executable, "default") {
                 Ok(id) => {
-                    self.profiles[self.active_profile].root_package =
+                    self.profile.items[self.profile.active_index].root_package =
                         Some(ContentIdentity { id, version: None })
                 }
                 Err(error) => {
@@ -249,7 +249,7 @@ impl StudioApp {
         if !self.require_open_workspace("build and play this workspace composition") {
             return;
         }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
         let Some(root_package) = profile.root_package else {

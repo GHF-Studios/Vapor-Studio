@@ -57,7 +57,7 @@ impl StudioApp {
             ui.label("Steam subscriptions are separate from Vapor Library imports. Import an item first, then choose whether it belongs in a profile.");
             ui.weak(format!(
                 "Target profile: {} · local catalog remains available when Steam is offline",
-                self.profiles[self.active_profile].name
+                self.profile.items[self.profile.active_index].name
             ));
             if !self.workshop.subscriptions.is_empty() {
                 ui.collapsing(format!("My subscriptions ({})", self.workshop.subscriptions.len()), |ui| {
@@ -107,19 +107,19 @@ impl StudioApp {
                                         !self.running && !self.workspace.editor_dirty,
                                         egui::Button::new(format!(
                                             "Set {} root",
-                                            self.profiles[self.active_profile].name
+                                            self.profile.items[self.profile.active_index].name
                                         )),
                                     )
                                     .clicked()
                                 {
                                     self.use_available_workshop_package_as_profile_root(&id);
                                 }
-                                if self.profiles[self.active_profile].root_package.is_some()
+                                if self.profile.items[self.profile.active_index].root_package.is_some()
                                     && ui.add_enabled(
                                         !self.running && !self.workspace.editor_dirty,
                                         egui::Button::new(format!(
                                             "Recheck {} plan",
-                                            self.profiles[self.active_profile].name
+                                            self.profile.items[self.profile.active_index].name
                                         )),
                                     )
                                     .on_hover_text(
@@ -214,7 +214,7 @@ impl StudioApp {
                                 !self.running && !self.workspace.editor_dirty,
                                 egui::Button::new(format!(
                                     "Set {} root",
-                                    self.profiles[self.active_profile].name
+                                    self.profile.items[self.profile.active_index].name
                                 )),
                             ).clicked()
                         {
@@ -222,12 +222,12 @@ impl StudioApp {
                                 &item.published_file_id,
                             );
                         } else if !available_packagepack
-                            && self.profiles[self.active_profile].root_package.is_some()
+                            && self.profile.items[self.profile.active_index].root_package.is_some()
                             && ui.add_enabled(
                                 !self.running && !self.workspace.editor_dirty,
                                 egui::Button::new(format!(
                                     "Recheck {} plan",
-                                    self.profiles[self.active_profile].name
+                                    self.profile.items[self.profile.active_index].name
                                 )),
                             ).clicked()
                         {
@@ -269,7 +269,7 @@ impl StudioApp {
                     if ui.add_enabled(!self.running && !self.workspace.editor_dirty,
                         egui::Button::new(format!(
                             "Use as {} root",
-                            self.profiles[self.active_profile].name
+                            self.profile.items[self.profile.active_index].name
                         )))
                         .on_disabled_hover_text("Save or discard editor changes before switching the profile's workspace.")
                         .clicked()
@@ -279,13 +279,13 @@ impl StudioApp {
                     ui.weak("The selected Packagepack will appear in Compositions, where you can preview its dependency plan before installing.");
                 } else {
                     ui.weak("Use this item as a dependency of a Packagepack to include it in a composition.");
-                    let has_root = self.profiles[self.active_profile].root_package.is_some();
+                    let has_root = self.profile.items[self.profile.active_index].root_package.is_some();
                     if ui
                         .add_enabled(
                             !self.running && !self.workspace.editor_dirty && has_root,
                             egui::Button::new(format!(
                                 "Recheck {} composition",
-                                self.profiles[self.active_profile].name
+                                self.profile.items[self.profile.active_index].name
                             )),
                         )
                         .on_disabled_hover_text(

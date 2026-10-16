@@ -7,7 +7,7 @@ impl StudioApp {
         ui.label("Create a registered Vapor project in the active workspace, then edit its role manifest.");
         ui.weak("Vapor Shell owns the content vocabulary and registers each new project in Workspace.vapor.toml.");
         egui::CollapsingHeader::new("Start from a complete playable workspace")
-            .default_open(self.profiles[self.active_profile].workspace.is_none())
+            .default_open(self.profile.items[self.profile.active_index].workspace.is_none())
             .show(ui, |ui| {
                 ui.label("Scaffold an Engine, Game, Packagepack, Cargo projects, and workspace manifests.");
                 ui.horizontal(|ui| {
