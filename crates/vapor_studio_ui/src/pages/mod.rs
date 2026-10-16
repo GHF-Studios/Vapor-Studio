@@ -14,3 +14,4 @@ mod workspace_authoring_panel;
 mod workspace_content_panel;
 mod workspace_operations_panel;
 mod workspace_registry_panel;
+mod workshop_browser;
