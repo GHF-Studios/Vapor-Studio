@@ -66,6 +66,8 @@ fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str
         CreateContent => "Create content project",
         LoadComposition => "Load Packagepack graph",
         SaveComposition => "Save Packagepack graph",
+        LoadWorkshopMetadata => "Load Workshop metadata",
+        SaveWorkshopMetadata => "Save Workshop metadata",
         CreateWorkspaceFile => "Create workspace file",
         OpenWorkspace => "Open workspace",
         RememberWorkspace => "Add workspace to Vapor sources",

@@ -30,3 +30,10 @@ into that content role's manifest; creating a project does not stage or publish
 it. The Workspace project overview reads the same Shell-validated metadata back
 so creators can inspect the intended AppID, item identity, visibility, title,
 and tags before staging a review package.
+
+The Workspace project overview also opens a structured Workshop metadata
+editor for existing source projects. Saving checks that the opened manifest
+snapshot is still current, preserves unrelated manifest fields, validates the
+updated role manifest through Vapor Shell discovery, and atomically replaces
+the file.
+Packagepack graph and publication-metadata edits share a per-manifest lock.

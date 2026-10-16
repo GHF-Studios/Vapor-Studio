@@ -31,6 +31,7 @@ pub struct SourceWorkshopPolicy {
 }
 
 pub use vapor_shell::content::WorkshopPolicyDraft;
+pub use vapor_shell::content::SourceWorkshopMetadata;
 
 pub use vapor_shell::content::{
     CompositionLink as SourceCompositionLink, SourceComposition,
@@ -58,6 +59,28 @@ pub fn save_source_composition(
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
     content::save_source_composition(&paths, selector, expected_source, links)
+}
+
+pub fn load_source_workshop_metadata(
+    application_executable: &Path,
+    workspace_root: &Path,
+    selector: &str,
+) -> Result<SourceWorkshopMetadata, String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    content::load_source_workshop_metadata(&paths, selector)
+}
+
+pub fn save_source_workshop_metadata(
+    application_executable: &Path,
+    workspace_root: &Path,
+    selector: &str,
+    expected_source: &str,
+    policy: &WorkshopPolicyDraft,
+) -> Result<SourceWorkshopMetadata, String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    content::save_source_workshop_metadata(&paths, selector, expected_source, policy)
 }
 
 /// Ask Vapor Shell whether one source role can directly depend on another.
@@ -151,6 +174,25 @@ pub fn validate_workspace_source(
 }
 
 pub fn create_content_workspace(
+    application_executable: &Path,
+    workspace_root: &Path,
+    id: &str,
+    version: &str,
+    kind: vapor_core::ContentKind,
+    dependency_selectors: &[String],
+) -> Result<PathBuf, String> {
+    create_content_workspace_with_workshop(
+        application_executable,
+        workspace_root,
+        id,
+        version,
+        kind,
+        dependency_selectors,
+        &WorkshopPolicyDraft::default(),
+    )
+}
+
+pub fn create_content_workspace_with_workshop(
     application_executable: &Path,
     workspace_root: &Path,
     id: &str,

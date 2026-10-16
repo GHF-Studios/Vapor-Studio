@@ -169,6 +169,16 @@ impl StudioApp {
                                     self.open_workspace_file(relative_manifest);
                                 }
                             }
+                            if ui
+                                .add_enabled(
+                                    !self.running && !self.workspace_editor_dirty,
+                                    egui::Button::new("Edit Workshop metadata"),
+                                )
+                                .on_disabled_hover_text("Save or reload the open file first; Workshop edits use a fresh Shell-validated manifest snapshot.")
+                                .clicked()
+                            {
+                                self.load_source_workshop_metadata(&content);
+                            }
                             if content.kind == vapor_core::ContentKind::Packagepack.as_str()
                                 && ui
                                     .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Edit composition"))
@@ -197,6 +207,71 @@ impl StudioApp {
                         });
                     });
                 }
+            });
+        }
+        if let Some(metadata) = self.workshop_metadata_edit.clone() {
+            ui.group(|ui| {
+                ui.heading(format!("Workshop metadata · {}", metadata.id));
+                ui.label("Edit the publication intent saved in this role manifest. This action does not upload to Steam.");
+                let mut changed = false;
+                ui.horizontal(|ui| {
+                    ui.label("Steam AppID");
+                    changed |= ui.text_edit_singleline(&mut self.workshop_metadata_app_id).changed();
+                    ui.label("PublishedFileId");
+                    changed |= ui.text_edit_singleline(&mut self.workshop_metadata_published_file_id).changed();
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Visibility");
+                    egui::ComboBox::from_id_salt("edit-source-workshop-visibility")
+                        .selected_text(if self.workshop_metadata_visibility.is_empty() {
+                            "Not set"
+                        } else {
+                            &self.workshop_metadata_visibility
+                        })
+                        .show_ui(ui, |ui| {
+                            changed |= ui.selectable_value(&mut self.workshop_metadata_visibility, String::new(), "Not set").changed();
+                            for visibility in ["private", "friends-only", "public"] {
+                                changed |= ui.selectable_value(
+                                    &mut self.workshop_metadata_visibility,
+                                    visibility.to_owned(),
+                                    visibility,
+                                ).changed();
+                            }
+                        });
+                    ui.label("Title");
+                    changed |= ui.text_edit_singleline(&mut self.workshop_metadata_title).changed();
+                });
+                ui.label("Description");
+                changed |= ui.add(
+                    egui::TextEdit::multiline(&mut self.workshop_metadata_description)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                ).changed();
+                ui.horizontal(|ui| {
+                    ui.label("Tags · comma separated");
+                    changed |= ui.text_edit_singleline(&mut self.workshop_metadata_tags).changed();
+                    ui.label("Change note");
+                    changed |= ui.text_edit_singleline(&mut self.workshop_metadata_change_note).changed();
+                });
+                self.workshop_metadata_dirty |= changed;
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(
+                        !self.running && !self.workspace_editor_dirty && self.workshop_metadata_dirty,
+                        egui::Button::new("Save Workshop metadata"),
+                    ).clicked() {
+                        self.save_source_workshop_metadata();
+                    }
+                    if ui.add_enabled(!self.running && self.workshop_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
+                        self.set_workshop_metadata_fields(&metadata.policy);
+                        self.workshop_metadata_dirty = false;
+                    }
+                    if ui.add_enabled(!self.running && !self.workshop_metadata_dirty, egui::Button::new("Close")).clicked() {
+                        self.workshop_metadata_edit = None;
+                    }
+                    if self.workshop_metadata_dirty {
+                        ui.colored_label(egui::Color32::YELLOW, "Unsaved metadata draft");
+                    }
+                });
             });
         }
         if !self.workspace_root.trim().is_empty() {

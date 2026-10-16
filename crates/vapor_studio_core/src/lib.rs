@@ -41,9 +41,12 @@ pub use vapor_steam::{
 
 pub use workspace::{
     SourceComposition, SourceCompositionLink, SourceContent, UnregisteredProjectCandidate,
-    UnregisteredProjectScan, WorkshopPolicyDraft, adopt_workspace_content_project, create_basic_content_workspace,
-    create_content_workspace, discover_source_content, load_source_composition,
-    save_source_composition, remember_workspace, scan_unregistered_content_projects,
+    SourceWorkshopMetadata, UnregisteredProjectScan, WorkshopPolicyDraft,
+    adopt_workspace_content_project, create_basic_content_workspace,
+    create_content_workspace, create_content_workspace_with_workshop,
+    discover_source_content, load_source_composition,
+    load_source_workshop_metadata, save_source_composition,
+    save_source_workshop_metadata, remember_workspace, scan_unregistered_content_projects,
     source_dependency_allowed, validate_profile_source,
     validate_workspace_source,
 };
