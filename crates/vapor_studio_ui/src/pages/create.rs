@@ -59,6 +59,26 @@ impl StudioApp {
             vapor_core::ContentKind::Gamepack => "Choose exactly one Game.",
             _ => "Dependencies are checked against this role's supported content kinds.",
         };
+        let source_shape = match self.draft_content_kind {
+            vapor_core::ContentKind::Packagepack
+            | vapor_core::ContentKind::Enginepack
+            | vapor_core::ContentKind::Gamepack
+            | vapor_core::ContentKind::Modpack => {
+                "Composition-only project: creates a role manifest without a Rust crate or Cargo member."
+            }
+            vapor_core::ContentKind::Engine => {
+                "Code-bearing project: creates a Rust executable crate and declares its runtime binary."
+            }
+            vapor_core::ContentKind::Game
+            | vapor_core::ContentKind::EngineMod
+            | vapor_core::ContentKind::GameMod
+            | vapor_core::ContentKind::ExtensionMod => {
+                "Code-bearing project: creates a Rust library crate and declares its runtime library."
+            }
+            vapor_core::ContentKind::Library => {
+                "Choose a supported Vapor content role to create a project."
+            }
+        };
         let required_role_group =
             vapor_studio_core::source_required_dependency_choice_group(self.draft_content_kind);
         let required_role_selected = required_role_group.is_none_or(|required_group| {
@@ -75,6 +95,7 @@ impl StudioApp {
             })
         });
         ui.weak(role_constraints);
+        ui.small(source_shape);
         ui.horizontal(|ui| {
             ui.label("Content ID under this workspace's namespace");
             ui.text_edit_singleline(&mut self.draft_content_id);
@@ -144,7 +165,7 @@ impl StudioApp {
                         && !self.workspace_editor_dirty
                         && !self.workspace_root.trim().is_empty()
                         && required_role_selected,
-                    egui::Button::new("Create content workspace"),
+                    egui::Button::new("Create content project"),
                 )
                 .on_disabled_hover_text(if !required_role_selected {
                     "Select the required Engine, Enginepack, Game, or Gamepack role first."
