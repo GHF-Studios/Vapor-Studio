@@ -250,14 +250,16 @@ impl StudioApp {
             && let (Some(selector), Some(preview)) = (selector, preview)
             && preview.selector == selector
         {
-            if let Some(published_file_id) =
+            let published_file_ids =
                 super::super::components::composition_preview::draw_composition_preview(
                     ui, &preview,
-                )
-            {
-                self.workshop.published_file_id = published_file_id;
-                self.section = super::super::Section::Discover;
-                self.download_workshop_item();
+                );
+            if !published_file_ids.is_empty() {
+                self.download_source_composition_dependencies(
+                    published_file_ids,
+                    selector.clone(),
+                    PathBuf::from(self.workspace.root.trim()),
+                );
             }
         }
         ui.add_space(6.0);

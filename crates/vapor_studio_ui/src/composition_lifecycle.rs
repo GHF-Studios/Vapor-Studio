@@ -3,16 +3,21 @@ use super::operation_protocol::OperationResult;
 use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, InstalledArtifactRecord, OperationKind};
 
+pub(super) enum RepreviewAfterCatalogRefresh {
+    ActiveProfile,
+    Source { selector: String, workspace_root: PathBuf },
+}
+
 pub(super) struct ProfileCompositionState {
     preview: Option<vapor_studio_core::CompositionPreview>,
-    repreview_after_catalog_refresh: bool,
+    repreview_after_catalog_refresh: Option<RepreviewAfterCatalogRefresh>,
 }
 
 impl Default for ProfileCompositionState {
     fn default() -> Self {
         Self {
             preview: None,
-            repreview_after_catalog_refresh: false,
+            repreview_after_catalog_refresh: None,
         }
     }
 }
@@ -32,15 +37,26 @@ impl ProfileCompositionState {
 
     pub(super) fn clear_context(&mut self) {
         self.invalidate_preview();
-        self.repreview_after_catalog_refresh = false;
+        self.repreview_after_catalog_refresh = None;
     }
 
     pub(super) fn request_repreview_after_catalog_refresh(&mut self) {
-        self.repreview_after_catalog_refresh = true;
+        self.repreview_after_catalog_refresh = Some(RepreviewAfterCatalogRefresh::ActiveProfile);
     }
 
-    pub(super) fn take_repreview_request(&mut self) -> bool {
-        std::mem::take(&mut self.repreview_after_catalog_refresh)
+    pub(super) fn request_source_repreview_after_catalog_refresh(
+        &mut self,
+        selector: String,
+        workspace_root: PathBuf,
+    ) {
+        self.repreview_after_catalog_refresh = Some(RepreviewAfterCatalogRefresh::Source {
+            selector,
+            workspace_root,
+        });
+    }
+
+    pub(super) fn take_repreview_request(&mut self) -> Option<RepreviewAfterCatalogRefresh> {
+        self.repreview_after_catalog_refresh.take()
     }
 }
 

@@ -105,8 +105,21 @@ impl StudioApp {
                 );
             }
         }
-        if self.profile_composition.take_repreview_request() {
-            self.preview_selected_composition();
+        match self.profile_composition.take_repreview_request() {
+            Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::ActiveProfile) => {
+                self.preview_selected_composition();
+            }
+            Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::Source {
+                selector,
+                workspace_root,
+            }) => {
+                self.preview_composition(
+                    selector,
+                    Some(workspace_root),
+                    "Re-resolving the source composition against the refreshed cache…",
+                );
+            }
+            None => {}
         }
         if self
             .catalog

@@ -42,6 +42,11 @@ impl Default for WorkshopState {
     }
 }
 
+enum RepreviewRequest {
+    ActiveProfile,
+    Source { selector: String, workspace_root: PathBuf },
+}
+
 impl StudioApp {
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
         self.catalog.items.iter().any(|content| {
@@ -73,6 +78,10 @@ impl StudioApp {
         );
         self.workshop.pending_acquisitions = acquisitions;
         self.workshop.selected_items.clear();
+    }
+
+    pub(super) fn apply_workshop_acquisition_error(&mut self, error: String) {
+        self.status = error;
     }
 
     pub(super) fn apply_workshop_publication(
@@ -255,15 +264,45 @@ impl StudioApp {
                 "Workshop downloads currently require a numeric PublishedFileId.".to_owned();
             return;
         }
-        self.download_workshop_items(vec![published_file_id]);
+        self.download_workshop_items(vec![published_file_id], None);
     }
 
     pub(super) fn download_selected_workshop_items(&mut self) {
         let ids = self.workshop.selected_items.iter().cloned().collect::<Vec<_>>();
-        self.download_workshop_items(ids);
+        self.download_workshop_items(ids, None);
     }
 
-    fn download_workshop_items(&mut self, published_file_ids: Vec<String>) {
+    pub(in crate::app) fn download_profile_composition_dependencies(
+        &mut self,
+        published_file_ids: Vec<String>,
+    ) {
+        self.download_workshop_items(
+            published_file_ids,
+            Some(RepreviewRequest::ActiveProfile),
+        );
+    }
+
+    pub(in crate::app) fn download_source_composition_dependencies(
+        &mut self,
+        published_file_ids: Vec<String>,
+        selector: String,
+        workspace_root: PathBuf,
+    ) {
+        self.download_workshop_items(
+            published_file_ids,
+            Some(RepreviewRequest::Source { selector, workspace_root }),
+        );
+    }
+
+    fn download_workshop_items(
+        &mut self,
+        published_file_ids: Vec<String>,
+        repreview_after_acquisition: Option<RepreviewRequest>,
+    ) {
+        if self.operation.running {
+            self.status = "Finish the current operation before importing Workshop content.".to_owned();
+            return;
+        }
         if published_file_ids.is_empty() {
             self.status = "Select at least one Workshop item to import.".to_owned();
             return;
@@ -283,6 +322,17 @@ impl StudioApp {
             }
         };
         let count = published_file_ids.len();
+        if let Some(request) = repreview_after_acquisition {
+            match request {
+                RepreviewRequest::ActiveProfile => {
+                    self.profile_composition.request_repreview_after_catalog_refresh();
+                }
+                RepreviewRequest::Source { selector, workspace_root } => {
+                    self.profile_composition
+                        .request_source_repreview_after_catalog_refresh(selector, workspace_root);
+                }
+            }
+        }
         self.spawn(OperationKind::Acquire, move |_context| {
             OperationResult::WorkshopAcquisition(vapor_studio_core::download_workshop_items(
                 &executable,

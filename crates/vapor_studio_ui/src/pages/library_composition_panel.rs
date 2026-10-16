@@ -51,14 +51,12 @@ impl StudioApp {
                 .filter(|preview| preview.selector == selector)
                 .cloned();
             if let Some(preview) = preview {
-                if let Some(published_file_id) =
+                let published_file_ids =
                     super::super::components::composition_preview::draw_composition_preview(
                         ui, &preview,
-                    )
-                {
-                    self.workshop.published_file_id = published_file_id;
-                    self.section = super::super::Section::Discover;
-                    self.download_workshop_item();
+                    );
+                if !published_file_ids.is_empty() {
+                    self.download_profile_composition_dependencies(published_file_ids);
                 }
             }
         }

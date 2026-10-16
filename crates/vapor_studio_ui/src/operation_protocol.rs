@@ -89,13 +89,13 @@ impl OperationResult {
 
     pub(super) fn refreshes_content_catalog(&self) -> bool {
         match self {
+            Self::WorkshopAcquisition(_) => true,
             Self::FileSaved(Ok(path)) => path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml")),
             _ => matches!(
                 self,
                 Self::WorkshopPublish(Ok(_))
-                    | Self::WorkshopAcquisition(Ok(_))
                     | Self::ContentWorkspace(Ok(_))
                     | Self::AdoptedContentProject(Ok(_))
                     | Self::UnregisteredContentProject(Ok(_))

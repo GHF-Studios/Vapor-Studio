@@ -54,8 +54,10 @@ impl StudioApp {
             OperationResult::WorkshopStage(Err(error)) => {
                 self.apply_workshop_stage_error(error)
             }
-            OperationResult::WorkshopAcquisition(Err(error))
-            | OperationResult::WorkshopPublish(Err(error))
+            OperationResult::WorkshopAcquisition(Err(error)) => {
+                self.apply_workshop_acquisition_error(error)
+            }
+            OperationResult::WorkshopPublish(Err(error))
             | OperationResult::WorkshopSearch(Err(error), _)
             | OperationResult::WorkshopSubscriptions(Err(error)) => {
                 self.apply_workshop_error(error)

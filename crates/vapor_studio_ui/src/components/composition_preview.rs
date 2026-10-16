@@ -5,8 +5,8 @@ use vapor_studio_core::{CompositionPreview, CompositionPreviewSource};
 pub(crate) fn draw_composition_preview(
     ui: &mut egui::Ui,
     preview: &CompositionPreview,
-) -> Option<String> {
-    let mut workshop_download = None;
+) -> Vec<String> {
+    let mut workshop_downloads = Vec::new();
     ui.group(|ui| {
         ui.horizontal(|ui| {
             ui.heading("Install plan");
@@ -60,8 +60,24 @@ pub(crate) fn draw_composition_preview(
             }
             if let Some(published_file_id) = node.published_file_id.as_ref().filter(|_| {
                 node.source == CompositionPreviewSource::DownloadRequired
-            }) && ui.button(format!("Download Workshop item {published_file_id}")).clicked() {
-                workshop_download = Some(published_file_id.clone());
+            }) && !workshop_downloads.contains(published_file_id) {
+                workshop_downloads.push(published_file_id.clone());
+            }
+        }
+        if !workshop_downloads.is_empty() {
+            ui.separator();
+            ui.label(format!(
+                "{} required Workshop item(s) are missing from Vapor's cache.",
+                workshop_downloads.len()
+            ));
+            let import_clicked = ui
+                .button(format!(
+                    "Import {} missing Workshop item(s)",
+                    workshop_downloads.len()
+                ))
+                .clicked();
+            if !import_clicked {
+                workshop_downloads.clear();
             }
         }
         for blocker in &preview.blockers {
@@ -71,5 +87,5 @@ pub(crate) fn draw_composition_preview(
             ui.weak(warning);
         }
     });
-    workshop_download
+    workshop_downloads
 }
