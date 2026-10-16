@@ -15,3 +15,6 @@ mod workspace_content_panel;
 mod workspace_operations_panel;
 mod workspace_registry_panel;
 mod workshop_browser;
+mod workshop_acquisition_panel;
+mod workshop_search_panel;
+mod workshop_subscriptions_panel;
