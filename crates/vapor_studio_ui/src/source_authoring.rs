@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, OperationKind};
 
 pub(super) struct AuthoringState {
+    pub(super) create_details_open: bool,
     pub(super) draft_content_id: String,
     pub(super) draft_content_version: String,
     pub(super) draft_content_kind: vapor_core::ContentKind,
@@ -36,6 +37,7 @@ pub(super) struct AuthoringState {
 impl Default for AuthoringState {
     fn default() -> Self {
         Self {
+            create_details_open: false,
             draft_content_id: String::new(),
             draft_content_version: "0.1.0".to_owned(),
             draft_content_kind: vapor_core::ContentKind::Packagepack,
@@ -76,6 +78,7 @@ impl AuthoringState {
     }
 
     pub(super) fn clear_workspace_context(&mut self) {
+        self.create_details_open = false;
         self.draft_dependencies.clear();
         self.clear_selected_source();
         self.workshop_metadata_edit = None;
@@ -91,8 +94,9 @@ impl StudioApp {
         if selector.is_empty() { self.status = "Select a source content project first.".to_owned(); return; }
         let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; } };
+        let operation_selector = selector.clone();
         self.spawn(OperationKind::LoadComposition, move |_context| {
-            OperationResult::SourceCompositionLoaded(vapor_studio_core::load_source_composition(&executable, &root, &selector))
+            OperationResult::SourceCompositionLoaded(vapor_studio_core::load_source_composition(&executable, &root, &operation_selector))
         });
         self.status = format!("Loading dependencies for {selector} through Vapor Shell…");
     }
@@ -121,9 +125,10 @@ impl StudioApp {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
         };
+        let operation_selector = selector.clone();
         self.spawn(OperationKind::LoadWorkshopMetadata, move |_context| {
             OperationResult::SourceWorkshopLoaded(vapor_studio_core::load_source_workshop_metadata(
-                &executable, &root, &selector,
+                &executable, &root, &operation_selector,
             ))
         });
         self.status = format!("Loading Workshop metadata for {selector} through Vapor Shell…");
@@ -137,9 +142,10 @@ impl StudioApp {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
         };
+        let operation_selector = selector.clone();
         self.spawn(OperationKind::LoadRuntimeOutputs, move |_context| {
             OperationResult::SourceRuntimeOutputsLoaded(vapor_studio_core::load_source_runtime_outputs(
-                &executable, &root, &selector,
+                &executable, &root, &operation_selector,
             ))
         });
         self.status = format!("Loading runtime output declarations for {selector} through Vapor Shell…");
@@ -167,9 +173,10 @@ impl StudioApp {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
         };
+        let operation_selector = selector.clone();
         self.spawn(OperationKind::SaveRuntimeOutputs, move |_context| {
             OperationResult::SourceRuntimeOutputsSaved(vapor_studio_core::save_source_runtime_outputs(
-                &executable, &root, &selector, &expected_source, &binaries, &libraries,
+                &executable, &root, &operation_selector, &expected_source, &binaries, &libraries,
             ))
         });
         self.status = format!("Validating and saving runtime outputs for {selector} through Vapor Shell…");
@@ -232,9 +239,10 @@ impl StudioApp {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
         };
+        let operation_selector = selector.clone();
         self.spawn(OperationKind::SaveWorkshopMetadata, move |_context| {
             OperationResult::SourceWorkshopSaved(vapor_studio_core::save_source_workshop_metadata(
-                &executable, &root, &selector, &expected_source, &policy,
+                &executable, &root, &operation_selector, &expected_source, &policy,
             ))
         });
         self.status = format!("Validating and saving Workshop metadata for {selector} through Vapor Shell…");

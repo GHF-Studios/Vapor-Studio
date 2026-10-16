@@ -25,7 +25,7 @@ impl StudioApp {
                 ui.label("New file");
                 ui.add_enabled(
                     !self.operation.running && !self.has_unsaved_workspace_edits(),
-                    egui::TextEdit::singleline(&mut self.workspace.new_file_path)
+                    egui::TextEdit::singleline(&mut self.workspace.editor.new_file_path)
                         .desired_width(280.0)
                         .hint_text("scripts/example.rhai"),
                 );
@@ -51,13 +51,13 @@ impl StudioApp {
                 {
                     self.refresh_workspace_files();
                 }
-                if let Some(path) = &self.workspace.selected_file {
+                if let Some(path) = &self.workspace.editor.selected_file {
                     ui.weak(path.display().to_string());
                 }
                 if ui
                     .add_enabled(
                         !self.operation.running
-                            && self.workspace.active_document_is_dirty()
+                            && self.workspace.editor.active_document_is_dirty()
                             && !self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save"),
                     )
@@ -69,7 +69,7 @@ impl StudioApp {
                     .add_enabled(
                         !self.operation.running
                             && !self.authoring.manifest_metadata_dirty
-                            && self.workspace.selected_file.is_some(),
+                            && self.workspace.editor.selected_file.is_some(),
                         egui::Button::new("Reload from disk"),
                     )
                     .on_hover_text("Discard the editor buffer and reopen the current on-disk file.")
@@ -77,12 +77,13 @@ impl StudioApp {
                 {
                     self.reload_workspace_file();
                 }
-                if self.workspace.active_document_is_dirty() {
+                if self.workspace.editor.active_document_is_dirty() {
                     ui.colored_label(egui::Color32::YELLOW, "Unsaved");
                 }
                 let dirty_count = self
                     .workspace
-                    .editor_documents
+                    .editor
+                    .documents
                     .values()
                     .filter(|document| document.is_dirty())
                     .count();
@@ -100,7 +101,8 @@ impl StudioApp {
             });
             let open_tabs = self
                 .workspace
-                .editor_documents
+                .editor
+                .documents
                 .iter()
                 .map(|(path, document)| (path.clone(), document.is_dirty()))
                 .collect::<Vec<_>>();
@@ -115,7 +117,7 @@ impl StudioApp {
                             .add_enabled(
                                 !self.operation.running,
                                 egui::Button::selectable(
-                                    self.workspace.selected_file.as_ref() == Some(path),
+                                    self.workspace.editor.selected_file.as_ref() == Some(path),
                                     label,
                                 ),
                             )
@@ -135,8 +137,8 @@ impl StudioApp {
                 });
             });
             if let Some(path) = select_tab {
-                self.workspace.selected_file = Some(path);
-                self.workspace.files_open = true;
+                self.workspace.editor.selected_file = Some(path);
+                self.workspace.editor.files_open = true;
             }
             if let Some(path) = close_tab {
                 self.close_workspace_document(&path);
@@ -144,12 +146,13 @@ impl StudioApp {
             ui.columns(3, |columns| {
                 columns[0].heading("Project");
                 let filter_response = columns[0].add(
-                    egui::TextEdit::singleline(&mut self.workspace.file_filter)
+                    egui::TextEdit::singleline(&mut self.workspace.editor.file_filter)
                         .hint_text("Find file by name or path"),
                 );
-                let filter = self.workspace.file_filter.trim().to_lowercase();
+                let filter = self.workspace.editor.file_filter.trim().to_lowercase();
                 let filtered_files = self
                     .workspace
+                    .editor
                     .files
                     .iter()
                     .filter(|path| {
@@ -161,7 +164,7 @@ impl StudioApp {
                 columns[0].small(format!(
                     "{} of {} files",
                     filtered_files.len(),
-                    self.workspace.files.len()
+                    self.workspace.editor.files.len()
                 ));
                 let enter_opens_match = filter_response.lost_focus()
                     && columns[0].input(|input| input.key_pressed(egui::Key::Enter))
@@ -179,7 +182,7 @@ impl StudioApp {
                         draw_workspace_tree(
                             ui,
                             &tree,
-                            self.workspace.selected_file.as_ref(),
+                            self.workspace.editor.selected_file.as_ref(),
                             !self.operation.running && !self.authoring.manifest_metadata_dirty,
                             &PathBuf::new(),
                             0,
@@ -193,9 +196,9 @@ impl StudioApp {
                 if let Some(path) = open_file {
                     self.open_workspace_file(path);
                 }
-                let selected_path = self.workspace.selected_file.clone();
+                let selected_path = self.workspace.editor.selected_file.clone();
                 let can_edit = !self.operation.running && !self.authoring.manifest_metadata_dirty;
-                if let Some(document) = self.workspace.active_document_mut() {
+                if let Some(document) = self.workspace.editor.active_document_mut() {
                     columns[1].push_id(selected_path.as_deref(), |ui| {
                         ui.add_enabled_ui(can_edit, |ui| {
                             egui::TextEdit::multiline(&mut document.contents)
@@ -210,10 +213,11 @@ impl StudioApp {
                 }
                 let active_contents = self
                     .workspace
+                    .editor
                     .active_document()
                     .map(|document| document.contents.clone())
                     .unwrap_or_default();
-                let active_dirty = self.workspace.active_document_is_dirty();
+                let active_dirty = self.workspace.editor.active_document_is_dirty();
                 let diagnostic = selected_path.as_deref().and_then(|path| {
                     let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
                     (name == "Vapor.toml" || name.ends_with(".vapor.toml") || name == "Cargo.toml")

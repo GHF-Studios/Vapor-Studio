@@ -1,6 +1,5 @@
 use super::super::{Section, StudioApp};
 use eframe::egui;
-use vapor_studio_core::ContentIdentity;
 
 impl StudioApp {
     #[allow(clippy::collapsible_if)]
@@ -10,7 +9,15 @@ impl StudioApp {
                 .catalog
                 .items
                 .iter()
-                .find(|content| super::super::catalog_content_selector(content) == identity)
+                .find(|content| {
+                    super::super::catalog_content_selector(content) == identity
+                        && super::super::catalog_matches_filters(
+                            content,
+                            self.catalog.source_filter,
+                            self.catalog.kind_filter.as_deref(),
+                            &self.catalog.search_query,
+                        )
+                })
                 .cloned()
             {
                 ui.heading("Content details");
@@ -107,6 +114,30 @@ impl StudioApp {
                         root.id == content.id && root.version == content.version
                     }) {
                         ui.strong("Selected for this profile");
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.operation.running
+                                && !self.has_unsaved_workspace_edits()
+                                && content.is_unambiguous(),
+                            egui::Button::new("Use this version for the active profile"),
+                        )
+                        .on_disabled_hover_text(if content.is_unambiguous() {
+                            "Save workspace edits before changing the active profile's source workspace."
+                        } else {
+                            "Resolve the identity conflict before selecting this content."
+                        })
+                        .clicked()
+                    {
+                        let workspace = content
+                            .locations
+                            .iter()
+                            .any(|location| {
+                                location.kind
+                                    == vapor_studio_core::CatalogLocationKind::Workspace
+                            })
+                            .then(|| std::path::PathBuf::from(self.workspace.root.trim()));
+                        self.assign_profile_root(content.identity(), workspace);
                     }
                 }
             }

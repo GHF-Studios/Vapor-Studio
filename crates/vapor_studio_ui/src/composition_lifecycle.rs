@@ -96,21 +96,105 @@ impl StudioApp {
         self.status = status.to_owned();
     }
 
+    pub(super) fn apply_profile_run_result(
+        &mut self,
+        result: vapor_studio_core::ProfileRunResult,
+        completed_message: &str,
+    ) {
+        let vapor_studio_core::ProfileRunResult {
+            composition,
+            profile_graph_matches,
+            launch_error,
+        } = result;
+        if !profile_graph_matches {
+            let detail = launch_error.unwrap_or_else(|| {
+                "The installed content no longer matches this profile's saved composition."
+                    .to_owned()
+            });
+            self.profile.items[self.profile.active_index].installation =
+                vapor_studio_core::InstallationState::OutOfDate {
+                    detail: detail.clone(),
+                    actual_graph: composition.graph,
+                    artifacts: installed_records(composition.artifacts),
+                    verified: false,
+                };
+            self.status = format!(
+                "Profile lock differs from the installed content: {detail}"
+            );
+            return;
+        }
+
+        let status = launch_error.map_or_else(
+            || completed_message.to_owned(),
+            |error| format!("Composition is intact, but launch failed: {error}"),
+        );
+        self.apply_installed_composition(composition, &status);
+    }
+
+    pub(super) fn apply_repaired_composition(
+        &mut self,
+        composition: vapor_studio_core::InstalledComposition,
+    ) {
+        if self.profile.items[self.profile.active_index]
+            .resolved_graph
+            .as_ref()
+            .is_some_and(|saved| {
+                !vapor_studio_core::resolved_graph_matches(saved, &composition.graph)
+            })
+        {
+            let detail = "Repair restored valid content, but its graph differs from this profile's saved composition.".to_owned();
+            self.profile.items[self.profile.active_index].installation =
+                vapor_studio_core::InstallationState::OutOfDate {
+                    detail: detail.clone(),
+                    actual_graph: composition.graph,
+                    artifacts: installed_records(composition.artifacts),
+                    verified: false,
+                };
+            self.status = format!(
+                "{detail} Review the installed graph, then update or explicitly adopt it."
+            );
+            return;
+        }
+        self.apply_installed_composition(
+            composition,
+            "Repaired the selected composition without changing its saved graph.",
+        );
+    }
+
     pub(super) fn apply_installation_check(
         &mut self,
         check: vapor_studio_core::InstallationCheck,
     ) {
-        let graph_fingerprint = check
-            .graph
-            .as_ref()
-            .and_then(vapor_studio_core::fingerprint_resolved_graph);
-        if let Some(graph) = check.graph {
-            self.profile.items[self.profile.active_index].resolved_graph = Some(graph);
-        }
         let checked = check.detail.len();
         let detail = check.detail.join("; ");
         let artifacts = installed_records(check.artifacts);
         if check.ok {
+            let graph_fingerprint = check
+                .graph
+                .as_ref()
+                .and_then(vapor_studio_core::fingerprint_resolved_graph);
+            if let Some(actual_graph) = check.graph {
+                let saved_graph = self.profile.items[self.profile.active_index]
+                    .resolved_graph
+                    .as_ref();
+                if saved_graph.is_some_and(|saved| {
+                    !vapor_studio_core::resolved_graph_matches(saved, &actual_graph)
+                }) {
+                    let message = "Verified installed content differs from this profile's saved graph.".to_owned();
+                    self.profile.items[self.profile.active_index].installation =
+                        vapor_studio_core::InstallationState::OutOfDate {
+                            detail: message.clone(),
+                            actual_graph,
+                            artifacts,
+                            verified: true,
+                        };
+                    self.status = format!(
+                        "{message} Review the installed graph, then update or explicitly adopt it."
+                    );
+                    return;
+                }
+                self.profile.items[self.profile.active_index].resolved_graph = Some(actual_graph);
+            }
             self.profile.items[self.profile.active_index].installation =
                 vapor_studio_core::InstallationState::Installed {
                     artifacts,
@@ -127,10 +211,33 @@ impl StudioApp {
         }
     }
 
+    pub(super) fn adopt_installed_profile_graph(&mut self) {
+        let state = self.profile.items[self.profile.active_index].installation.clone();
+        let vapor_studio_core::InstallationState::OutOfDate {
+            actual_graph,
+            artifacts,
+            verified: true,
+            ..
+        } = state
+        else {
+            return;
+        };
+        let graph_fingerprint =
+            vapor_studio_core::fingerprint_resolved_graph(&actual_graph);
+        self.profile.items[self.profile.active_index].resolved_graph = Some(actual_graph);
+        self.profile.items[self.profile.active_index].installation =
+            vapor_studio_core::InstallationState::Installed {
+                artifacts,
+                graph_fingerprint,
+            };
+        self.status = "Adopted the verified installed graph for this profile.".to_owned();
+    }
+
     pub(super) fn apply_verification_error(&mut self, error: String) {
         let artifacts = match self.profile.items[self.profile.active_index].installation.clone() {
             vapor_studio_core::InstallationState::Installed { artifacts, .. }
-            | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. } => artifacts,
+            | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. }
+            | vapor_studio_core::InstallationState::OutOfDate { artifacts, .. } => artifacts,
             _ => Vec::new(),
         };
         self.profile.items[self.profile.active_index].installation =
@@ -357,12 +464,14 @@ impl StudioApp {
         };
         let selector = content_selector(&root_package);
         let workspace = profile.workspace.map(|workspace| workspace.root);
+        let expected_graph = profile.resolved_graph;
         let arguments = profile.launch.arguments;
         self.spawn(OperationKind::RunInstalled, move |_context| {
-            OperationResult::Message(vapor_studio_core::run_installed_profile(
+            OperationResult::RunInstalled(vapor_studio_core::run_installed_profile(
                 &executable,
                 workspace.as_deref(),
                 &selector,
+                expected_graph.as_ref(),
                 &arguments,
             ))
         });

@@ -9,11 +9,7 @@ impl StudioApp {
                 self.refresh_workshop_subscriptions();
             }
         });
-        ui.label("Steam subscriptions are separate from Vapor Library imports. Import an item first, then choose whether it belongs in a profile.");
-        ui.weak(format!(
-            "Target profile: {} · local catalog remains available when Steam is offline",
-            self.profile.items[self.profile.active_index].name
-        ));
+        ui.label("Steam subscriptions are separate from Vapor cache imports. A subscribed item is not playable until its content is imported and composed.");
         if !self.workshop.subscriptions_loaded {
             ui.weak("Load your Steam Workshop subscriptions to review download state and import them into Vapor Library.");
         } else if self.workshop.subscriptions.is_empty() {

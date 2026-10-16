@@ -1,7 +1,7 @@
 use super::{StudioApp, content_selector, source_content_selector};
 use super::operation_protocol::OperationResult;
 use std::path::PathBuf;
-use vapor_core::OperationKind;
+use vapor_studio_core::OperationKind;
 
 impl StudioApp {
     pub(super) fn apply_remembered_sources(&mut self, known: Vec<PathBuf>) {
@@ -16,6 +16,7 @@ impl StudioApp {
     ) {
         self.catalog.sources = contents;
         self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.unregistered_scan_completed = false;
         self.status = summary;
     }
 
@@ -27,6 +28,7 @@ impl StudioApp {
     ) {
         self.catalog.sources = contents;
         self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.unregistered_scan_completed = false;
         self.workspace.pending_unregistration = None;
         self.invalidate_profiles_for_source_content(&identity);
         self.status = summary;
@@ -44,6 +46,7 @@ impl StudioApp {
             if scan.diagnostics.len() == 1 { "" } else { "s" },
         );
         self.workspace.unregistered_projects = scan;
+        self.workspace.unregistered_scan_completed = true;
     }
 
     pub(super) fn validate_source_project(&mut self, content: &vapor_studio_core::SourceContent) {
@@ -59,9 +62,10 @@ impl StudioApp {
                 return;
             }
         };
+        let operation_selector = selector.clone();
         self.spawn(OperationKind::Validate, move |_context| {
             OperationResult::Message(vapor_studio_core::validate_profile_source(
-                &executable, &root, &selector,
+                &executable, &root, &operation_selector,
             ))
         });
         self.status = format!("Validating {selector} through Vapor Shell…");

@@ -1,7 +1,7 @@
 use super::{StudioApp, catalog_content_selector, content_selector};
 use crate::navigation::{CatalogSourceFilter, Section};
 use std::path::PathBuf;
-use vapor_studio_core::ContentIdentity;
+use vapor_studio_core::{ContentIdentity, WorkspaceAssociation};
 
 
 pub(super) struct ProfileState {
@@ -155,7 +155,7 @@ impl StudioApp {
             );
             return;
         }
-        if self.workspace.has_dirty_documents()
+        if self.workspace.editor.has_dirty_documents()
             && current_workspace.as_deref() != workspace.as_deref()
         {
             self.status =

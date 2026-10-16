@@ -21,7 +21,7 @@ pub use profile::{
     ResolvedCompositionGraph, ResolvedDependencyIdentity, ResolvedNodeIdentity,
     WorkspaceAssociation, add_profile, decode_profiles, duplicate_profile,
     remove_profile, rename_profile,
-    fingerprint_resolved_graph,
+    fingerprint_resolved_graph, resolved_graph_matches,
 };
 pub use publishing::{
     WorkshopPackagePreview, WorkshopPublication, publish_reviewed_workshop_content,
@@ -30,6 +30,7 @@ pub use publishing::{
 pub use shell_content::{
     CompositionPreview, CompositionPreviewDependency, CompositionPreviewNode,
     CompositionPreviewSource, InstallationCheck, InstalledArtifact, InstalledComposition,
+    ProfileRunResult,
     WorkshopAcquisition, default_packagepack_selector, download_workshop_item,
     download_workshop_items,
     install_profile_composition, preview_profile_composition, repair_profile_composition,

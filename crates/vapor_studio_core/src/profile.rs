@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
@@ -107,6 +107,220 @@ pub fn fingerprint_resolved_graph(graph: &ResolvedCompositionGraph) -> Option<St
     Some(format!("vapor-graph-fnv1a-64-v1:{hash:016x}"))
 }
 
+/// Check that an installed graph still satisfies the identities saved by a profile.
+/// Missing legacy payload/source facts are tolerated once so a successful launch can
+/// upgrade that profile to a complete lock. Facts already present must match exactly.
+pub fn resolved_graph_matches(
+    expected: &ResolvedCompositionGraph,
+    actual: &ResolvedCompositionGraph,
+) -> bool {
+    if expected.root != actual.root
+        || expected.effective_engine != actual.effective_engine
+        || expected.effective_game != actual.effective_game
+    {
+        return false;
+    }
+    let Some(expected_nodes) = canonical_resolved_nodes(expected) else {
+        return false;
+    };
+    let Some(actual_nodes) = canonical_resolved_nodes(actual) else {
+        return false;
+    };
+    if expected_nodes.len() != actual_nodes.len() {
+        return false;
+    }
+    expected_nodes.iter().all(|(identity, expected)| {
+        let Some(actual) = actual_nodes.get(identity) else {
+            return false;
+        };
+        expected.kind == actual.kind
+            && expected.dependencies == actual.dependencies
+            && expected
+                .fingerprint
+                .is_none_or(|fingerprint| actual.fingerprint == Some(fingerprint))
+            && expected
+                .source
+                .is_none_or(|source| actual.source == Some(source))
+    })
+}
+
+struct CanonicalResolvedNode<'a> {
+    kind: &'a str,
+    fingerprint: Option<&'a str>,
+    source: Option<&'a str>,
+    dependencies: Vec<(String, ContentIdentity)>,
+}
+
+fn canonical_resolved_nodes(
+    graph: &ResolvedCompositionGraph,
+) -> Option<BTreeMap<ContentIdentity, CanonicalResolvedNode<'_>>> {
+    let mut nodes = BTreeMap::new();
+    for node in &graph.nodes {
+        let mut bindings = BTreeSet::new();
+        let mut dependencies = node
+            .dependencies
+            .iter()
+            .map(|dependency| {
+                if !bindings.insert(dependency.binding.clone()) {
+                    return None;
+                }
+                Some((dependency.binding.clone(), dependency.content.clone()))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        dependencies.sort();
+        if nodes
+            .insert(
+                node.content.clone(),
+                CanonicalResolvedNode {
+                    kind: &node.kind,
+                    fingerprint: node.fingerprint.as_deref(),
+                    source: node.source.as_deref(),
+                    dependencies,
+                },
+            )
+            .is_some()
+        {
+            return None;
+        }
+    }
+    if !nodes.contains_key(&graph.root)
+        || !nodes.contains_key(&graph.effective_engine)
+        || graph
+            .effective_game
+            .as_ref()
+            .is_some_and(|game| !nodes.contains_key(game))
+        || nodes.values().any(|node| {
+            node.dependencies
+                .iter()
+                .any(|(_, dependency)| !nodes.contains_key(dependency))
+        })
+    {
+        return None;
+    }
+    Some(nodes)
+}
+
+#[cfg(test)]
+mod resolved_graph_tests {
+    use super::{
+        ContentIdentity, InstallationState, ResolvedCompositionGraph,
+        ResolvedDependencyIdentity, ResolvedNodeIdentity, resolved_graph_matches,
+    };
+
+    fn identity(id: &str, version: &str) -> ContentIdentity {
+        ContentIdentity {
+            id: id.to_owned(),
+            version: Some(version.to_owned()),
+        }
+    }
+
+    fn graph(engine_fingerprint: &str) -> ResolvedCompositionGraph {
+        ResolvedCompositionGraph {
+            root: identity("org.game", "1.0.0"),
+            effective_engine: identity("org.engine", "2.0.0"),
+            effective_game: Some(identity("org.gameplay", "3.0.0")),
+            nodes: vec![
+                ResolvedNodeIdentity {
+                    content: identity("org.engine", "2.0.0"),
+                    kind: "Engine".to_owned(),
+                    fingerprint: Some(engine_fingerprint.to_owned()),
+                    source: Some("workshop:42".to_owned()),
+                    dependencies: Vec::new(),
+                },
+                ResolvedNodeIdentity {
+                    content: identity("org.game", "1.0.0"),
+                    kind: "Packagepack".to_owned(),
+                    fingerprint: Some("sha256:root".to_owned()),
+                    source: Some("workspace:/game".to_owned()),
+                    dependencies: vec![
+                        ResolvedDependencyIdentity {
+                            binding: "engine".to_owned(),
+                            content: identity("org.engine", "2.0.0"),
+                        },
+                        ResolvedDependencyIdentity {
+                            binding: "game".to_owned(),
+                            content: identity("org.gameplay", "3.0.0"),
+                        },
+                    ],
+                },
+                ResolvedNodeIdentity {
+                    content: identity("org.gameplay", "3.0.0"),
+                    kind: "Game".to_owned(),
+                    fingerprint: Some("sha256:game".to_owned()),
+                    source: Some("cache".to_owned()),
+                    dependencies: Vec::new(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn resolved_graph_match_ignores_record_order_but_checks_payload_and_edges() {
+        let expected = graph("sha256:engine");
+        let mut reordered = expected.clone();
+        reordered.nodes.reverse();
+        reordered.nodes[1].dependencies.reverse();
+        assert!(resolved_graph_matches(&expected, &reordered));
+
+        let changed_payload = graph("sha256:changed");
+        assert!(!resolved_graph_matches(&expected, &changed_payload));
+
+        let mut changed_source = expected.clone();
+        changed_source.nodes[0].source = Some("cache".to_owned());
+        assert!(!resolved_graph_matches(&expected, &changed_source));
+
+        let mut changed_engine_version = expected.clone();
+        changed_engine_version.effective_engine.version = Some("2.0.1".to_owned());
+        assert!(!resolved_graph_matches(&expected, &changed_engine_version));
+
+        let mut changed_edges = expected.clone();
+        changed_edges.nodes[1].dependencies[1].content = identity("org.other-game", "3.0.0");
+        assert!(!resolved_graph_matches(&expected, &changed_edges));
+        assert!(!resolved_graph_matches(&changed_edges, &changed_edges));
+
+        let mut duplicate_binding = expected.clone();
+        duplicate_binding.nodes[1].dependencies[1].binding = "engine".to_owned();
+        assert!(!resolved_graph_matches(&duplicate_binding, &duplicate_binding));
+    }
+
+    #[test]
+    fn installed_file_verification_does_not_survive_profile_reload() {
+        let state = InstallationState::OutOfDate {
+            detail: "graph changed".to_owned(),
+            actual_graph: graph("sha256:engine"),
+            artifacts: Vec::new(),
+            verified: true,
+        };
+        let encoded = serde_json::to_string(&state).unwrap();
+        assert!(!encoded.contains("verified"));
+        let decoded: InstallationState = serde_json::from_str(&encoded).unwrap();
+        assert!(matches!(
+            decoded,
+            InstallationState::OutOfDate {
+                verified: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn legacy_graph_without_provenance_can_be_upgraded_after_identity_match() {
+        let actual = graph("sha256:engine");
+        let mut legacy = actual.clone();
+        for node in &mut legacy.nodes {
+            node.fingerprint = None;
+            node.source = None;
+        }
+        assert!(resolved_graph_matches(&legacy, &actual));
+
+        legacy.nodes[0].dependencies.push(ResolvedDependencyIdentity {
+            binding: "asset".to_owned(),
+            content: identity("org.asset", "1.0.0"),
+        });
+        assert!(!resolved_graph_matches(&legacy, &actual));
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceAssociation {
     pub root: PathBuf,
@@ -136,6 +350,14 @@ pub enum InstallationState {
     Installed {
         artifacts: Vec<InstalledArtifactRecord>,
         graph_fingerprint: Option<String>,
+    },
+    OutOfDate {
+        detail: String,
+        actual_graph: ResolvedCompositionGraph,
+        artifacts: Vec<InstalledArtifactRecord>,
+        /// Session-local proof; installed files must be checked again after restart.
+        #[serde(skip)]
+        verified: bool,
     },
     Partial {
         detail: String,

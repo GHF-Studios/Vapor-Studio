@@ -10,15 +10,20 @@ pub(super) fn discover_workspace_and_catalog(
 ) -> (
     Result<Vec<vapor_studio_core::SourceContent>, String>,
     Result<Vec<vapor_studio_core::CatalogContent>, String>,
+    Result<vapor_studio_core::UnregisteredProjectScan, String>,
 ) {
     let source = workspace_root
         .map(|root| vapor_studio_core::discover_source_content(executable, root))
         .unwrap_or_else(|| Err("Open a workspace to browse authored source content.".to_owned()));
     let catalog = vapor_studio_core::discover_content_catalog(executable, workspace_root);
-    (source, catalog)
+    let unregistered = workspace_root
+        .map(|root| vapor_studio_core::scan_unregistered_content_projects(executable, root))
+        .unwrap_or_else(|| Ok(vapor_studio_core::UnregisteredProjectScan::default()));
+    (source, catalog, unregistered)
 }
 
 pub(super) struct CatalogState {
+    pub(super) discover_tab: DiscoverTab,
     pub(super) search_query: String,
     pub(super) sources: Vec<vapor_studio_core::SourceContent>,
     pub(super) items: Vec<vapor_studio_core::CatalogContent>,
@@ -27,9 +32,17 @@ pub(super) struct CatalogState {
     pub(super) selected: Option<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum DiscoverTab {
+    #[default]
+    Local,
+    Workshop,
+}
+
 impl Default for CatalogState {
     fn default() -> Self {
         Self {
+            discover_tab: DiscoverTab::Local,
             search_query: String::new(),
             sources: Vec::new(),
             items: Vec::new(),
@@ -65,8 +78,8 @@ impl StudioApp {
             }
         };
         self.spawn(vapor_studio_core::OperationKind::Discover, move |_context| {
-            let (source, catalog) = discover_workspace_and_catalog(&executable, root.as_deref());
-            OperationResult::Discovery(source, catalog)
+            let (source, catalog, unregistered) = discover_workspace_and_catalog(&executable, root.as_deref());
+            OperationResult::Discovery(source, catalog, unregistered)
         });
     }
 
@@ -74,6 +87,7 @@ impl StudioApp {
         &mut self,
         source_result: Result<Vec<vapor_studio_core::SourceContent>, String>,
         catalog_result: Result<Vec<vapor_studio_core::CatalogContent>, String>,
+        unregistered_result: Result<vapor_studio_core::UnregisteredProjectScan, String>,
     ) {
         let source_error = match source_result {
             Ok(contents) => {
@@ -103,6 +117,29 @@ impl StudioApp {
                     || format!("Could not refresh the local content catalog: {error}"),
                     |source_error| format!("Workspace sources failed: {source_error}. Local catalog failed: {error}"),
                 );
+            }
+        }
+        match unregistered_result {
+            Ok(scan) => {
+                self.workspace.unregistered_scan_completed = true;
+                self.workspace.unregistered_projects = scan;
+            }
+            Err(error) => {
+                self.workspace.unregistered_scan_completed = false;
+                self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+                if !self.status.is_empty() {
+                    self.status.push(' ');
+                }
+                self.status.push_str(&format!("Workspace project scan could not complete: {error}"));
+            }
+        }
+        if self.workspace.unregistered_scan_completed {
+            let candidates = self.workspace.unregistered_projects.candidates.len();
+            if candidates > 0 {
+                self.status.push_str(&format!(
+                    " Found {candidates} existing content project{} ready to adopt.",
+                    if candidates == 1 { "" } else { "s" },
+                ));
             }
         }
         match self.profile_composition.take_repreview_request() {
@@ -138,7 +175,7 @@ impl StudioApp {
     }
 }
 
-fn content_selector(identity: &ContentIdentity) -> String {
+pub(super) fn content_selector(identity: &ContentIdentity) -> String {
     identity
         .version
         .as_deref()
@@ -213,4 +250,24 @@ pub(super) fn catalog_matches_filters(
             .as_deref()
             .unwrap_or_default()
             .contains(&query)
+}
+
+pub(super) fn workspace_candidate_matches_filters(
+    candidate: &vapor_studio_core::UnregisteredProjectCandidate,
+    source_filter: CatalogSourceFilter,
+    kind_filter: Option<&str>,
+    query: &str,
+) -> bool {
+    if !matches!(source_filter, CatalogSourceFilter::All | CatalogSourceFilter::Workspace) {
+        return false;
+    }
+    let kind = candidate.kind.to_string();
+    if kind_filter.is_some_and(|filter| filter != kind) {
+        return false;
+    }
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || candidate.id.to_lowercase().contains(&query)
+        || kind.to_lowercase().contains(&query)
+        || candidate.path.to_string_lossy().to_lowercase().contains(&query)
 }

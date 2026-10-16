@@ -1,10 +1,13 @@
 use std::path::PathBuf;
+use crate::navigation::Section;
 use vapor_core::VaporWorkspace;
 use vapor_studio_core::ContentIdentity;
 
 pub(super) struct WorkspaceOpenSnapshot {
     pub(super) root: PathBuf,
+    pub(super) landing_section: Section,
     pub(super) source_content: Vec<vapor_studio_core::SourceContent>,
+    pub(super) unregistered_projects: Result<vapor_studio_core::UnregisteredProjectScan, String>,
     pub(super) local_catalog: Result<Vec<vapor_studio_core::CatalogContent>, String>,
     pub(super) workspace_files: Vec<PathBuf>,
 }
@@ -21,6 +24,7 @@ pub(super) enum OperationResult {
     Discovery(
         Result<Vec<vapor_studio_core::SourceContent>, String>,
         Result<Vec<vapor_studio_core::CatalogContent>, String>,
+        Result<vapor_studio_core::UnregisteredProjectScan, String>,
     ),
     Message(Result<String, String>),
     CompositionPreview(Result<vapor_studio_core::CompositionPreview, String>),
@@ -37,8 +41,9 @@ pub(super) enum OperationResult {
     SourceRuntimeOutputsLoaded(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
     SourceRuntimeOutputsSaved(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
     Install(Result<vapor_studio_core::InstalledComposition, String>),
+    RunInstalled(Result<vapor_studio_core::ProfileRunResult, String>),
     Update(Result<vapor_studio_core::InstalledComposition, String>),
-    RunProfile(Result<vapor_studio_core::InstalledComposition, String>),
+    RunProfile(Result<vapor_studio_core::ProfileRunResult, String>),
     Verify(Result<vapor_studio_core::InstallationCheck, String>),
     Repair(Result<vapor_studio_core::InstalledComposition, String>),
     WorkshopStage(Result<vapor_studio_core::WorkshopPackagePreview, String>),
@@ -72,6 +77,7 @@ impl OperationResult {
             | Self::SourceRuntimeOutputsLoaded(Err(error))
             | Self::SourceRuntimeOutputsSaved(Err(error))
             | Self::Install(Err(error))
+            | Self::RunInstalled(Err(error))
             | Self::Update(Err(error))
             | Self::RunProfile(Err(error))
             | Self::Verify(Err(error))
@@ -87,15 +93,22 @@ impl OperationResult {
                 let messages = errors.cloned().collect::<Vec<_>>();
                 (!messages.is_empty()).then(|| messages.join("; "))
             }
-            Self::Discovery(_, Err(error)) => Some(error.clone()),
+            Self::Discovery(_, Err(error), _) | Self::Discovery(_, _, Err(error)) => {
+                Some(error.clone())
+            }
             Self::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
+            Self::RunInstalled(Ok(result)) | Self::RunProfile(Ok(result))
+                if result.launch_error.is_some() =>
+            {
+                result.launch_error.clone()
+            }
             _ => None,
         }
     }
 
     pub(super) fn refreshes_content_catalog(&self) -> bool {
         match self {
-            Self::WorkshopAcquisition(_) => true,
+            Self::WorkshopAcquisition(_) | Self::RunInstalled(Ok(_)) => true,
             Self::FileSaved(Ok(path)) => path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml")),

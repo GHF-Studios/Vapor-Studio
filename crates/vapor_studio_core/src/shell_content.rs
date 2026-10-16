@@ -34,6 +34,14 @@ pub struct InstalledComposition {
     pub artifacts: Vec<InstalledArtifact>,
 }
 
+/// Installed graph plus the outcome of attempting to launch it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileRunResult {
+    pub composition: InstalledComposition,
+    pub profile_graph_matches: bool,
+    pub launch_error: Option<String>,
+}
+
 /// Provenance selected for one node in a read-only composition preview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompositionPreviewSource {
@@ -259,9 +267,14 @@ pub fn verify_installation(
             ),
         });
     }
-    let graph = content::installed_packagepack_graph(&installation, root_selector)
-        .ok()
-        .map(|graph| snapshot_installed_graph(&graph));
+    let graph = match content::installed_packagepack_graph(&installation, root_selector) {
+        Ok(graph) => Some(snapshot_installed_graph(&graph)),
+        Err(error) => {
+            ok = false;
+            detail.push(format!("composition graph could not be resolved: {error}"));
+            None
+        }
+    };
     Ok(InstallationCheck {
         ok,
         detail,
@@ -329,10 +342,17 @@ pub fn run_installed_profile(
     application_executable: &Path,
     workspace_root: Option<&Path>,
     selector: &str,
+    expected_graph: Option<&crate::ResolvedCompositionGraph>,
     arguments: &[String],
-) -> Result<String, String> {
+) -> Result<ProfileRunResult, String> {
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     if !content::has_installed_artifact(&installation, selector)? {
+        if expected_graph.is_some() {
+            return Err(
+                "This profile's saved composition is not installed. Install or restore the saved graph before playing it."
+                    .to_owned(),
+            );
+        }
         let paths = workspace_root
             .map(|root| {
                 EnvironmentPaths::from_installation_and_source_path(installation.clone(), root)
@@ -340,14 +360,25 @@ pub fn run_installed_profile(
             .transpose()?;
         content::install(&installation, paths.as_ref(), selector)?;
     }
-    let plan = content::prepare_packagepack_launch(&installation, selector)?;
-    let summary = format!(
-        "Launched {} using {}",
-        plan.packagepack_id(),
-        plan.engine_id()
-    );
-    content::run_packagepack_launch(&plan, "studio-profile", arguments)?;
-    Ok(summary)
+    let composition = installed_composition(&installation, selector)?;
+    let profile_graph_matches = expected_graph.is_none_or(|expected| {
+        crate::resolved_graph_matches(expected, &composition.graph)
+    });
+    let launch_error = if profile_graph_matches {
+        content::prepare_packagepack_launch(&installation, selector)
+            .and_then(|plan| content::run_packagepack_launch(&plan, "studio-profile", arguments))
+            .err()
+    } else {
+        Some(
+            "The installed content no longer matches this profile's saved composition. Preview and update the profile before playing it."
+                .to_owned(),
+        )
+    };
+    Ok(ProfileRunResult {
+        composition,
+        profile_graph_matches,
+        launch_error,
+    })
 }
 
 /// Install source changes for one profile, then launch that exact installed graph.
@@ -356,16 +387,16 @@ pub fn run_source_profile(
     workspace_root: &Path,
     selector: &str,
     arguments: &[String],
-) -> Result<InstalledComposition, String> {
+) -> Result<ProfileRunResult, String> {
     let composition =
         install_profile_composition(application_executable, Some(workspace_root), selector)?;
     run_installed_profile(
         application_executable,
         Some(workspace_root),
         selector,
+        Some(&composition.graph),
         arguments,
-    )?;
-    Ok(composition)
+    )
 }
 
 fn installed_composition(

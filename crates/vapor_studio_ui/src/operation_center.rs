@@ -3,8 +3,7 @@ use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("studio-operation-center").show(ui, |ui| {
-            egui::CollapsingHeader::new(if self.operation.running {
+        egui::CollapsingHeader::new(if self.operation.running {
                 "Operation running"
             } else {
                 "Operations and activity"
@@ -43,16 +42,16 @@ impl StudioApp {
                 }
                 for operation in self.operation.operation_history.iter().take(5) {
                     ui.horizontal(|ui| {
-                        ui.small(operation_kind_label(&operation.kind));
-                        ui.small(operation_status_label(&operation.status));
+                        ui.small(operation_kind_label(&operation.event.kind));
+                        ui.small(operation_status_label(&operation.event.status));
+                        ui.weak(super::operations::elapsed_label(operation.completed_at_unix));
                     });
                 }
             });
-        });
     }
 }
 
-fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str {
+pub(super) fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str {
     use vapor_studio_core::OperationKind::*;
     match kind {
         Discover => "Refresh content catalog",

@@ -3,8 +3,8 @@ use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_library(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Compositions");
-        ui.label("Profiles keep their own content choice, workspace, launch settings, and installed graph.");
+        ui.heading("Play profiles");
+        ui.label("Manage launchable compositions, installed content, and the workspace each one uses.");
         self.draw_profile_selector_panel(ui);
 
         let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {

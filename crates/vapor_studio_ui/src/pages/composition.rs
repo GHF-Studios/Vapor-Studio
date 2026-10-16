@@ -5,7 +5,7 @@ use vapor_studio_core::SourceCompositionLink;
 
 impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Compose source content");
+        ui.heading("Compose content graph");
         ui.label("Edit the dependency graph of a locally authored content project.");
         ui.weak("Vapor Shell owns validation and manifest writes. Studio shows the current source snapshot and the exact graph you are changing.");
 

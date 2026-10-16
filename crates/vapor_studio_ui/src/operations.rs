@@ -2,10 +2,11 @@ use super::StudioApp;
 use super::operation_protocol::OperationResult;
 use std::{
     collections::VecDeque,
-    path::PathBuf,
     sync::{Arc, Mutex, mpsc::{self, Receiver, TryRecvError}},
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
+use serde::{Deserialize, Serialize};
 use vapor_core::{
     OperationEvent as CoreOperationEvent,
     OperationRequest as CoreOperationRequest,
@@ -21,7 +22,13 @@ pub(super) struct OperationState {
     pub(super) receiver: Option<Receiver<(OperationId, OperationResult)>>,
     pub(super) latest_operation_event: Arc<Mutex<Option<CoreOperationEvent>>>,
     pub(super) active_operation: Option<OperationEvent>,
-    pub(super) operation_history: VecDeque<OperationEvent>,
+    pub(super) operation_history: VecDeque<HistoricalOperation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct HistoricalOperation {
+    pub(super) completed_at_unix: u64,
+    pub(super) event: OperationEvent,
 }
 
 impl Default for OperationState {
@@ -33,6 +40,33 @@ impl Default for OperationState {
             active_operation: None,
             operation_history: VecDeque::new(),
         }
+    }
+}
+
+impl OperationState {
+    pub(super) fn restore_history(&mut self, encoded: Option<&str>) {
+        let Some(history) = encoded.and_then(|value| {
+            serde_json::from_str::<VecDeque<HistoricalOperation>>(value).ok()
+        }) else {
+            return;
+        };
+        self.operation_history = history.into_iter().take(20).collect();
+    }
+}
+
+pub(super) fn elapsed_label(completed_at_unix: u64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs());
+    let elapsed = now.saturating_sub(completed_at_unix);
+    if elapsed < 60 {
+        "just now".to_owned()
+    } else if elapsed < 3_600 {
+        format!("{}m ago", elapsed / 60)
+    } else if elapsed < 86_400 {
+        format!("{}h ago", elapsed / 3_600)
+    } else {
+        format!("{}d ago", elapsed / 86_400)
     }
 }
 
@@ -99,7 +133,13 @@ impl StudioApp {
                         summary: self.status.clone(),
                     },
                 };
-                self.operation.operation_history.push_front(event.clone());
+                let completed_at_unix = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_secs());
+                self.operation.operation_history.push_front(HistoricalOperation {
+                    completed_at_unix,
+                    event: event.clone(),
+                });
                 self.operation.operation_history.truncate(20);
             }
             self.operation.active_operation = None;

@@ -1,3 +1,4 @@
+use crate::ContentIdentity;
 use std::path::{Path, PathBuf};
 use vapor_shell::{
     content,

@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Section {
     Home,
     Discover,
@@ -34,26 +34,17 @@ impl CatalogSourceFilter {
             Self::Workspace => "Workspace source",
             Self::Cache => "Vapor cache",
             Self::Installed => "Installed",
-            Self::Workshop => "Workshop-backed",
+            Self::Workshop => "Workshop cache",
         }
     }
 }
 
 impl Section {
-    pub(super) const ALL: [Self; 7] = [
-        Self::Home,
-        Self::Discover,
-        Self::Library,
-        Self::Compose,
-        Self::Create,
-        Self::Workspace,
-        Self::Publish,
-    ];
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Home => "Home",
             Self::Discover => "Discover",
-            Self::Library => "Library",
+            Self::Library => "Play",
             Self::Compose => "Compose",
             Self::Create => "Create",
             Self::Workspace => "Workspace",

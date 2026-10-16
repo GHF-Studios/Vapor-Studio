@@ -1,9 +1,9 @@
 use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
-use super::workspace_ops::WorkspaceDocument;
+use super::workspace_editor::WorkspaceDocument;
 use super::workspace_files::discover_workspace_files;
 use super::StudioApp;
 use std::{fs, path::PathBuf};
-use vapor_core::OperationKind;
+use vapor_studio_core::OperationKind;
 use crate::navigation::Section;
 
 impl StudioApp {
@@ -14,10 +14,11 @@ impl StudioApp {
         files: Vec<PathBuf>,
     ) {
         self.invalidate_workshop_review();
-        self.workspace.files = files;
-        self.workspace.selected_file = Some(manifest.clone());
-        self.workspace.files_open = true;
-        self.workspace.editor_documents.insert(
+        self.authoring.create_details_open = false;
+        self.workspace.editor.files = files;
+        self.workspace.editor.selected_file = Some(manifest.clone());
+        self.workspace.editor.files_open = true;
+        self.workspace.editor.documents.insert(
             manifest,
             WorkspaceDocument {
                 original: contents.clone(),
@@ -133,6 +134,7 @@ impl StudioApp {
             .and_then(|root| {
                 vapor_studio_core::discover_source_content(&open_executable, &root)
                     .and_then(|contents| {
+                        let unregistered_projects = vapor_studio_core::scan_unregistered_content_projects(&open_executable, &root);
                         let catalog = vapor_studio_core::discover_content_catalog(
                             &open_executable,
                             Some(&root),
@@ -140,7 +142,9 @@ impl StudioApp {
                         discover_workspace_files(&root)
                             .map(|files| WorkspaceOpenSnapshot {
                                 root: root.clone(),
+                                landing_section: crate::navigation::Section::Workspace,
                                 source_content: contents,
+                                unregistered_projects,
                                 local_catalog: catalog,
                                 workspace_files: files,
                             })

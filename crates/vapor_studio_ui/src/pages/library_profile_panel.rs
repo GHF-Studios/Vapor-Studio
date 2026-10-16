@@ -53,9 +53,6 @@ impl StudioApp {
     }
 }
 
-use super::super::StudioApp;
-use eframe::egui;
-
 impl StudioApp {
     pub(super) fn draw_profile_management_panel(
         &mut self,

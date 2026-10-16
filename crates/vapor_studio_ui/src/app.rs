@@ -37,6 +37,7 @@ mod workshop;
 
 use crate::navigation::Section;
 use std::path::PathBuf;
+use eframe::egui;
 use operations::OperationState;
 use profiles::ProfileState;
 use source_authoring::AuthoringState;
@@ -68,6 +69,7 @@ impl StudioApp {
         workspace: Option<PathBuf>,
         play_mode: bool,
     ) -> Self {
+        configure_studio_visuals(&creation.egui_ctx);
         let saved_workspace = creation
             .storage
             .and_then(|storage| storage.get_string("workspace_root"));
@@ -95,6 +97,9 @@ impl StudioApp {
         let saved_profile_id = creation
             .storage
             .and_then(|storage| storage.get_string("active_profile_id"));
+        let saved_operation_history = creation
+            .storage
+            .and_then(|storage| storage.get_string("operation_history"));
         let active_profile = saved_profile_id
             .as_deref()
             .and_then(|id| {
@@ -122,7 +127,9 @@ impl StudioApp {
         };
         let profile_name_draft = profiles[active_profile].name.clone();
         let mut workspace_state = WorkspaceState::new(workspace_root, workspace_root_draft, root);
-        workspace_state.editor_draft_recovery = saved_editor_drafts;
+        workspace_state.editor.draft_recovery = saved_editor_drafts;
+        let mut operation = OperationState::default();
+        operation.restore_history(saved_operation_history.as_deref());
         let mut app = Self {
             section: if play_mode {
                 Section::Library
@@ -144,18 +151,32 @@ impl StudioApp {
             authoring: AuthoringState::default(),
             profile_composition: ProfileCompositionState::default(),
             status: "Choose a workspace or discover content in this folder.".to_owned(),
-            operation: OperationState::default(),
+            operation,
             diagnostics: vapor_devtools::connect(None),
         };
         app.refresh_registered_sources();
         if play_mode {
             app.launch_default_profile();
         } else if let Some(workspace) = requested_workspace {
-            app.open_workspace_path(workspace);
+            app.open_workspace_path_to(workspace, Section::Home);
         } else {
             app.discover();
         }
         app
     }
+
+}
+
+fn configure_studio_visuals(context: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = egui::Color32::from_rgb(15, 20, 28);
+    visuals.window_fill = egui::Color32::from_rgb(20, 27, 36);
+    visuals.extreme_bg_color = egui::Color32::from_rgb(9, 13, 19);
+    visuals.faint_bg_color = egui::Color32::from_rgb(23, 31, 41);
+    visuals.selection.bg_fill = egui::Color32::from_rgb(43, 92, 116);
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(29, 39, 51);
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(39, 59, 75);
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(39, 100, 126);
+    context.set_visuals(visuals);
 
 }
