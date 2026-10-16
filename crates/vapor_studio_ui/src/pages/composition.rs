@@ -46,7 +46,7 @@ impl StudioApp {
             if ui
                 .add_enabled(
                     !self.running
-                        && !self.workspace_editor_dirty
+                        && !self.workspace.editor_dirty
                     && !self.composition_edit_selector.trim().is_empty(),
                     egui::Button::new("Load dependencies"),
                 )
@@ -259,6 +259,6 @@ impl StudioApp {
             }
         }
         ui.add_space(6.0);
-        ui.small(format!("Workspace: {}", PathBuf::from(self.workspace_root.trim()).display()));
+        ui.small(format!("Workspace: {}", PathBuf::from(self.workspace.root.trim()).display()));
     }
 }

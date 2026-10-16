@@ -85,7 +85,7 @@ impl StudioApp {
         if !self.require_open_workspace("preview this source composition") {
             return;
         }
-        let workspace = Some(PathBuf::from(self.workspace_root.trim()));
+        let workspace = Some(PathBuf::from(self.workspace.root.trim()));
         self.preview_composition(selector, workspace, "Resolving this source composition against workspace, cache, and installed content…");
     }
 

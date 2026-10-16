@@ -24,7 +24,7 @@ impl StudioApp {
                         ui.selectable_value(&mut self.catalog_kind_filter, Some(kind.clone()), kind);
                     }
                 });
-            if ui.add_enabled(!self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Refresh local catalog"))
+            if ui.add_enabled(!self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Refresh local catalog"))
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
                 .clicked()
             {
@@ -104,7 +104,7 @@ impl StudioApp {
                                 });
                                 if available_packagepack
                                     && ui.add_enabled(
-                                        !self.running && !self.workspace_editor_dirty,
+                                        !self.running && !self.workspace.editor_dirty,
                                         egui::Button::new(format!(
                                             "Set {} root",
                                             self.profiles[self.active_profile].name
@@ -116,7 +116,7 @@ impl StudioApp {
                                 }
                                 if self.profiles[self.active_profile].root_package.is_some()
                                     && ui.add_enabled(
-                                        !self.running && !self.workspace_editor_dirty,
+                                        !self.running && !self.workspace.editor_dirty,
                                         egui::Button::new(format!(
                                             "Recheck {} plan",
                                             self.profiles[self.active_profile].name
@@ -211,7 +211,7 @@ impl StudioApp {
                         ui.weak("In Vapor Library");
                         if available_packagepack
                             && ui.add_enabled(
-                                !self.running && !self.workspace_editor_dirty,
+                                !self.running && !self.workspace.editor_dirty,
                                 egui::Button::new(format!(
                                     "Set {} root",
                                     self.profiles[self.active_profile].name
@@ -224,7 +224,7 @@ impl StudioApp {
                         } else if !available_packagepack
                             && self.profiles[self.active_profile].root_package.is_some()
                             && ui.add_enabled(
-                                !self.running && !self.workspace_editor_dirty,
+                                !self.running && !self.workspace.editor_dirty,
                                 egui::Button::new(format!(
                                     "Recheck {} plan",
                                     self.profiles[self.active_profile].name
@@ -266,7 +266,7 @@ impl StudioApp {
                     acquisition.kind));
                 ui.label(format!("{} · {}", acquisition.cache_root.display(), acquisition.fingerprint));
                 if acquisition.kind == "packagepack" {
-                    if ui.add_enabled(!self.running && !self.workspace_editor_dirty,
+                    if ui.add_enabled(!self.running && !self.workspace.editor_dirty,
                         egui::Button::new(format!(
                             "Use as {} root",
                             self.profiles[self.active_profile].name
@@ -282,7 +282,7 @@ impl StudioApp {
                     let has_root = self.profiles[self.active_profile].root_package.is_some();
                     if ui
                         .add_enabled(
-                            !self.running && !self.workspace_editor_dirty && has_root,
+                            !self.running && !self.workspace.editor_dirty && has_root,
                             egui::Button::new(format!(
                                 "Recheck {} composition",
                                 self.profiles[self.active_profile].name

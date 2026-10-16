@@ -8,7 +8,7 @@ impl StudioApp {
         if !self.require_open_workspace("edit a source content dependency graph") { return; }
         let selector = self.composition_edit_selector.trim().to_owned();
         if selector.is_empty() { self.status = "Select a source content project first.".to_owned(); return; }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; } };
         self.spawn(OperationKind::LoadComposition, move |_context| {
             OperationResult::SourceCompositionLoaded(vapor_studio_core::load_source_composition(&executable, &root, &selector))
@@ -22,7 +22,7 @@ impl StudioApp {
         let selector = composition.version.as_deref()
             .map(|version| format!("{}@{version}", composition.id))
             .unwrap_or_else(|| composition.id.clone());
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; } };
         self.spawn(OperationKind::SaveComposition, move |_context| {
             OperationResult::SourceCompositionSaved(vapor_studio_core::save_source_composition(
@@ -35,7 +35,7 @@ impl StudioApp {
     pub(super) fn load_source_workshop_metadata(&mut self, content: &vapor_studio_core::SourceContent) {
         if !self.require_open_workspace("edit Workshop metadata") { return; }
         let selector = source_content_selector(content);
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
@@ -51,7 +51,7 @@ impl StudioApp {
     pub(super) fn load_source_runtime_outputs(&mut self, content: &vapor_studio_core::SourceContent) {
         if !self.require_open_workspace("edit runtime output declarations") { return; }
         let selector = source_content_selector(content);
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
@@ -66,7 +66,7 @@ impl StudioApp {
 
     pub(super) fn save_source_runtime_outputs(&mut self) {
         if !self.require_open_workspace("save runtime output declarations") { return; }
-        if self.workspace_editor_dirty {
+        if self.workspace.editor_dirty {
             self.status = "Save or reload the open file before saving runtime outputs.".to_owned();
             return;
         }
@@ -85,7 +85,7 @@ impl StudioApp {
             .map(|version| format!("{}@{version}", outputs.id))
             .unwrap_or_else(|| outputs.id.clone());
         let expected_source = outputs.source;
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
@@ -119,7 +119,7 @@ impl StudioApp {
 
     pub(super) fn save_source_workshop_metadata(&mut self) {
         if !self.require_open_workspace("save Workshop metadata") { return; }
-        if self.workspace_editor_dirty {
+        if self.workspace.editor_dirty {
             self.status = "Save or reload the open file before saving Workshop metadata.".to_owned();
             return;
         }
@@ -152,7 +152,7 @@ impl StudioApp {
             .map(|version| format!("{}@{version}", metadata.id))
             .unwrap_or_else(|| metadata.id.clone());
         let expected_source = metadata.source;
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
@@ -182,7 +182,7 @@ impl StudioApp {
             return;
         }
         let root = ContentIdentity { id: composition.id.clone(), version: composition.version.clone() };
-        self.assign_profile_root(root, Some(PathBuf::from(self.workspace_root.trim())));
+        self.assign_profile_root(root, Some(PathBuf::from(self.workspace.root.trim())));
         self.preview_selected_composition();
     }
 

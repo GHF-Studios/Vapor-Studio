@@ -66,7 +66,7 @@ impl StudioApp {
         if self.running || index >= self.profiles.len() {
             return;
         }
-        if self.workspace_editor_dirty || self.manifest_metadata_dirty {
+        if self.workspace.editor_dirty || self.manifest_metadata_dirty {
             self.status =
                 "Save or discard workspace file or manifest metadata edits before switching profiles.".to_owned();
             return;
@@ -74,15 +74,15 @@ impl StudioApp {
         self.active_profile = index;
         self.profile_name_draft = self.profiles[index].name.clone();
         self.confirm_profile_removal = false;
-        self.workspace_root = self.profiles[index]
+        self.workspace.root = self.profiles[index]
             .workspace
             .as_ref()
             .map(|workspace| workspace.root.display().to_string())
             .unwrap_or_default();
-        self.workspace_root_draft = if self.workspace_root.is_empty() {
-            self.fallback_workspace_root.display().to_string()
+        self.workspace.root_draft = if self.workspace.root.is_empty() {
+            self.workspace.fallback_root.display().to_string()
         } else {
-            self.workspace_root.clone()
+            self.workspace.root.clone()
         };
         self.draft_dependencies.clear();
         self.contents.clear();
@@ -95,19 +95,19 @@ impl StudioApp {
         self.composition_link_candidate.clear();
         self.repreview_after_catalog_refresh = false;
         self.invalidate_workshop_review();
-        self.pending_content_unregistration = None;
+        self.workspace.pending_unregistration = None;
         self.workshop_metadata_edit = None;
         self.runtime_outputs_edit = None;
         self.manifest_metadata_dirty = false;
-        self.workspace_files.clear();
-        self.selected_workspace_file = None;
-        self.workspace_editor.clear();
-        self.workspace_editor_original.clear();
-        self.workspace_editor_toml_diagnostic = None;
-        self.workspace_editor_dirty = false;
-        self.workspace_files_open = false;
-        self.new_workspace_file_path.clear();
-        self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.files.clear();
+        self.workspace.selected_file = None;
+        self.workspace.editor.clear();
+        self.workspace.editor_original.clear();
+        self.workspace.editor_toml_diagnostic = None;
+        self.workspace.editor_dirty = false;
+        self.workspace.files_open = false;
+        self.workspace.new_file_path.clear();
+        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.discover();
     }
 
@@ -134,7 +134,7 @@ impl StudioApp {
             );
             return;
         }
-        if self.workspace_editor_dirty && current_workspace.as_deref() != workspace.as_deref() {
+        if self.workspace.editor_dirty && current_workspace.as_deref() != workspace.as_deref() {
             self.status =
                 "Save or discard workspace edits before assigning content from another workspace."
                     .to_owned();
@@ -153,26 +153,26 @@ impl StudioApp {
             self.composition_edit_selector.clear();
             self.composition_link_candidate.clear();
             self.repreview_after_catalog_refresh = false;
-            self.workspace_root = workspace
+            self.workspace.root = workspace
                 .as_ref()
                 .map(|root| root.display().to_string())
                 .unwrap_or_default();
-            self.workspace_root_draft = if self.workspace_root.is_empty() {
-                self.fallback_workspace_root.display().to_string()
+            self.workspace.root_draft = if self.workspace.root.is_empty() {
+                self.workspace.fallback_root.display().to_string()
             } else {
-                self.workspace_root.clone()
+                self.workspace.root.clone()
             };
             self.contents.clear();
             self.catalog.clear();
             self.selected_catalog_content = None;
-            self.workspace_files.clear();
-            self.workspace_files_open = false;
-            self.selected_workspace_file = None;
-            self.workspace_editor.clear();
-            self.workspace_editor_original.clear();
-            self.workspace_editor_toml_diagnostic = None;
-            self.workspace_editor_dirty = false;
-            self.new_workspace_file_path.clear();
+            self.workspace.files.clear();
+            self.workspace.files_open = false;
+            self.workspace.selected_file = None;
+            self.workspace.editor.clear();
+            self.workspace.editor_original.clear();
+            self.workspace.editor_toml_diagnostic = None;
+            self.workspace.editor_dirty = false;
+            self.workspace.new_file_path.clear();
             self.discover();
         }
         self.status = format!(
@@ -185,8 +185,8 @@ impl StudioApp {
 
     pub(super) fn add_profile(&mut self) {
         let name = self.new_profile_name.trim();
-        let workspace = (!self.workspace_root.trim().is_empty())
-            .then(|| PathBuf::from(self.workspace_root.trim()));
+        let workspace = (!self.workspace.root.trim().is_empty())
+            .then(|| PathBuf::from(self.workspace.root.trim()));
         let index = match vapor_studio_core::add_profile(&mut self.profiles, name, workspace)
         {
             Ok(index) => index,
@@ -223,7 +223,7 @@ impl StudioApp {
     }
 
     pub(super) fn remove_active_profile(&mut self) {
-        if self.running || self.workspace_editor_dirty || self.manifest_metadata_dirty {
+        if self.running || self.workspace.editor_dirty || self.manifest_metadata_dirty {
             self.status = "Finish or discard the current operation and edits before removing a profile.".to_owned();
             return;
         }
@@ -243,7 +243,7 @@ impl StudioApp {
     }
 
     pub(super) fn duplicate_active_profile(&mut self) {
-        if self.running || self.workspace_editor_dirty {
+        if self.running || self.workspace.editor_dirty {
             return;
         }
         let source_name = self.profiles[self.active_profile].name.clone();

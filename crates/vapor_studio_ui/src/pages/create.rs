@@ -12,15 +12,15 @@ impl StudioApp {
                 ui.label("Scaffold an Engine, Game, Packagepack, Cargo projects, and workspace manifests.");
                 ui.horizontal(|ui| {
                     ui.label("New folder");
-                    ui.text_edit_singleline(&mut self.starter_workspace_path);
+                    ui.text_edit_singleline(&mut self.workspace.starter_path);
                 });
                 ui.horizontal(|ui| {
                     ui.label("Organization");
-                    ui.text_edit_singleline(&mut self.starter_workspace_organization);
+                    ui.text_edit_singleline(&mut self.workspace.starter_organization);
                     ui.label("Workspace name");
-                    ui.text_edit_singleline(&mut self.starter_workspace_name);
+                    ui.text_edit_singleline(&mut self.workspace.starter_name);
                 });
-                if ui.add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Create and open starter workspace"))
+                if ui.add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Create and open starter workspace"))
                     .on_disabled_hover_text("Save or reload the open file before creating and opening another workspace.")
                     .clicked()
                 {
@@ -151,7 +151,7 @@ impl StudioApp {
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.running && !self.workspace_editor_dirty,
+                    !self.running && !self.workspace.editor_dirty,
                     egui::Button::new("Refresh available content"),
                 )
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
@@ -162,12 +162,12 @@ impl StudioApp {
             if ui
                 .add_enabled(
                     !self.running
-                        && !self.workspace_editor_dirty
-                        && !self.workspace_root.trim().is_empty()
+                        && !self.workspace.editor_dirty
+                        && !self.workspace.root.trim().is_empty()
                         && required_role_selected,
                     egui::Button::new("Create content project"),
                 )
-                .on_disabled_hover_text(if self.workspace_root.trim().is_empty() {
+                .on_disabled_hover_text(if self.workspace.root.trim().is_empty() {
                     "Open a Vapor Workspace before creating content."
                 } else if !required_role_selected {
                     "Select the required Engine, Enginepack, Game, or Gamepack role first."

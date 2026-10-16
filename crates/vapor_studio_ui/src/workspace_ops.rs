@@ -8,12 +8,59 @@ use std::{fs, path::PathBuf};
 use vapor_core::{DevelopmentOperation, VaporWorkspace};
 use vapor_studio_core::{OperationKind, WorkspaceAssociation};
 
+
+pub(super) struct WorkspaceState {
+    pub(super) root: String,
+    pub(super) root_draft: String,
+    pub(super) fallback_root: PathBuf,
+    pub(super) starter_path: String,
+    pub(super) starter_organization: String,
+    pub(super) starter_name: String,
+    pub(super) new_file_path: String,
+    pub(super) unregistered_projects: vapor_studio_core::UnregisteredProjectScan,
+    pub(super) pending_unregistration: Option<vapor_studio_core::SourceContent>,
+    pub(super) registered_sources: Vec<PathBuf>,
+    pub(super) active_source: Option<PathBuf>,
+    pub(super) files: Vec<PathBuf>,
+    pub(super) selected_file: Option<PathBuf>,
+    pub(super) editor: String,
+    pub(super) editor_original: String,
+    pub(super) editor_toml_diagnostic: Option<Result<(), String>>,
+    pub(super) editor_dirty: bool,
+    pub(super) files_open: bool,
+}
+
+impl WorkspaceState {
+    pub(super) fn new(root: String, root_draft: String, fallback_root: PathBuf) -> Self {
+        Self {
+            root,
+            root_draft,
+            fallback_root,
+            starter_path: String::new(),
+            starter_organization: "my-workshop".to_owned(),
+            starter_name: "my-game".to_owned(),
+            new_file_path: String::new(),
+            unregistered_projects: vapor_studio_core::UnregisteredProjectScan::default(),
+            pending_unregistration: None,
+            registered_sources: Vec::new(),
+            active_source: None,
+            files: Vec::new(),
+            selected_file: None,
+            editor: String::new(),
+            editor_original: String::new(),
+            editor_toml_diagnostic: None,
+            editor_dirty: false,
+            files_open: false,
+        }
+    }
+}
+
 impl StudioApp {
     pub(super) fn run_operation(&mut self, operation: DevelopmentOperation) {
         if !self.require_open_workspace("run a workspace operation") {
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let kind = match operation {
             DevelopmentOperation::Fmt => OperationKind::Fmt,
             DevelopmentOperation::Check => OperationKind::Check,
@@ -66,8 +113,8 @@ impl StudioApp {
             .as_ref()
             .is_none_or(|workspace| workspace.root != root);
         let catalog_error = catalog.as_ref().err().cloned();
-        self.workspace_root = root.display().to_string();
-        self.workspace_root_draft = self.workspace_root.clone();
+        self.workspace.root = root.display().to_string();
+        self.workspace.root_draft = self.workspace.root.clone();
         self.draft_dependencies.clear();
         let profile = &mut self.profiles[self.active_profile];
         profile.workspace = Some(WorkspaceAssociation { root });
@@ -86,31 +133,31 @@ impl StudioApp {
         self.composition_link_candidate.clear();
         self.repreview_after_catalog_refresh = false;
         self.invalidate_workshop_review();
-        self.workspace_files = files;
-        self.selected_workspace_file = None;
-        self.workspace_editor.clear();
-        self.workspace_editor_original.clear();
-        self.workspace_editor_toml_diagnostic = None;
-        self.workspace_editor_dirty = false;
-        self.workspace_files_open = false;
-        self.new_workspace_file_path.clear();
-        self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
-        self.pending_content_unregistration = None;
+        self.workspace.files = files;
+        self.workspace.selected_file = None;
+        self.workspace.editor.clear();
+        self.workspace.editor_original.clear();
+        self.workspace.editor_toml_diagnostic = None;
+        self.workspace.editor_dirty = false;
+        self.workspace.files_open = false;
+        self.workspace.new_file_path.clear();
+        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.pending_unregistration = None;
         self.section = Section::Workspace;
         self.status = catalog_error.map_or_else(
-            || format!("Opened workspace {} · {} source items · {} local catalog entries.", self.workspace_root, self.contents.len(), self.catalog.len()),
-            |error| format!("Opened workspace {} · {} source items. Local cache/install catalog could not load: {error}", self.workspace_root, self.contents.len()),
+            || format!("Opened workspace {} · {} source items · {} local catalog entries.", self.workspace.root, self.contents.len(), self.catalog.len()),
+            |error| format!("Opened workspace {} · {} source items. Local cache/install catalog could not load: {error}", self.workspace.root, self.contents.len()),
         );
     }
 
     pub(super) fn open_workspace_path(&mut self, path: PathBuf) {
         if self.manifest_metadata_dirty {
-            self.workspace_root_draft = self.workspace_root.clone();
+            self.workspace.root_draft = self.workspace.root.clone();
             self.status = "Save or discard the structured manifest edits before changing workspaces.".to_owned();
             return;
         }
-        if self.workspace_editor_dirty {
-            self.workspace_root_draft = self.workspace_root.clone();
+        if self.workspace.editor_dirty {
+            self.workspace.root_draft = self.workspace.root.clone();
             self.status =
                 "Save or discard the current editor changes before changing workspaces.".to_owned();
             return;
@@ -147,7 +194,7 @@ impl StudioApp {
         if !self.require_open_workspace("validate this content project") {
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let selector = source_content_selector(content);
         let executable = match std::env::current_exe() {
             Ok(value) => value,
@@ -175,7 +222,7 @@ impl StudioApp {
         else {
             return;
         };
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -198,7 +245,7 @@ impl StudioApp {
         if !self.require_open_workspace("validate workspace content") {
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -222,7 +269,7 @@ impl StudioApp {
             );
             return false;
         }
-        if !self.workspace_editor_dirty {
+        if !self.workspace.editor_dirty {
             return true;
         }
         self.status = format!(
@@ -240,7 +287,7 @@ impl StudioApp {
             .get(self.active_profile)
             .and_then(|profile| profile.workspace.as_ref())
             .is_some()
-            && !self.workspace_root.trim().is_empty()
+            && !self.workspace.root.trim().is_empty()
         {
             return true;
         }
@@ -252,7 +299,7 @@ impl StudioApp {
         if !self.require_open_workspace("read workspace files") {
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         self.spawn(OperationKind::DiscoverWorkspace, move |_context| {
             OperationResult::WorkspaceFiles(discover_workspace_files(&root))
         });
@@ -260,7 +307,7 @@ impl StudioApp {
     }
 
     pub(super) fn refresh_workspace_editor_toml_diagnostic(&mut self) {
-        self.workspace_editor_toml_diagnostic = self
+        self.workspace.editor_toml_diagnostic = self
             .selected_workspace_file
             .as_deref()
             .filter(|path| {
@@ -271,7 +318,7 @@ impl StudioApp {
                 name == "Vapor.toml" || name.ends_with(".vapor.toml") || name == "Cargo.toml"
             })
             .map(|_| {
-                self.workspace_editor
+                self.workspace.editor
                     .parse::<toml::Value>()
                     .map(|_| ())
                     .map_err(|error| error.to_string())
@@ -286,12 +333,12 @@ impl StudioApp {
             self.status = "Save or discard structured manifest edits before opening another file.".to_owned();
             return;
         }
-        if self.workspace_editor_dirty {
+        if self.workspace.editor_dirty {
             self.status = "Save or discard the current editor changes before opening another file."
                 .to_owned();
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         self.spawn(OperationKind::OpenWorkspaceFile, move |_context| {
             OperationResult::FileContents(
                 read_workspace_file(&root, &path).map(|contents| (path, contents)),
@@ -304,12 +351,12 @@ impl StudioApp {
         if !self.require_open_workspace("save a workspace file") {
             return;
         }
-        let Some(path) = self.selected_workspace_file.clone() else {
+        let Some(path) = self.workspace.selected_file.clone() else {
             return;
         };
-        let root = PathBuf::from(self.workspace_root.trim());
-        let expected_contents = self.workspace_editor_original.clone();
-        let contents = self.workspace_editor.clone();
+        let root = PathBuf::from(self.workspace.root.trim());
+        let expected_contents = self.workspace.editor_original.clone();
+        let contents = self.workspace.editor.clone();
         self.spawn(OperationKind::SaveWorkspaceFile, move |_context| {
             OperationResult::FileSaved(
                 write_workspace_file(&root, &path, &expected_contents, &contents).map(|()| path),
@@ -322,10 +369,10 @@ impl StudioApp {
         if !self.require_open_workspace("reload a workspace file") {
             return;
         }
-        let Some(path) = self.selected_workspace_file.clone() else {
+        let Some(path) = self.workspace.selected_file.clone() else {
             return;
         };
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         self.spawn(OperationKind::OpenWorkspaceFile, move |_context| {
             OperationResult::FileContents(
                 read_workspace_file(&root, &path).map(|contents| (path, contents)),
@@ -338,8 +385,8 @@ impl StudioApp {
         if !self.require_open_workspace("create a workspace file") {
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
-        let relative = PathBuf::from(self.new_workspace_file_path.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
+        let relative = PathBuf::from(self.workspace.new_file_path.trim());
         if relative.as_os_str().is_empty() {
             self.status = "Enter a file path relative to the workspace root.".to_owned();
             return;
@@ -354,7 +401,7 @@ impl StudioApp {
         if !self.require_open_workspace("create content in this workspace") {
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -429,13 +476,13 @@ impl StudioApp {
         if !self.require_saved_workspace("create and open a starter workspace") {
             return;
         }
-        let destination = PathBuf::from(self.starter_workspace_path.trim());
+        let destination = PathBuf::from(self.workspace.starter_path.trim());
         if destination.as_os_str().is_empty() {
             self.status = "Choose an empty folder for the new starter workspace.".to_owned();
             return;
         }
-        let organization = self.starter_workspace_organization.trim().to_owned();
-        let name = self.starter_workspace_name.trim().to_owned();
+        let organization = self.workspace.starter_organization.trim().to_owned();
+        let name = self.workspace.starter_name.trim().to_owned();
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -485,7 +532,7 @@ impl StudioApp {
                 return;
             }
         };
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         self.spawn(OperationKind::DiscoverContentProjects, move |_context| {
             OperationResult::UnregisteredProjectScan(
                 vapor_studio_core::scan_unregistered_content_projects(&executable, &root),
@@ -505,7 +552,7 @@ impl StudioApp {
                 return;
             }
         };
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let display_path = project_path.display().to_string();
         self.spawn(OperationKind::AdoptContentProject, move |_context| {
             OperationResult::AdoptedContentProject(
@@ -521,7 +568,7 @@ impl StudioApp {
         if !self.require_open_workspace("unregister a content project") {
             return;
         }
-        let Some(project) = self.pending_content_unregistration.clone() else {
+        let Some(project) = self.workspace.pending_unregistration.clone() else {
             self.status = "Select a registered content project to unregister.".to_owned();
             return;
         };
@@ -532,7 +579,7 @@ impl StudioApp {
                 return;
             }
         };
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         let id = project.id.clone();
         let display = format!("{} · {}", project.id, project.root.display());
         self.spawn(OperationKind::UnregisterContentProject, move |_context| {
@@ -547,12 +594,12 @@ impl StudioApp {
         if !self.require_open_workspace("add this workspace to Vapor sources") {
             return;
         }
-        let root = PathBuf::from(self.workspace_root.trim());
+        let root = PathBuf::from(self.workspace.root.trim());
         if root.as_os_str().is_empty() {
             self.status = "Open a workspace before adding it to Vapor sources.".to_owned();
             return;
         }
-        if self.registered_sources.iter().any(|source| source == &root) {
+        if self.workspace.registered_sources.iter().any(|source| source == &root) {
             self.status = "This workspace is already registered with Vapor.".to_owned();
             return;
         }
@@ -572,12 +619,12 @@ impl StudioApp {
             });
         match result {
             Ok((known, active)) => {
-                self.registered_sources = known;
-                self.active_source = active;
+                self.workspace.registered_sources = known;
+                self.workspace.active_source = active;
                 self.status = format!(
                     "Loaded {} registered workspace{} from this Vapor installation.",
-                    self.registered_sources.len(),
-                    if self.registered_sources.len() == 1 {
+                    self.workspace.registered_sources.len(),
+                    if self.workspace.registered_sources.len() == 1 {
                         ""
                     } else {
                         "s"

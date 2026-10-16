@@ -20,18 +20,18 @@ impl StudioApp {
             OperationResult::UnregisteredProjectScan(Err(error)) => self.status = error,
             OperationResult::RememberedSources(Err(error)) => self.status = error,
             OperationResult::RememberedSources(Ok(known)) => {
-                self.registered_sources = known;
+                self.workspace.registered_sources = known;
                 self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
             }
             OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
                 self.contents = contents;
-                self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+                self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
                 self.status = summary;
             }
             OperationResult::UnregisteredContentProject(Ok((summary, contents, identity))) => {
                 self.contents = contents;
-                self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
-                self.pending_content_unregistration = None;
+                self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+                self.workspace.pending_unregistration = None;
                 self.invalidate_profiles_for_source_content(&identity);
                 self.status = summary;
             }
@@ -43,13 +43,13 @@ impl StudioApp {
                     scan.diagnostics.len(),
                     if scan.diagnostics.len() == 1 { "" } else { "s" },
                 );
-                self.unregistered_projects = scan;
+                self.workspace.unregistered_projects = scan;
             }
             OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
                 self.workshop_metadata_edit = None;
                 self.runtime_outputs_edit = None;
                 self.manifest_metadata_dirty = false;
-                self.pending_content_unregistration = None;
+                self.workspace.pending_unregistration = None;
                 self.activate_workspace(root, contents, catalog, files)
             }
             OperationResult::Discovery(source_result, catalog_result) => {
@@ -245,52 +245,52 @@ impl StudioApp {
                 self.status = error
             }
             OperationResult::WorkspaceFiles(Ok(files)) => {
-                self.workspace_files = files;
-                self.status = format!("Found {} workspace files.", self.workspace_files.len());
+                self.workspace.files = files;
+                self.status = format!("Found {} workspace files.", self.workspace.files.len());
             }
             OperationResult::WorkspaceFileCreated(Ok(path)) => {
                 self.invalidate_workshop_review();
-                if !self.workspace_files.contains(&path) {
-                    self.workspace_files.push(path.clone());
-                    self.workspace_files.sort();
+                if !self.workspace.files.contains(&path) {
+                    self.workspace.files.push(path.clone());
+                    self.workspace.files.sort();
                 }
-                self.selected_workspace_file = Some(path.clone());
-                self.workspace_files_open = true;
-                self.workspace_editor.clear();
-                self.workspace_editor_original.clear();
+                self.workspace.selected_file = Some(path.clone());
+                self.workspace.files_open = true;
+                self.workspace.editor.clear();
+                self.workspace.editor_original.clear();
                 self.refresh_workspace_editor_toml_diagnostic();
-                self.workspace_editor_dirty = false;
-                self.new_workspace_file_path.clear();
+                self.workspace.editor_dirty = false;
+                self.workspace.new_file_path.clear();
                 self.status = format!("Created {}.", path.display());
             }
             OperationResult::FileContents(Ok((path, contents))) => {
-                self.selected_workspace_file = Some(path);
-                self.workspace_files_open = true;
-                self.workspace_editor = contents.clone();
-                self.workspace_editor_original = contents;
+                self.workspace.selected_file = Some(path);
+                self.workspace.files_open = true;
+                self.workspace.editor = contents.clone();
+                self.workspace.editor_original = contents;
                 self.refresh_workspace_editor_toml_diagnostic();
-                self.workspace_editor_dirty = false;
+                self.workspace.editor_dirty = false;
                 self.status = "Opened workspace file.".to_owned();
             }
             OperationResult::FileSaved(Ok(path)) => {
                 self.invalidate_workshop_review();
-                if self.selected_workspace_file.as_ref() == Some(&path) {
-                    self.workspace_editor_original
-                        .clone_from(&self.workspace_editor);
+                if self.workspace.selected_file.as_ref() == Some(&path) {
+                    self.workspace.editor_original
+                        .clone_from(&self.workspace.editor);
                     self.refresh_workspace_editor_toml_diagnostic();
-                    self.workspace_editor_dirty = false;
+                    self.workspace.editor_dirty = false;
                 }
                 self.status = format!("Saved {}.", path.display());
             }
             OperationResult::ContentWorkspace(Ok((manifest, contents, files))) => {
                 self.invalidate_workshop_review();
-                self.workspace_files = files;
-                self.selected_workspace_file = Some(manifest);
-                self.workspace_files_open = true;
-                self.workspace_editor = contents.clone();
-                self.workspace_editor_original = contents;
+                self.workspace.files = files;
+                self.workspace.selected_file = Some(manifest);
+                self.workspace.files_open = true;
+                self.workspace.editor = contents.clone();
+                self.workspace.editor_original = contents;
                 self.refresh_workspace_editor_toml_diagnostic();
-                self.workspace_editor_dirty = false;
+                self.workspace.editor_dirty = false;
                 self.section = Section::Workspace;
                 self.status = "Created content and opened its manifest.".to_owned();
             }
@@ -334,12 +334,12 @@ impl StudioApp {
                     id: metadata.id.clone(),
                     version: metadata.version.clone(),
                 });
-                if let Ok(relative) = metadata.manifest.strip_prefix(Path::new(self.workspace_root.trim())) {
+                if let Ok(relative) = metadata.manifest.strip_prefix(Path::new(self.workspace.root.trim())) {
                     let relative = relative.to_path_buf();
-                    if self.selected_workspace_file.as_ref() == Some(&relative) {
-                        self.workspace_editor = metadata.source.clone();
-                        self.workspace_editor_original = metadata.source.clone();
-                        self.workspace_editor_dirty = false;
+                    if self.workspace.selected_file.as_ref() == Some(&relative) {
+                        self.workspace.editor = metadata.source.clone();
+                        self.workspace.editor_original = metadata.source.clone();
+                        self.workspace.editor_dirty = false;
                         self.refresh_workspace_editor_toml_diagnostic();
                     }
                 }
@@ -361,12 +361,12 @@ impl StudioApp {
                     id: outputs.id.clone(),
                     version: outputs.version.clone(),
                 });
-                if let Ok(relative) = outputs.manifest.strip_prefix(Path::new(self.workspace_root.trim())) {
+                if let Ok(relative) = outputs.manifest.strip_prefix(Path::new(self.workspace.root.trim())) {
                     let relative = relative.to_path_buf();
-                    if self.selected_workspace_file.as_ref() == Some(&relative) {
-                        self.workspace_editor = outputs.source.clone();
-                        self.workspace_editor_original = outputs.source.clone();
-                        self.workspace_editor_dirty = false;
+                    if self.workspace.selected_file.as_ref() == Some(&relative) {
+                        self.workspace.editor = outputs.source.clone();
+                        self.workspace.editor_original = outputs.source.clone();
+                        self.workspace.editor_dirty = false;
                         self.refresh_workspace_editor_toml_diagnostic();
                     }
                 }

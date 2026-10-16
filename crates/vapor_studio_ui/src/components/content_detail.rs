@@ -48,7 +48,7 @@ impl StudioApp {
                 }).collect::<Vec<_>>().join(" · ");
                 ui.small(location_summary);
                 if selected && kind == vapor_core::ContentKind::Packagepack.as_str()
-                    && ui.add_enabled(!self.running && !self.workspace_editor_dirty && content.is_unambiguous(),
+                    && ui.add_enabled(!self.running && !self.workspace.editor_dirty && content.is_unambiguous(),
                         egui::Button::new("Use this exact version as the profile root"))
                         .on_disabled_hover_text(if content.is_unambiguous() { "Save or discard editor changes before switching the profile's workspace." } else { "Resolve conflicting local records before selecting this content." })
                         .clicked()
@@ -60,7 +60,7 @@ impl StudioApp {
                         .locations
                         .iter()
                         .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
-                        .then(|| std::path::PathBuf::from(self.workspace_root.trim()));
+                        .then(|| std::path::PathBuf::from(self.workspace.root.trim()));
                     self.assign_profile_root(root, workspace);
                 }
                 ui.separator();
@@ -132,7 +132,7 @@ impl StudioApp {
                     .iter()
                     .any(|source| super::super::source_content_selector(source) == identity);
                 if is_authored_here {
-                    if ui.add_enabled(!self.running && !self.workspace_editor_dirty && content.is_unambiguous(), egui::Button::new("Stage Workshop review package"))
+                    if ui.add_enabled(!self.running && !self.workspace.editor_dirty && content.is_unambiguous(), egui::Button::new("Stage Workshop review package"))
                         .on_disabled_hover_text(if content.is_unambiguous() { "Save or reload the open file first; staging reads the workspace source from disk." } else { "Resolve conflicting local records before staging this identity." })
                         .clicked()
                     {

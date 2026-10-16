@@ -14,7 +14,7 @@ impl StudioApp {
                 .clicked()
             {
                 self.section = section;
-                if section == Section::Workspace && self.workspace_files.is_empty() && !self.running
+                if section == Section::Workspace && self.workspace.files.is_empty() && !self.running
                 {
                     self.refresh_workspace_files();
                 }
@@ -54,7 +54,7 @@ impl StudioApp {
                 .on_hover_text("Search the current catalog");
             if ui
                 .add_enabled(
-                    !self.running && !self.workspace_editor_dirty,
+                    !self.running && !self.workspace.editor_dirty,
                     egui::Button::new("+ Profile"),
                 )
                 .clicked()
@@ -138,7 +138,7 @@ impl eframe::App for StudioApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string("workspace_root", self.workspace_root.clone());
+        storage.set_string("workspace_root", self.workspace.root.clone());
         let document = ProfileDocument {
             schema_version: CURRENT_SCHEMA_VERSION,
             profiles: self.profiles.clone(),

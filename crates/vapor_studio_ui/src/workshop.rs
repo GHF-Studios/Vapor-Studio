@@ -63,7 +63,7 @@ impl StudioApp {
             return;
         }
         self.invalidate_workshop_review();
-        let workspace = PathBuf::from(self.workspace_root.trim());
+        let workspace = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -107,7 +107,7 @@ impl StudioApp {
                 format!("Type {expected_confirmation} exactly to authorize this Workshop upload.");
             return;
         }
-        let workspace = PathBuf::from(self.workspace_root.trim());
+        let workspace = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {

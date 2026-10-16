@@ -29,6 +29,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc::Receiver};
 use operations::OperationResult;
 use workshop::WorkshopState;
+use workspace_ops::WorkspaceState;
 use vapor_core::{ContentKind, OperationEvent as CoreOperationEvent};
 use vapor_studio_core::{
     CompositionProfile, ContentIdentity, OperationEvent, OperationId, OperationKind,
@@ -37,9 +38,7 @@ use vapor_studio_core::{
 
 pub struct StudioApp {
     section: Section,
-    workspace_root: String,
-    workspace_root_draft: String,
-    fallback_workspace_root: PathBuf,
+    workspace: WorkspaceState,
     profiles: Vec<CompositionProfile>,
     profile_recovery: Option<String>,
     profile_recovery_backup: Option<String>,
@@ -76,14 +75,6 @@ pub struct StudioApp {
     workshop_metadata_tags: String,
     workshop_metadata_change_note: String,
     repreview_after_catalog_refresh: bool,
-    starter_workspace_path: String,
-    starter_workspace_organization: String,
-    starter_workspace_name: String,
-    new_workspace_file_path: String,
-    unregistered_projects: vapor_studio_core::UnregisteredProjectScan,
-    pending_content_unregistration: Option<vapor_studio_core::SourceContent>,
-    registered_sources: Vec<PathBuf>,
-    active_source: Option<PathBuf>,
     contents: Vec<vapor_studio_core::SourceContent>,
     catalog: Vec<vapor_studio_core::CatalogContent>,
     catalog_source_filter: CatalogSourceFilter,
@@ -91,13 +82,6 @@ pub struct StudioApp {
     selected_catalog_content: Option<String>,
     workshop: WorkshopState,
     composition_preview: Option<vapor_studio_core::CompositionPreview>,
-    workspace_files: Vec<PathBuf>,
-    selected_workspace_file: Option<PathBuf>,
-    workspace_editor: String,
-    workspace_editor_original: String,
-    workspace_editor_toml_diagnostic: Option<Result<(), String>>,
-    workspace_editor_dirty: bool,
-    workspace_files_open: bool,
     status: String,
     running: bool,
     receiver: Option<Receiver<(OperationId, OperationResult)>>,
@@ -169,9 +153,7 @@ impl StudioApp {
             } else {
                 Section::Home
             },
-            workspace_root,
-            workspace_root_draft,
-            fallback_workspace_root: root,
+            workspace: WorkspaceState::new(workspace_root, workspace_root_draft, root),
             profiles,
             profile_recovery: profile_recovery
                 .as_ref()
@@ -210,13 +192,6 @@ impl StudioApp {
             workshop_metadata_tags: String::new(),
             workshop_metadata_change_note: String::new(),
             repreview_after_catalog_refresh: false,
-            workspace_files: Vec::new(),
-            selected_workspace_file: None,
-            workspace_editor: String::new(),
-            workspace_editor_original: String::new(),
-            workspace_editor_toml_diagnostic: None,
-            workspace_editor_dirty: false,
-            workspace_files_open: false,
             draft_content_id: String::new(),
             draft_content_version: "0.1.0".to_owned(),
             draft_content_kind: ContentKind::Packagepack,
@@ -228,14 +203,6 @@ impl StudioApp {
             draft_workshop_description: String::new(),
             draft_workshop_tags: String::new(),
             draft_workshop_change_note: String::new(),
-            starter_workspace_path: String::new(),
-            starter_workspace_organization: "my-workshop".to_owned(),
-            starter_workspace_name: "my-game".to_owned(),
-            new_workspace_file_path: String::new(),
-            unregistered_projects: vapor_studio_core::UnregisteredProjectScan::default(),
-            pending_content_unregistration: None,
-            registered_sources: Vec::new(),
-            active_source: None,
             status: "Choose a workspace or discover content in this folder.".to_owned(),
             running: false,
             receiver: None,

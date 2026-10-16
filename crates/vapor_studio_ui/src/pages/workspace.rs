@@ -21,35 +21,35 @@ impl StudioApp {
         ui.heading("Workspace");
         ui.label("Author content and maintain the selected Vapor workspace.");
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.workspace_files_open, false, "Overview");
-            let has_workspace = !self.workspace_root.trim().is_empty();
+            ui.selectable_value(&mut self.workspace.files_open, false, "Overview");
+            let has_workspace = !self.workspace.root.trim().is_empty();
             if ui
                 .add_enabled(
                     has_workspace,
-                    egui::Button::selectable(self.workspace_files_open, "Files"),
+                    egui::Button::selectable(self.workspace.files_open, "Files"),
                 )
                 .clicked()
             {
-                self.workspace_files_open = true;
+                self.workspace.files_open = true;
             }
         });
         ui.separator();
-        if !self.workspace_files_open {
+        if !self.workspace.files_open {
             ui.label("Operations use the workspace pin and Vapor-managed toolchain and cache.");
-            let has_workspace = !self.workspace_root.trim().is_empty();
+            let has_workspace = !self.workspace.root.trim().is_empty();
             ui.horizontal(|ui| {
                 if ui.button("Refresh registered workspaces").clicked() {
                     self.refresh_registered_sources();
                 }
-                if self.registered_sources.is_empty() {
+                if self.workspace.registered_sources.is_empty() {
                     ui.weak("No workspaces loaded from this Vapor installation yet.");
                 }
             });
-            if !self.registered_sources.is_empty() {
+            if !self.workspace.registered_sources.is_empty() {
                 ui.label("Registered workspaces");
-                for source in self.registered_sources.clone() {
-                    let active = self.active_source.as_ref() == Some(&source);
-                    let selected = Path::new(self.workspace_root.trim()) == source;
+                for source in self.workspace.registered_sources.clone() {
+                    let active = self.workspace.active_source.as_ref() == Some(&source);
+                    let selected = Path::new(self.workspace.root.trim()) == source;
                     ui.horizontal(|ui| {
                         if ui
                             .add_enabled(
@@ -66,9 +66,9 @@ impl StudioApp {
                     });
                 }
             }
-            if !self.workspace_root.trim().is_empty() {
-                let current = Path::new(self.workspace_root.trim());
-                let already_registered = self.registered_sources.iter().any(|source| source == current);
+            if !self.workspace.root.trim().is_empty() {
+                let current = Path::new(self.workspace.root.trim());
+                let already_registered = self.workspace.registered_sources.iter().any(|source| source == current);
                 if !already_registered {
                     ui.horizontal(|ui| {
                         ui.label("This workspace is open for the current profile only.");
@@ -82,7 +82,7 @@ impl StudioApp {
                 ui.label("Workspace");
                 ui.add_enabled(
                     !self.running,
-                    egui::TextEdit::singleline(&mut self.workspace_root_draft)
+                    egui::TextEdit::singleline(&mut self.workspace.root_draft)
                         .desired_width(360.0)
                         .hint_text("Path to a Vapor workspace"),
                 );
@@ -90,7 +90,7 @@ impl StudioApp {
                     .add_enabled(!self.running, egui::Button::new("Open workspace"))
                     .clicked()
                 {
-                    self.open_workspace_path(PathBuf::from(self.workspace_root_draft.trim()));
+                    self.open_workspace_path(PathBuf::from(self.workspace.root_draft.trim()));
                 }
             });
             if !self.contents.is_empty() {
@@ -161,12 +161,12 @@ impl StudioApp {
                             ui.horizontal(|ui| {
                                 let relative_manifest = content
                                     .manifest
-                                    .strip_prefix(Path::new(self.workspace_root.trim()))
+                                    .strip_prefix(Path::new(self.workspace.root.trim()))
                                     .ok()
                                     .map(PathBuf::from);
                                 if ui
                                     .add_enabled(
-                                        !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                                        !self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty,
                                         egui::Button::new("Validate"),
                                     )
                                     .on_hover_text("Validate this content manifest and its local references through Vapor Shell.")
@@ -177,7 +177,7 @@ impl StudioApp {
                                 if let Some(relative_manifest) = relative_manifest {
                                     if ui
                                         .add_enabled(
-                                            !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                                            !self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty,
                                             egui::Button::new("Edit manifest"),
                                         )
                                         .on_disabled_hover_text("Save or discard the current file before opening a project manifest.")
@@ -188,7 +188,7 @@ impl StudioApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                                        !self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty,
                                         egui::Button::new("Edit Workshop metadata"),
                                     )
                                     .on_disabled_hover_text("Save or reload the open file first; Workshop edits use a fresh Shell-validated manifest snapshot.")
@@ -198,7 +198,7 @@ impl StudioApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                                        !self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty,
                                         egui::Button::new("Edit runtime outputs"),
                                     )
                                     .on_disabled_hover_text("Save or discard open edits first; runtime output edits use a fresh Shell-validated manifest snapshot.")
@@ -207,7 +207,7 @@ impl StudioApp {
                                     self.load_source_runtime_outputs(&content);
                                 }
                                 if ui
-                                        .add_enabled(!self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Edit dependencies"))
+                                        .add_enabled(!self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Edit dependencies"))
                                         .clicked()
                                 {
                                     self.composition_edit_selector =
@@ -219,7 +219,7 @@ impl StudioApp {
                                 }
                                 if content.kind == vapor_core::ContentKind::Packagepack.as_str()
                                     && ui
-                                        .add_enabled(!self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Use in active profile"))
+                                        .add_enabled(!self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Use in active profile"))
                                         .clicked()
                                 {
                                     self.assign_profile_root(
@@ -227,25 +227,25 @@ impl StudioApp {
                                             id: content.id.clone(),
                                             version: content.version.clone(),
                                         },
-                                        Some(PathBuf::from(self.workspace_root.trim())),
+                                        Some(PathBuf::from(self.workspace.root.trim())),
                                     );
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                                        !self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty,
                                         egui::Button::new("Unregister"),
                                     )
                                     .on_hover_text("Remove this project from Vapor discovery without deleting its files or changing Cargo membership.")
                                     .clicked()
                                 {
-                                    self.pending_content_unregistration = Some(content.clone());
+                                    self.workspace.pending_unregistration = Some(content.clone());
                                 }
                             });
                         });
                     }
                 });
             }
-            if let Some(project) = self.pending_content_unregistration.clone() {
+            if let Some(project) = self.workspace.pending_unregistration.clone() {
                 ui.group(|ui| {
                     ui.heading(format!("Unregister {}?", project.id));
                     ui.label(format!(
@@ -255,13 +255,13 @@ impl StudioApp {
                     ));
                     ui.horizontal(|ui| {
                         if ui.add_enabled(
-                            !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                            !self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty,
                             egui::Button::new("Unregister from Vapor"),
                         ).clicked() {
                             self.unregister_content_project();
                         }
                         if ui.add_enabled(!self.running, egui::Button::new("Keep registered")).clicked() {
-                            self.pending_content_unregistration = None;
+                            self.workspace.pending_unregistration = None;
                         }
                     });
                 });
@@ -313,7 +313,7 @@ impl StudioApp {
                     self.manifest_metadata_dirty |= changed;
                     ui.horizontal(|ui| {
                         if ui.add_enabled(
-                            !self.running && !self.workspace_editor_dirty && self.manifest_metadata_dirty,
+                            !self.running && !self.workspace.editor_dirty && self.manifest_metadata_dirty,
                             egui::Button::new("Save Workshop metadata"),
                         ).clicked() {
                             self.save_source_workshop_metadata();
@@ -354,7 +354,7 @@ impl StudioApp {
                     });
                     ui.horizontal(|ui| {
                         if ui.add_enabled(
-                            !self.running && !self.workspace_editor_dirty && self.manifest_metadata_dirty,
+                            !self.running && !self.workspace.editor_dirty && self.manifest_metadata_dirty,
                             egui::Button::new("Save runtime outputs"),
                         ).clicked() {
                             self.save_source_runtime_outputs();
@@ -372,35 +372,35 @@ impl StudioApp {
                     });
                 });
             }
-            if !self.workspace_root.trim().is_empty() {
+            if !self.workspace.root.trim().is_empty() {
                 ui.horizontal(|ui| {
                     ui.label("Existing unregistered content");
                     if ui
-                        .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Find projects"))
+                        .add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Find projects"))
                         .on_hover_text("Scans explicit role manifests and lists valid candidates. Nothing is registered until you choose Adopt.")
                         .clicked()
                     {
                         self.scan_unregistered_content_projects();
                     }
                 });
-                for candidate in self.unregistered_projects.candidates.clone() {
+                for candidate in self.workspace.unregistered_projects.candidates.clone() {
                     ui.horizontal(|ui| {
                         ui.label(&candidate.id);
                         ui.weak(format!("{} · {}", candidate.kind, candidate.path.display()));
                         if ui
-                            .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Adopt"))
+                            .add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Adopt"))
                             .clicked()
                         {
                             self.adopt_content_project(candidate.path.clone());
                         }
                     });
                 }
-                for diagnostic in &self.unregistered_projects.diagnostics {
+                for diagnostic in &self.workspace.unregistered_projects.diagnostics {
                     ui.colored_label(egui::Color32::YELLOW, diagnostic);
                 }
             }
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(!self.running && !self.workspace_editor_dirty && !self.workspace_root.trim().is_empty(), egui::Button::new("Validate content"))
+                if ui.add_enabled(!self.running && !self.workspace.editor_dirty && !self.workspace.root.trim().is_empty(), egui::Button::new("Validate content"))
                     .on_disabled_hover_text("Save or reload the open file first; validation reads workspace files from disk.")
                     .clicked()
                 {
@@ -415,7 +415,7 @@ impl StudioApp {
                 ] {
                     if ui
                         .add_enabled(
-                            !self.running && !self.workspace_editor_dirty && has_workspace,
+                            !self.running && !self.workspace.editor_dirty && has_workspace,
                             egui::Button::new(label),
                         )
                         .on_disabled_hover_text(if has_workspace {
@@ -430,24 +430,24 @@ impl StudioApp {
                 }
             });
             ui.separator();
-        } else if self.workspace_root.trim().is_empty() {
+        } else if self.workspace.root.trim().is_empty() {
             ui.weak("Open a Vapor Workspace from Overview before editing its files.");
         } else {
             ui.horizontal(|ui| {
                 ui.label("Workspace files");
-                ui.weak(&self.workspace_root);
+                ui.weak(&self.workspace.root);
             });
             ui.horizontal(|ui| {
                 ui.label("New file");
                 ui.add_enabled(
-                    !self.running && !self.workspace_editor_dirty,
-                    egui::TextEdit::singleline(&mut self.new_workspace_file_path)
+                    !self.running && !self.workspace.editor_dirty,
+                    egui::TextEdit::singleline(&mut self.workspace.new_file_path)
                         .desired_width(280.0)
                         .hint_text("scripts/example.rhai"),
                 );
                 if ui
                     .add_enabled(
-                        !self.running && !self.workspace_editor_dirty,
+                        !self.running && !self.workspace.editor_dirty,
                         egui::Button::new("Create file"),
                     )
                     .clicked()
@@ -464,12 +464,12 @@ impl StudioApp {
                 {
                     self.refresh_workspace_files();
                 }
-                if let Some(path) = &self.selected_workspace_file {
+                if let Some(path) = &self.workspace.selected_file {
                     ui.weak(path.display().to_string());
                 }
                 if ui
                     .add_enabled(
-                        !self.running && self.workspace_editor_dirty,
+                        !self.running && self.workspace.editor_dirty,
                         egui::Button::new("Save"),
                     )
                     .clicked()
@@ -478,7 +478,7 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.running && self.selected_workspace_file.is_some(),
+                        !self.running && self.workspace.selected_file.is_some(),
                         egui::Button::new("Reload from disk"),
                     )
                     .on_hover_text("Discard the editor buffer and reopen the current on-disk file.")
@@ -486,13 +486,13 @@ impl StudioApp {
                 {
                     self.reload_workspace_file();
                 }
-                if self.workspace_editor_dirty {
+                if self.workspace.editor_dirty {
                     ui.colored_label(egui::Color32::YELLOW, "Unsaved");
                 }
             });
             ui.columns(3, |columns| {
                 columns[0].heading("Project");
-                let tree = workspace_tree(&self.workspace_files);
+                let tree = workspace_tree(&self.workspace.files);
                 let mut open_file = None;
                 egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
                     if tree.entries.is_empty() {
@@ -501,7 +501,7 @@ impl StudioApp {
                         draw_workspace_tree(
                             ui,
                             &tree,
-                            self.selected_workspace_file.as_ref(),
+                            self.workspace.selected_file.as_ref(),
                             !self.running,
                             &PathBuf::new(),
                             0,
@@ -514,9 +514,9 @@ impl StudioApp {
                 }
                 let changed = columns[1]
                     .add_enabled_ui(
-                        self.selected_workspace_file.is_some() && !self.running,
+                        self.workspace.selected_file.is_some() && !self.running,
                         |ui| {
-                            egui::TextEdit::multiline(&mut self.workspace_editor)
+                            egui::TextEdit::multiline(&mut self.workspace.editor)
                                 .code_editor()
                                 .desired_width(f32::INFINITY)
                                 .desired_rows(24)
@@ -526,28 +526,28 @@ impl StudioApp {
                     .inner
                     .response
                     .changed();
-                self.workspace_editor_dirty |= changed;
+                self.workspace.editor_dirty |= changed;
                 if changed {
                     self.refresh_workspace_editor_toml_diagnostic();
                 }
                 columns[2].heading("Inspector");
-                columns[2].small(format!("Workspace\n{}", self.workspace_root));
-                if let Some(path) = &self.selected_workspace_file {
+                columns[2].small(format!("Workspace\n{}", self.workspace.root));
+                if let Some(path) = &self.workspace.selected_file {
                     columns[2].separator();
                     columns[2].label("File");
                     columns[2].small(path.display().to_string());
                     columns[2].label(format!("{} file", workspace_file_kind(path)));
                     columns[2].label(format!(
                         "{} lines · {} characters",
-                        self.workspace_editor.lines().count(),
-                        self.workspace_editor.chars().count()
+                        self.workspace.editor.lines().count(),
+                        self.workspace.editor.chars().count()
                     ));
-                    columns[2].label(if self.workspace_editor_dirty {
+                    columns[2].label(if self.workspace.editor_dirty {
                         "Unsaved changes"
                     } else {
                         "Saved"
                     });
-                    if let Some(diagnostic) = &self.workspace_editor_toml_diagnostic {
+                    if let Some(diagnostic) = &self.workspace.editor_toml_diagnostic {
                         match diagnostic {
                             Ok(()) => {
                                 columns[2]

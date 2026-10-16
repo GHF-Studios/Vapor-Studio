@@ -6,7 +6,7 @@ impl StudioApp {
         ui.heading("Vapor Studio");
         ui.label("Find content, manage launchable compositions, or continue authoring.");
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Discover content"))
+            if ui.add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Discover content"))
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
                 .clicked()
             {
@@ -31,7 +31,7 @@ impl StudioApp {
                 &self.profiles[self.active_profile].installation,
                 vapor_studio_core::InstallationState::Installed { .. },
             );
-            let source_ready = !self.workspace_editor_dirty
+            let source_ready = !self.workspace.editor_dirty
                 && self.composition_preview.as_ref().is_some_and(|preview| {
                     preview.selector == content_id
                         && preview.ready()
@@ -41,7 +41,7 @@ impl StudioApp {
                 });
             let action = if installed {
                 "Play installed composition"
-            } else if self.workspace_editor_dirty {
+            } else if self.workspace.editor_dirty {
                 "Save workspace edits before source play"
             } else if source_ready {
                 "Build and play source composition"
@@ -50,7 +50,7 @@ impl StudioApp {
             };
             if ui
                 .add_enabled(
-                    !self.running && (installed || !self.workspace_editor_dirty),
+                    !self.running && (installed || !self.workspace.editor_dirty),
                     egui::Button::new(action),
                 )
                 .on_disabled_hover_text(
@@ -69,7 +69,7 @@ impl StudioApp {
             }
         } else {
             ui.weak("No root Packagepack selected for this composition yet.");
-            if ui.add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Choose content"))
+            if ui.add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Choose content"))
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
                 .clicked()
             {
