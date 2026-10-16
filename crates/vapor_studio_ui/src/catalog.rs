@@ -1,3 +1,4 @@
+use super::StudioApp;
 use crate::navigation::CatalogSourceFilter;
 use vapor_core::ContentKind;
 use vapor_studio_core::ContentIdentity;
@@ -29,6 +30,62 @@ impl CatalogState {
         self.sources.clear();
         self.items.clear();
         self.selected = None;
+    }
+}
+
+impl StudioApp {
+    pub(super) fn apply_catalog_discovery(
+        &mut self,
+        source_result: Result<Vec<vapor_studio_core::SourceContent>, String>,
+        catalog_result: Result<Vec<vapor_studio_core::CatalogContent>, String>,
+    ) {
+        let source_error = match source_result {
+            Ok(contents) => {
+                self.catalog.sources = contents;
+                None
+            }
+            Err(error) => {
+                self.catalog.sources.clear();
+                Some(error)
+            }
+        };
+        match catalog_result {
+            Ok(catalog) => {
+                let count = catalog.len();
+                self.catalog.items = catalog;
+                self.status = if self.profile.items[self.profile.active_index].workspace.is_some() {
+                    source_error.map(|error| format!("Found {count} local items, but workspace sources could not load: {error}"))
+                        .unwrap_or_else(|| format!("Discovered {count} local content identities across workspace, cache, and installation."))
+                } else {
+                    format!("Discovered {count} cached and installed content identities.")
+                };
+            }
+            Err(error) => {
+                self.catalog.items.clear();
+                self.catalog.selected = None;
+                self.status = source_error.map_or_else(
+                    || format!("Could not refresh the local content catalog: {error}"),
+                    |source_error| format!("Workspace sources failed: {source_error}. Local catalog failed: {error}"),
+                );
+            }
+        }
+        if self.profile_composition.take_repreview_request() {
+            self.preview_selected_composition();
+        }
+        if self
+            .catalog
+            .selected
+            .as_ref()
+            .is_some_and(|identity| {
+                !self
+                    .catalog
+                    .items
+                    .iter()
+                    .any(|content| catalog_content_selector(content) == *identity)
+            })
+        {
+            self.catalog.selected = None;
+        }
     }
 }
 

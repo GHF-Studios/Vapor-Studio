@@ -4,10 +4,64 @@ use super::workspace_files::{
     write_workspace_file,
 };
 use super::StudioApp;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use vapor_studio_core::OperationKind;
 
 impl StudioApp {
+    pub(super) fn sync_saved_workspace_manifest(&mut self, manifest: &Path, source: &str) {
+        if let Ok(relative) = manifest.strip_prefix(Path::new(self.workspace.root.trim())) {
+            let relative = relative.to_path_buf();
+            if self.workspace.selected_file.as_ref() == Some(&relative) {
+                self.workspace.editor = source.to_owned();
+                self.workspace.editor_original = source.to_owned();
+                self.workspace.editor_dirty = false;
+                self.refresh_workspace_editor_toml_diagnostic();
+            }
+        }
+    }
+
+    pub(super) fn apply_workspace_files(&mut self, files: Vec<PathBuf>) {
+        self.workspace.files = files;
+        self.status = format!("Found {} workspace files.", self.workspace.files.len());
+    }
+
+    pub(super) fn apply_workspace_file_created(&mut self, path: PathBuf) {
+        self.invalidate_workshop_review();
+        if !self.workspace.files.contains(&path) {
+            self.workspace.files.push(path.clone());
+            self.workspace.files.sort();
+        }
+        self.workspace.selected_file = Some(path.clone());
+        self.workspace.files_open = true;
+        self.workspace.editor.clear();
+        self.workspace.editor_original.clear();
+        self.refresh_workspace_editor_toml_diagnostic();
+        self.workspace.editor_dirty = false;
+        self.workspace.new_file_path.clear();
+        self.status = format!("Created {}.", path.display());
+    }
+
+    pub(super) fn apply_workspace_file_opened(&mut self, path: PathBuf, contents: String) {
+        self.workspace.selected_file = Some(path);
+        self.workspace.files_open = true;
+        self.workspace.editor = contents.clone();
+        self.workspace.editor_original = contents;
+        self.refresh_workspace_editor_toml_diagnostic();
+        self.workspace.editor_dirty = false;
+        self.status = "Opened workspace file.".to_owned();
+    }
+
+    pub(super) fn apply_workspace_file_saved(&mut self, path: PathBuf) {
+        self.invalidate_workshop_review();
+        if self.workspace.selected_file.as_ref() == Some(&path) {
+            self.workspace.editor_original
+                .clone_from(&self.workspace.editor);
+            self.refresh_workspace_editor_toml_diagnostic();
+            self.workspace.editor_dirty = false;
+        }
+        self.status = format!("Saved {}.", path.display());
+    }
+
     pub(super) fn refresh_workspace_files(&mut self) {
         if !self.require_open_workspace("read workspace files") {
             return;

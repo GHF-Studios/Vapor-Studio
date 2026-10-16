@@ -45,6 +45,25 @@ impl ProfileCompositionState {
 }
 
 impl StudioApp {
+    pub(super) fn apply_composition_preview(
+        &mut self,
+        preview: vapor_studio_core::CompositionPreview,
+    ) {
+        self.status = if preview.ready() {
+            format!(
+                "Resolved {} content nodes. This composition is ready to install.",
+                preview.nodes.len()
+            )
+        } else {
+            format!(
+                "Resolved {} available nodes with {} blocker(s). Review the plan before installing.",
+                preview.nodes.len(),
+                preview.blockers.len()
+            )
+        };
+        self.profile_composition.set_preview(preview);
+    }
+
     pub(super) fn apply_installed_composition(
         &mut self,
         composition: vapor_studio_core::InstalledComposition,

@@ -1,105 +1,31 @@
-use super::{StudioApp, catalog_content_selector};
+use super::StudioApp;
 use super::operations::OperationResult;
-use crate::navigation::Section;
-use std::path::Path;
-use vapor_studio_core::ContentIdentity;
 
 impl StudioApp {
     pub(super) fn apply_operation_result(&mut self, result: OperationResult) {
         match result {
-            OperationResult::Workspace(Ok(workspace)) => {
-                self.status = format!(
-                    "Completed for {}/{} · {} projects",
-                    workspace.manifest.workspace.organization,
-                    workspace.manifest.workspace.name,
-                    workspace.projects.len()
-                )
-            }
+            OperationResult::Workspace(Ok(workspace)) => self.apply_workspace_loaded(workspace),
             OperationResult::Workspace(Err(error)) => self.status = error,
             OperationResult::WorkspaceSelection(Err(error)) => self.status = error,
             OperationResult::UnregisteredProjectScan(Err(error)) => self.status = error,
             OperationResult::RememberedSources(Err(error)) => self.status = error,
             OperationResult::RememberedSources(Ok(known)) => {
-                self.workspace.registered_sources = known;
-                self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
+                self.apply_remembered_sources(known)
             }
             OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
-                self.catalog.sources = contents;
-                self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
-                self.status = summary;
+                self.apply_adopted_content_project(summary, contents)
             }
             OperationResult::UnregisteredContentProject(Ok((summary, contents, identity))) => {
-                self.catalog.sources = contents;
-                self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
-                self.workspace.pending_unregistration = None;
-                self.invalidate_profiles_for_source_content(&identity);
-                self.status = summary;
+                self.apply_unregistered_content_project(summary, contents, identity)
             }
             OperationResult::UnregisteredProjectScan(Ok(scan)) => {
-                self.status = format!(
-                    "Found {} adoptable content project{} and {} diagnostic{}.",
-                    scan.candidates.len(),
-                    if scan.candidates.len() == 1 { "" } else { "s" },
-                    scan.diagnostics.len(),
-                    if scan.diagnostics.len() == 1 { "" } else { "s" },
-                );
-                self.workspace.unregistered_projects = scan;
+                self.apply_unregistered_project_scan(scan)
             }
             OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
-                self.workspace.pending_unregistration = None;
                 self.activate_workspace(root, contents, catalog, files)
             }
             OperationResult::Discovery(source_result, catalog_result) => {
-                let source_error = match source_result {
-                    Ok(contents) => {
-                        self.catalog.sources = contents;
-                        None
-                    }
-                    Err(error) => {
-                        self.catalog.sources.clear();
-                        Some(error)
-                    }
-                };
-                match catalog_result {
-                    Ok(catalog) => {
-                        let count = catalog.len();
-                        self.catalog.items = catalog;
-                        self.status = if self.profile.items[self.profile.active_index].workspace.is_some()
-                        {
-                            source_error.map(|error| format!("Found {count} local items, but workspace sources could not load: {error}"))
-                                .unwrap_or_else(|| format!("Discovered {count} local content identities across workspace, cache, and installation."))
-                        } else {
-                            format!(
-                                "Discovered {count} cached and installed content identities."
-                            )
-                        };
-                    }
-                    Err(error) => {
-                        self.catalog.items.clear();
-                        self.catalog.selected = None;
-                        self.status = source_error.map_or_else(
-                            || format!("Could not refresh the local content catalog: {error}"),
-                            |source_error| format!("Workspace sources failed: {source_error}. Local catalog failed: {error}"),
-                        );
-                    }
-                }
-                if self.profile_composition.take_repreview_request() {
-                    self.preview_selected_composition();
-                }
-                if self
-                    .catalog
-                    .selected
-                    .as_ref()
-                    .is_some_and(|identity| {
-                        !self
-                            .catalog
-                            .items
-                            .iter()
-                            .any(|content| catalog_content_selector(content) == *identity)
-                    })
-                {
-                    self.catalog.selected = None;
-                }
+                self.apply_catalog_discovery(source_result, catalog_result)
             }
             OperationResult::Message(Err(error))
             | OperationResult::CompositionPreview(Err(error))
@@ -123,232 +49,70 @@ impl StudioApp {
             | OperationResult::Repair(Err(error)) => self.apply_composition_action_error(error),
             OperationResult::Message(Ok(message)) => self.status = message,
             OperationResult::CompositionPreview(Ok(preview)) => {
-                self.status = if preview.ready() {
-                    format!(
-                        "Resolved {} content nodes. This composition is ready to install.",
-                        preview.nodes.len()
-                    )
-                } else {
-                    format!(
-                        "Resolved {} available nodes with {} blocker(s). Review the plan before installing.",
-                        preview.nodes.len(),
-                        preview.blockers.len()
-                    )
-                };
-                self.profile_composition.set_preview(preview);
+                self.apply_composition_preview(preview)
             }
             OperationResult::WorkshopStage(Err(error)) => {
-                self.invalidate_workshop_review();
-                self.status = error;
+                self.apply_workshop_stage_error(error)
             }
             OperationResult::WorkshopAcquisition(Err(error))
             | OperationResult::WorkshopPublish(Err(error))
             | OperationResult::WorkshopSearch(Err(error), _)
-            | OperationResult::WorkshopSubscriptions(Err(error)) => self.status = error,
+            | OperationResult::WorkshopSubscriptions(Err(error)) => {
+                self.apply_workshop_error(error)
+            }
             OperationResult::WorkshopAcquisition(Ok(acquisition)) => {
-                self.status = format!(
-                    "Downloaded {} ({}) into Vapor's cache.",
-                    acquisition.id, acquisition.kind
-                );
-                self.workshop.pending_acquisition = Some(acquisition);
+                self.apply_workshop_acquisition(acquisition)
             }
             OperationResult::WorkshopPublish(Ok(publication)) => {
-                self.status = format!(
-                    "{} Workshop item {}{}; receipt saved at {}.",
-                    if publication.created {
-                        "Created"
-                    } else {
-                        "Updated"
-                    },
-                    publication.id,
-                    publication
-                        .published_file_id
-                        .as_ref()
-                        .map(|id| format!(" · PublishedFileId {id}"))
-                        .unwrap_or_default(),
-                    publication.receipt.display(),
-                );
-                self.invalidate_workshop_review();
+                self.apply_workshop_publication(publication)
             }
             OperationResult::WorkshopStage(Ok(preview)) => {
-                self.status = format!(
-                    "Staged {} · {} files · {} bytes.",
-                    preview.id, preview.files, preview.bytes
-                );
-                self.workshop.preview = Some(preview);
+                self.apply_workshop_stage(preview)
             }
             OperationResult::WorkshopSearch(Ok(page), query) => {
-                self.workshop.page = page.page;
-                self.workshop.total_results = page.total_results;
-                self.workshop.results = page.items;
-                self.workshop.results_query = Some(query);
-                self.status = format!(
-                    "Steam Workshop returned {} items on page {} of {}.",
-                    self.workshop.results.len(),
-                    self.workshop.page,
-                    self.workshop.total_results
-                );
+                self.apply_workshop_search(page, query)
             }
             OperationResult::WorkshopSubscriptions(Ok(subscriptions)) => {
-                self.workshop.subscriptions = subscriptions
-                    .iter()
-                    .map(|item| item.published_file_id.clone())
-                    .collect();
-                self.workshop.subscription_details = subscriptions
-                    .into_iter()
-                    .map(|item| (item.published_file_id.clone(), item))
-                    .collect();
-                self.status = format!(
-                    "Loaded {} Steam Workshop subscriptions.",
-                    self.workshop.subscriptions.len()
-                );
+                self.apply_workshop_subscriptions(subscriptions)
             }
             OperationResult::WorkshopSubscriptionChange(Ok(()), id, subscribed) => {
-                if subscribed {
-                    self.workshop.subscriptions.insert(id.clone());
-                } else {
-                    self.workshop.subscriptions.remove(&id);
-                    self.workshop.subscription_details.remove(&id);
-                }
-                self.status = format!(
-                    "{} Steam Workshop item {id}.",
-                    if subscribed {
-                        "Subscribed to"
-                    } else {
-                        "Unsubscribed from"
-                    }
-                );
+                self.apply_workshop_subscription_change(id, subscribed)
             }
             OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => {
-                self.status = error
+                self.apply_workshop_error(error)
             }
             OperationResult::WorkspaceFiles(Ok(files)) => {
-                self.workspace.files = files;
-                self.status = format!("Found {} workspace files.", self.workspace.files.len());
+                self.apply_workspace_files(files)
             }
             OperationResult::WorkspaceFileCreated(Ok(path)) => {
-                self.invalidate_workshop_review();
-                if !self.workspace.files.contains(&path) {
-                    self.workspace.files.push(path.clone());
-                    self.workspace.files.sort();
-                }
-                self.workspace.selected_file = Some(path.clone());
-                self.workspace.files_open = true;
-                self.workspace.editor.clear();
-                self.workspace.editor_original.clear();
-                self.refresh_workspace_editor_toml_diagnostic();
-                self.workspace.editor_dirty = false;
-                self.workspace.new_file_path.clear();
-                self.status = format!("Created {}.", path.display());
+                self.apply_workspace_file_created(path)
             }
             OperationResult::FileContents(Ok((path, contents))) => {
-                self.workspace.selected_file = Some(path);
-                self.workspace.files_open = true;
-                self.workspace.editor = contents.clone();
-                self.workspace.editor_original = contents;
-                self.refresh_workspace_editor_toml_diagnostic();
-                self.workspace.editor_dirty = false;
-                self.status = "Opened workspace file.".to_owned();
+                self.apply_workspace_file_opened(path, contents)
             }
             OperationResult::FileSaved(Ok(path)) => {
-                self.invalidate_workshop_review();
-                if self.workspace.selected_file.as_ref() == Some(&path) {
-                    self.workspace.editor_original
-                        .clone_from(&self.workspace.editor);
-                    self.refresh_workspace_editor_toml_diagnostic();
-                    self.workspace.editor_dirty = false;
-                }
-                self.status = format!("Saved {}.", path.display());
+                self.apply_workspace_file_saved(path)
             }
             OperationResult::ContentWorkspace(Ok((manifest, contents, files))) => {
-                self.invalidate_workshop_review();
-                self.workspace.files = files;
-                self.workspace.selected_file = Some(manifest);
-                self.workspace.files_open = true;
-                self.workspace.editor = contents.clone();
-                self.workspace.editor_original = contents;
-                self.refresh_workspace_editor_toml_diagnostic();
-                self.workspace.editor_dirty = false;
-                self.section = Section::Workspace;
-                self.status = "Created content and opened its manifest.".to_owned();
+                self.apply_content_workspace_created(manifest, contents, files)
             }
             OperationResult::SourceCompositionLoaded(Ok(composition)) => {
-                self.authoring.composition_edit_selector = composition
-                    .version
-                    .as_deref()
-                    .map(|version| format!("{}@{version}", composition.id))
-                    .unwrap_or_else(|| composition.id.clone());
-                self.authoring.composition_original_links = Some(composition.links.clone());
-                self.authoring.composition_edit = Some(composition);
-                self.status = format!(
-                    "Loaded the {} dependency graph. Review its edges before saving.",
-                    self.authoring.composition_edit.as_ref().map(|graph| graph.kind.as_str()).unwrap_or("source content"),
-                );
+                self.apply_source_composition_loaded(composition)
             }
             OperationResult::SourceCompositionSaved(Ok(composition)) => {
-                self.invalidate_workshop_review();
-                let identity = ContentIdentity {
-                    id: composition.id.clone(),
-                    version: composition.version.clone(),
-                };
-                self.authoring.composition_original_links = Some(composition.links.clone());
-                self.authoring.composition_edit = Some(composition);
-                self.invalidate_profiles_for_source_content(&identity);
-                self.status = "Saved the source content graph. Studio is refreshing its catalog and composition plan.".to_owned();
+                self.apply_source_composition_saved(composition)
             }
             OperationResult::SourceWorkshopLoaded(Ok(metadata)) => {
-                self.set_workshop_metadata_fields(&metadata.policy);
-                self.authoring.workshop_metadata_edit = Some(metadata);
-                self.authoring.runtime_outputs_edit = None;
-                self.authoring.manifest_metadata_dirty = false;
-                self.status = "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell.".to_owned();
+                self.apply_source_workshop_loaded(metadata)
             }
             OperationResult::SourceWorkshopSaved(Ok(metadata)) => {
-                self.invalidate_workshop_review();
-                self.set_workshop_metadata_fields(&metadata.policy);
-                self.authoring.workshop_metadata_edit = Some(metadata.clone());
-                self.authoring.manifest_metadata_dirty = false;
-                self.invalidate_profiles_for_source_content(&ContentIdentity {
-                    id: metadata.id.clone(),
-                    version: metadata.version.clone(),
-                });
-                if let Ok(relative) = metadata.manifest.strip_prefix(Path::new(self.workspace.root.trim())) {
-                    let relative = relative.to_path_buf();
-                    if self.workspace.selected_file.as_ref() == Some(&relative) {
-                        self.workspace.editor = metadata.source.clone();
-                        self.workspace.editor_original = metadata.source.clone();
-                        self.workspace.editor_dirty = false;
-                        self.refresh_workspace_editor_toml_diagnostic();
-                    }
-                }
-                self.status = "Saved Workshop metadata through Vapor Shell. Studio is refreshing the workspace catalog.".to_owned();
+                self.apply_source_workshop_saved(metadata)
             }
             OperationResult::SourceRuntimeOutputsLoaded(Ok(outputs)) => {
-                self.set_runtime_output_fields(&outputs);
-                self.authoring.runtime_outputs_edit = Some(outputs);
-                self.authoring.workshop_metadata_edit = None;
-                self.authoring.manifest_metadata_dirty = false;
-                self.status = "Loaded runtime output declarations. Edit the executable and library lists, then save through Vapor Shell.".to_owned();
+                self.apply_source_runtime_outputs_loaded(outputs)
             }
             OperationResult::SourceRuntimeOutputsSaved(Ok(outputs)) => {
-                self.invalidate_workshop_review();
-                self.set_runtime_output_fields(&outputs);
-                self.authoring.runtime_outputs_edit = Some(outputs.clone());
-                self.authoring.manifest_metadata_dirty = false;
-                self.invalidate_profiles_for_source_content(&ContentIdentity {
-                    id: outputs.id.clone(),
-                    version: outputs.version.clone(),
-                });
-                if let Ok(relative) = outputs.manifest.strip_prefix(Path::new(self.workspace.root.trim())) {
-                    let relative = relative.to_path_buf();
-                    if self.workspace.selected_file.as_ref() == Some(&relative) {
-                        self.workspace.editor = outputs.source.clone();
-                        self.workspace.editor_original = outputs.source.clone();
-                        self.workspace.editor_dirty = false;
-                        self.refresh_workspace_editor_toml_diagnostic();
-                    }
-                }
-                self.status = "Saved runtime outputs through Vapor Shell. Studio is refreshing the catalog and active profile.".to_owned();
+                self.apply_source_runtime_outputs_saved(outputs)
             }
             OperationResult::Install(Ok(composition)) => {
                 self.apply_installed_composition(

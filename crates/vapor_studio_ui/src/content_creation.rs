@@ -3,8 +3,27 @@ use super::workspace_files::discover_workspace_files;
 use super::StudioApp;
 use std::{fs, path::PathBuf};
 use vapor_core::OperationKind;
+use crate::navigation::Section;
 
 impl StudioApp {
+    pub(super) fn apply_content_workspace_created(
+        &mut self,
+        manifest: PathBuf,
+        contents: String,
+        files: Vec<PathBuf>,
+    ) {
+        self.invalidate_workshop_review();
+        self.workspace.files = files;
+        self.workspace.selected_file = Some(manifest);
+        self.workspace.files_open = true;
+        self.workspace.editor = contents.clone();
+        self.workspace.editor_original = contents;
+        self.refresh_workspace_editor_toml_diagnostic();
+        self.workspace.editor_dirty = false;
+        self.section = Section::Workspace;
+        self.status = "Created content and opened its manifest.".to_owned();
+    }
+
     pub(super) fn create_content_workspace(&mut self) {
         if !self.require_open_workspace("create content in this workspace") {
             return;

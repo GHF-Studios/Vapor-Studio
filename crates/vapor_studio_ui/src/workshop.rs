@@ -52,6 +52,115 @@ impl StudioApp {
         self.workshop.confirmation.clear();
     }
 
+    pub(super) fn apply_workshop_stage_error(&mut self, error: String) {
+        self.invalidate_workshop_review();
+        self.status = error;
+    }
+
+    pub(super) fn apply_workshop_error(&mut self, error: String) {
+        self.status = error;
+    }
+
+    pub(super) fn apply_workshop_acquisition(
+        &mut self,
+        acquisition: vapor_studio_core::WorkshopAcquisition,
+    ) {
+        self.status = format!(
+            "Downloaded {} ({}) into Vapor's cache.",
+            acquisition.id, acquisition.kind
+        );
+        self.workshop.pending_acquisition = Some(acquisition);
+    }
+
+    pub(super) fn apply_workshop_publication(
+        &mut self,
+        publication: vapor_studio_core::WorkshopPublication,
+    ) {
+        self.status = format!(
+            "{} Workshop item {}{}; receipt saved at {}.",
+            if publication.created {
+                "Created"
+            } else {
+                "Updated"
+            },
+            publication.id,
+            publication
+                .published_file_id
+                .as_ref()
+                .map(|id| format!(" · PublishedFileId {id}"))
+                .unwrap_or_default(),
+            publication.receipt.display(),
+        );
+        self.invalidate_workshop_review();
+    }
+
+    pub(super) fn apply_workshop_stage(
+        &mut self,
+        preview: vapor_studio_core::WorkshopPackagePreview,
+    ) {
+        self.status = format!(
+            "Staged {} · {} files · {} bytes.",
+            preview.id, preview.files, preview.bytes
+        );
+        self.workshop.preview = Some(preview);
+    }
+
+    pub(super) fn apply_workshop_search(
+        &mut self,
+        page: vapor_studio_core::WorkshopPage,
+        query: String,
+    ) {
+        self.workshop.page = page.page;
+        self.workshop.total_results = page.total_results;
+        self.workshop.results = page.items;
+        self.workshop.results_query = Some(query);
+        self.status = format!(
+            "Steam Workshop returned {} items on page {} of {}.",
+            self.workshop.results.len(),
+            self.workshop.page,
+            self.workshop.total_results
+        );
+    }
+
+    pub(super) fn apply_workshop_subscriptions(
+        &mut self,
+        subscriptions: Vec<vapor_studio_core::WorkshopSubscription>,
+    ) {
+        self.workshop.subscriptions = subscriptions
+            .iter()
+            .map(|item| item.published_file_id.clone())
+            .collect();
+        self.workshop.subscription_details = subscriptions
+            .into_iter()
+            .map(|item| (item.published_file_id.clone(), item))
+            .collect();
+        self.status = format!(
+            "Loaded {} Steam Workshop subscriptions.",
+            self.workshop.subscriptions.len()
+        );
+    }
+
+    pub(super) fn apply_workshop_subscription_change(
+        &mut self,
+        id: String,
+        subscribed: bool,
+    ) {
+        if subscribed {
+            self.workshop.subscriptions.insert(id.clone());
+        } else {
+            self.workshop.subscriptions.remove(&id);
+            self.workshop.subscription_details.remove(&id);
+        }
+        self.status = format!(
+            "{} Steam Workshop item {id}.",
+            if subscribed {
+                "Subscribed to"
+            } else {
+                "Unsubscribed from"
+            }
+        );
+    }
+
     pub(super) fn stage_workshop_content(&mut self, selector: String) {
         if self.catalog_identity_is_conflicted(&selector) {
             self.status = format!(

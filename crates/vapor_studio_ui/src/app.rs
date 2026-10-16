@@ -2,6 +2,8 @@
 mod components;
 #[path = "app_shell.rs"]
 mod app_shell;
+#[path = "authoring_results.rs"]
+mod authoring_results;
 #[path = "catalog.rs"]
 mod catalog;
 #[path = "composition_lifecycle.rs"]

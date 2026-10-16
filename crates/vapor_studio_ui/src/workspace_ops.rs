@@ -65,6 +65,57 @@ impl WorkspaceState {
 }
 
 impl StudioApp {
+    pub(super) fn apply_workspace_loaded(&mut self, workspace: VaporWorkspace) {
+        self.status = format!(
+            "Completed for {}/{} · {} projects",
+            workspace.manifest.workspace.organization,
+            workspace.manifest.workspace.name,
+            workspace.projects.len()
+        );
+    }
+
+    pub(super) fn apply_remembered_sources(&mut self, known: Vec<PathBuf>) {
+        self.workspace.registered_sources = known;
+        self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
+    }
+
+    pub(super) fn apply_adopted_content_project(
+        &mut self,
+        summary: String,
+        contents: Vec<vapor_studio_core::SourceContent>,
+    ) {
+        self.catalog.sources = contents;
+        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.status = summary;
+    }
+
+    pub(super) fn apply_unregistered_content_project(
+        &mut self,
+        summary: String,
+        contents: Vec<vapor_studio_core::SourceContent>,
+        identity: vapor_studio_core::ContentIdentity,
+    ) {
+        self.catalog.sources = contents;
+        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.pending_unregistration = None;
+        self.invalidate_profiles_for_source_content(&identity);
+        self.status = summary;
+    }
+
+    pub(super) fn apply_unregistered_project_scan(
+        &mut self,
+        scan: vapor_studio_core::UnregisteredProjectScan,
+    ) {
+        self.status = format!(
+            "Found {} adoptable content project{} and {} diagnostic{}.",
+            scan.candidates.len(),
+            if scan.candidates.len() == 1 { "" } else { "s" },
+            scan.diagnostics.len(),
+            if scan.diagnostics.len() == 1 { "" } else { "s" },
+        );
+        self.workspace.unregistered_projects = scan;
+    }
+
     pub(super) fn run_operation(&mut self, operation: DevelopmentOperation) {
         if !self.require_open_workspace("run a workspace operation") {
             return;
