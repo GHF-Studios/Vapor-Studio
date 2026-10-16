@@ -550,8 +550,11 @@ impl StudioApp {
                     };
                     self.composition_preview = Some(preview);
                 }
-                OperationResult::WorkshopStage(Err(error))
-                | OperationResult::WorkshopAcquisition(Err(error))
+                OperationResult::WorkshopStage(Err(error)) => {
+                    self.invalidate_workshop_review();
+                    self.status = error;
+                }
+                OperationResult::WorkshopAcquisition(Err(error))
                 | OperationResult::WorkshopPublish(Err(error))
                 | OperationResult::WorkshopSearch(Err(error))
                 | OperationResult::WorkshopSubscriptions(Err(error)) => self.status = error,
@@ -637,6 +640,7 @@ impl StudioApp {
                     self.status = format!("Found {} workspace files.", self.workspace_files.len());
                 }
                 OperationResult::WorkspaceFileCreated(Ok(path)) => {
+                    self.invalidate_workshop_review();
                     if !self.workspace_files.contains(&path) {
                         self.workspace_files.push(path.clone());
                         self.workspace_files.sort();
@@ -660,6 +664,7 @@ impl StudioApp {
                     self.status = "Opened workspace file.".to_owned();
                 }
                 OperationResult::FileSaved(Ok(path)) => {
+                    self.invalidate_workshop_review();
                     if self.selected_workspace_file.as_ref() == Some(&path) {
                         self.workspace_editor_original
                             .clone_from(&self.workspace_editor);
@@ -669,6 +674,7 @@ impl StudioApp {
                     self.status = format!("Saved {}.", path.display());
                 }
                 OperationResult::ContentWorkspace(Ok((manifest, contents, files))) => {
+                    self.invalidate_workshop_review();
                     self.workspace_files = files;
                     self.selected_workspace_file = Some(manifest);
                     self.workspace_files_open = true;
@@ -693,6 +699,7 @@ impl StudioApp {
                     );
                 }
                 OperationResult::SourceCompositionSaved(Ok(composition)) => {
+                    self.invalidate_workshop_review();
                     let identity = ContentIdentity {
                         id: composition.id.clone(),
                         version: composition.version.clone(),
@@ -710,6 +717,7 @@ impl StudioApp {
                     self.status = "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell.".to_owned();
                 }
                 OperationResult::SourceWorkshopSaved(Ok(metadata)) => {
+                    self.invalidate_workshop_review();
                     self.set_workshop_metadata_fields(&metadata.policy);
                     self.workshop_metadata_edit = Some(metadata.clone());
                     self.manifest_metadata_dirty = false;
@@ -736,6 +744,7 @@ impl StudioApp {
                     self.status = "Loaded runtime output declarations. Edit the executable and library lists, then save through Vapor Shell.".to_owned();
                 }
                 OperationResult::SourceRuntimeOutputsSaved(Ok(outputs)) => {
+                    self.invalidate_workshop_review();
                     self.set_runtime_output_fields(&outputs);
                     self.runtime_outputs_edit = Some(outputs.clone());
                     self.manifest_metadata_dirty = false;
@@ -1198,6 +1207,11 @@ impl StudioApp {
         })
     }
 
+    fn invalidate_workshop_review(&mut self) {
+        self.workshop_preview = None;
+        self.workshop_confirmation.clear();
+    }
+
     pub(super) fn stage_workshop_content(&mut self, selector: String) {
         if self.catalog_identity_is_conflicted(&selector) {
             self.status = format!(
@@ -1208,6 +1222,7 @@ impl StudioApp {
         if !self.require_saved_workspace("stage this Workshop item") {
             return;
         }
+        self.invalidate_workshop_review();
         let workspace = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
