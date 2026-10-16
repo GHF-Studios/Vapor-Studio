@@ -222,7 +222,8 @@ impl StudioApp {
                     if included {
                         if let Some(role_group) = role_group {
                             let old_role_choices = self
-                                .contents
+                                .catalog
+                                .sources
                                 .iter()
                                 .filter(|candidate| {
                                     let candidate_id =
@@ -238,6 +239,7 @@ impl StudioApp {
                                     );
                                     candidate_group == Some(role_group)
                                         && self
+                                            .authoring
                                             .draft_dependencies
                                             .iter()
                                             .any(|selected| selected == candidate_id)

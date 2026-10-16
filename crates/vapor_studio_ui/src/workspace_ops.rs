@@ -53,6 +53,17 @@ impl WorkspaceState {
             files_open: false,
         }
     }
+
+    pub(super) fn clear_file_context(&mut self) {
+        self.files.clear();
+        self.selected_file = None;
+        self.editor.clear();
+        self.editor_original.clear();
+        self.editor_toml_diagnostic = None;
+        self.editor_dirty = false;
+        self.files_open = false;
+        self.new_file_path.clear();
+    }
 }
 
 impl StudioApp {
@@ -116,7 +127,7 @@ impl StudioApp {
         let catalog_error = catalog.as_ref().err().cloned();
         self.workspace.root = root.display().to_string();
         self.workspace.root_draft = self.workspace.root.clone();
-        self.authoring.draft_dependencies.clear();
+        self.authoring.clear_workspace_context();
         let profile = &mut self.profile.items[self.profile.active_index];
         profile.workspace = Some(WorkspaceAssociation { root });
         if workspace_changed {
@@ -124,24 +135,13 @@ impl StudioApp {
             profile.resolved_graph = None;
             profile.installation = vapor_studio_core::InstallationState::Unknown;
         }
+        self.workspace.clear_file_context();
         self.catalog.sources = contents;
         self.catalog.items = catalog.unwrap_or_default();
         self.catalog.selected = None;
-        self.composition_preview = None;
-        self.authoring.composition_edit = None;
-        self.authoring.composition_original_links = None;
-        self.authoring.composition_edit_selector.clear();
-        self.authoring.composition_link_candidate.clear();
-        self.repreview_after_catalog_refresh = false;
+        self.profile_composition.clear_context();
         self.invalidate_workshop_review();
         self.workspace.files = files;
-        self.workspace.selected_file = None;
-        self.workspace.editor.clear();
-        self.workspace.editor_original.clear();
-        self.workspace.editor_toml_diagnostic = None;
-        self.workspace.editor_dirty = false;
-        self.workspace.files_open = false;
-        self.workspace.new_file_path.clear();
         self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.workspace.pending_unregistration = None;
         self.section = Section::Workspace;
@@ -398,130 +398,6 @@ impl StudioApp {
             OperationResult::WorkspaceFileCreated(create_new_workspace_file(&root, &relative))
         });
         self.status = "Creating a new workspace file…".to_owned();
-    }
-
-    pub(super) fn create_content_workspace(&mut self) {
-        if !self.require_open_workspace("create content in this workspace") {
-            return;
-        }
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let id = self.authoring.draft_content_id.trim().to_owned();
-        let version = self.authoring.draft_content_version.trim().to_owned();
-        let selected = self.authoring.draft_dependencies.clone();
-        let app_id = match self.authoring.draft_workshop_app_id.trim() {
-            "" => None,
-            value => match value.parse::<u32>() {
-                Ok(value) if value > 0 => Some(value),
-                _ => {
-                    self.status = "Steam AppID must be a positive number.".to_owned();
-                    return;
-                }
-            },
-        };
-        let non_empty = |value: &str| {
-            let value = value.trim();
-            (!value.is_empty()).then(|| value.to_owned())
-        };
-        let workshop = vapor_studio_core::WorkshopPolicyDraft {
-            app_id,
-            published_file_id: non_empty(&self.authoring.draft_workshop_published_file_id),
-            visibility: non_empty(&self.authoring.draft_workshop_visibility),
-            title: non_empty(&self.authoring.draft_workshop_title),
-            description: non_empty(&self.authoring.draft_workshop_description),
-            tags: self
-                .draft_workshop_tags
-                .split(',')
-                .map(str::trim)
-                .filter(|tag| !tag.is_empty())
-                .map(ToOwned::to_owned)
-                .collect(),
-            change_note: non_empty(&self.authoring.draft_workshop_change_note),
-        };
-        let kind = self.authoring.draft_content_kind;
-        self.spawn(OperationKind::CreateContent, move |_context| {
-            let result = vapor_studio_core::create_content_workspace_with_workshop(
-                &executable,
-                &root,
-                &id,
-                &version,
-                kind,
-                &selected,
-                &workshop,
-            )
-            .and_then(|output| {
-                let workspace = fs::canonicalize(&root)
-                    .map_err(|error| format!("{}: {error}", root.display()))?;
-                let manifest = output;
-                let relative = manifest
-                    .strip_prefix(&workspace)
-                    .map(PathBuf::from)
-                    .map_err(|error| {
-                        format!("created manifest is outside the workspace: {error}")
-                    })?;
-                let contents = fs::read_to_string(&manifest)
-                    .map_err(|error| format!("{}: {error}", manifest.display()))?;
-                let files = discover_workspace_files(&workspace)?;
-                Ok((relative, contents, files))
-            });
-            OperationResult::ContentWorkspace(result)
-        });
-        self.status = "Creating content and opening its manifest…".to_owned();
-    }
-
-    pub(super) fn create_starter_workspace(&mut self) {
-        if !self.require_saved_workspace("create and open a starter workspace") {
-            return;
-        }
-        let destination = PathBuf::from(self.workspace.starter_path.trim());
-        if destination.as_os_str().is_empty() {
-            self.status = "Choose an empty folder for the new starter workspace.".to_owned();
-            return;
-        }
-        let organization = self.workspace.starter_organization.trim().to_owned();
-        let name = self.workspace.starter_name.trim().to_owned();
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let open_executable = executable.clone();
-        self.spawn(OperationKind::CreateWorkspace, move |_context| {
-            let result = vapor_studio_core::create_basic_content_workspace(
-                &executable,
-                &destination,
-                &organization,
-                &name,
-            )
-            .and_then(|root| {
-                vapor_studio_core::discover_source_content(&open_executable, &root)
-                    .and_then(|contents| {
-                        let catalog = vapor_studio_core::discover_content_catalog(
-                            &open_executable,
-                            Some(&root),
-                        );
-                        discover_workspace_files(&root)
-                            .map(|files| (root.clone(), contents, catalog, files))
-                    })
-                    .map_err(|error| {
-                        format!(
-                            "Created workspace at {}, but Studio could not open it: {error}",
-                            root.display()
-                        )
-                    })
-            });
-            OperationResult::WorkspaceSelection(result)
-        });
-        self.status =
-            "Creating the maintained Engine, Game, and Packagepack starter workspace…".to_owned();
     }
 
     pub(super) fn scan_unregistered_content_projects(&mut self) {

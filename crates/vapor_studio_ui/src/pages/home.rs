@@ -32,7 +32,7 @@ impl StudioApp {
                 vapor_studio_core::InstallationState::Installed { .. },
             );
             let source_ready = !self.workspace.editor_dirty
-                && self.composition_preview.as_ref().is_some_and(|preview| {
+                && self.profile_composition.preview().is_some_and(|preview| {
                     preview.selector == content_id
                         && preview.ready()
                         && preview.nodes.last().is_some_and(|root| {

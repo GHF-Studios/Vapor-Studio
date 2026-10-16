@@ -3,6 +3,47 @@ use super::operations::OperationResult;
 use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, OperationKind};
 
+pub(super) struct ProfileCompositionState {
+    preview: Option<vapor_studio_core::CompositionPreview>,
+    repreview_after_catalog_refresh: bool,
+}
+
+impl Default for ProfileCompositionState {
+    fn default() -> Self {
+        Self {
+            preview: None,
+            repreview_after_catalog_refresh: false,
+        }
+    }
+}
+
+impl ProfileCompositionState {
+    pub(super) fn preview(&self) -> Option<&vapor_studio_core::CompositionPreview> {
+        self.preview.as_ref()
+    }
+
+    pub(super) fn set_preview(&mut self, preview: vapor_studio_core::CompositionPreview) {
+        self.preview = Some(preview);
+    }
+
+    pub(super) fn invalidate_preview(&mut self) {
+        self.preview = None;
+    }
+
+    pub(super) fn clear_context(&mut self) {
+        self.invalidate_preview();
+        self.repreview_after_catalog_refresh = false;
+    }
+
+    pub(super) fn request_repreview_after_catalog_refresh(&mut self) {
+        self.repreview_after_catalog_refresh = true;
+    }
+
+    pub(super) fn take_repreview_request(&mut self) -> bool {
+        std::mem::take(&mut self.repreview_after_catalog_refresh)
+    }
+}
+
 impl StudioApp {
     pub(super) fn install_selected(&mut self) {
         if !self.require_saved_workspace("install this workspace composition") {
@@ -102,7 +143,7 @@ impl StudioApp {
                 return;
             }
         };
-        self.composition_preview = None;
+        self.profile_composition.invalidate_preview();
         self.spawn(OperationKind::Resolve, move |_context| {
             OperationResult::CompositionPreview(vapor_studio_core::preview_profile_composition(
                 &executable,

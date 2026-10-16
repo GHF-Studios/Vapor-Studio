@@ -10,7 +10,8 @@ impl StudioApp {
         ui.weak("Vapor Shell owns validation and manifest writes. Studio shows the current source snapshot and the exact graph you are changing.");
 
         let source_projects = self
-            .contents
+            .catalog
+            .sources
             .iter()
             .map(|content| {
                 (
@@ -121,7 +122,8 @@ impl StudioApp {
             ui.separator();
             ui.label("Add a local workspace content edge");
             let choices = self
-                .contents
+                .catalog
+                .sources
                 .iter()
                 .filter(|content| content.id != composition.id)
                 .filter(|content| {
@@ -243,7 +245,7 @@ impl StudioApp {
                 .map(|version| format!("{}@{version}", composition.id))
                 .unwrap_or_else(|| composition.id.clone())
         });
-        let preview = self.composition_preview.clone();
+        let preview = self.profile_composition.preview().cloned();
         if source_graph_saved
             && let (Some(selector), Some(preview)) = (selector, preview)
             && preview.selector == selector

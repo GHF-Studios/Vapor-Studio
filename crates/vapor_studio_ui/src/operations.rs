@@ -212,7 +212,7 @@ impl StudioApp {
     }
 
     fn refresh_content_catalog(&mut self) {
-        self.composition_preview = None;
+        self.profile_composition.invalidate_preview();
         let root = self
             .profile
             .items

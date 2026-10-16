@@ -46,9 +46,6 @@ impl StudioApp {
                 self.workspace.unregistered_projects = scan;
             }
             OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
-                self.authoring.workshop_metadata_edit = None;
-                self.authoring.runtime_outputs_edit = None;
-                self.authoring.manifest_metadata_dirty = false;
                 self.workspace.pending_unregistration = None;
                 self.activate_workspace(root, contents, catalog, files)
             }
@@ -86,8 +83,7 @@ impl StudioApp {
                         );
                     }
                 }
-                if self.repreview_after_catalog_refresh {
-                    self.repreview_after_catalog_refresh = false;
+                if self.profile_composition.take_repreview_request() {
                     self.preview_selected_composition();
                 }
                 if self
@@ -159,7 +155,7 @@ impl StudioApp {
                         preview.blockers.len()
                     )
                 };
-                self.composition_preview = Some(preview);
+                self.profile_composition.set_preview(preview);
             }
             OperationResult::WorkshopStage(Err(error)) => {
                 self.invalidate_workshop_review();
@@ -375,7 +371,7 @@ impl StudioApp {
                 self.status = "Saved runtime outputs through Vapor Shell. Studio is refreshing the catalog and active profile.".to_owned();
             }
             OperationResult::Install(Ok(composition)) => {
-                self.composition_preview = None;
+                self.profile_composition.invalidate_preview();
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                 self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
@@ -389,7 +385,7 @@ impl StudioApp {
                         .to_owned();
             }
             OperationResult::Update(Ok(composition)) => {
-                self.composition_preview = None;
+                self.profile_composition.invalidate_preview();
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                 self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
@@ -401,7 +397,7 @@ impl StudioApp {
                 self.status = "Updated the selected composition from its current workspace or cache sources.".to_owned();
             }
             OperationResult::RunProfile(Ok(composition)) => {
-                self.composition_preview = None;
+                self.profile_composition.invalidate_preview();
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                 self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
@@ -413,7 +409,7 @@ impl StudioApp {
                 self.status = "Finished playing the selected source composition.".to_owned();
             }
             OperationResult::Repair(Ok(composition)) => {
-                self.composition_preview = None;
+                self.profile_composition.invalidate_preview();
                 let graph_fingerprint =
                     vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                 self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);

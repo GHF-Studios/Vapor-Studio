@@ -149,9 +149,7 @@ impl StudioApp {
             {
                 self.preview_selected_composition();
             }
-            let preview = self
-                .composition_preview
-                .as_ref()
+            let preview = self.profile_composition.preview()
                 .filter(|preview| preview.selector == selector)
                 .cloned();
             if let Some(preview) = preview {
@@ -261,7 +259,7 @@ impl StudioApp {
             let has_source = profile.workspace.is_some();
             let root_plan_node = profile.root_package.as_ref().and_then(|root| {
                 let selector = content_identity(root);
-                self.composition_preview.as_ref()
+                self.profile_composition.preview()
                     .filter(|preview| preview.selector == selector && preview.ready())
                     .and_then(|preview| preview.nodes.last())
             });

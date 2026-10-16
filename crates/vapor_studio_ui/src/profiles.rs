@@ -116,29 +116,12 @@ impl StudioApp {
         } else {
             self.workspace.root.clone()
         };
-        self.authoring.draft_dependencies.clear();
-        self.catalog.sources.clear();
-        self.catalog.items.clear();
-        self.catalog.selected = None;
-        self.composition_preview = None;
-        self.authoring.composition_edit = None;
-        self.authoring.composition_original_links = None;
-        self.authoring.composition_edit_selector.clear();
-        self.authoring.composition_link_candidate.clear();
-        self.repreview_after_catalog_refresh = false;
+        self.authoring.clear_workspace_context();
+        self.catalog.clear_workspace_content();
+        self.profile_composition.clear_context();
         self.invalidate_workshop_review();
         self.workspace.pending_unregistration = None;
-        self.authoring.workshop_metadata_edit = None;
-        self.authoring.runtime_outputs_edit = None;
-        self.authoring.manifest_metadata_dirty = false;
-        self.workspace.files.clear();
-        self.workspace.selected_file = None;
-        self.workspace.editor.clear();
-        self.workspace.editor_original.clear();
-        self.workspace.editor_toml_diagnostic = None;
-        self.workspace.editor_dirty = false;
-        self.workspace.files_open = false;
-        self.workspace.new_file_path.clear();
+        self.workspace.clear_file_context();
         self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.discover();
     }
@@ -178,13 +161,9 @@ impl StudioApp {
         profile.workspace = workspace.clone().map(|root| WorkspaceAssociation { root });
         profile.resolved_graph = None;
         profile.installation = vapor_studio_core::InstallationState::NotInstalled;
-        self.composition_preview = None;
         if workspace_changed {
-            self.authoring.composition_edit = None;
-            self.authoring.composition_original_links = None;
-            self.authoring.composition_edit_selector.clear();
-            self.authoring.composition_link_candidate.clear();
-            self.repreview_after_catalog_refresh = false;
+            self.authoring.clear_selected_source();
+            self.profile_composition.clear_context();
             self.workspace.root = workspace
                 .as_ref()
                 .map(|root| root.display().to_string())
@@ -194,18 +173,11 @@ impl StudioApp {
             } else {
                 self.workspace.root.clone()
             };
-            self.catalog.sources.clear();
-            self.catalog.items.clear();
-            self.catalog.selected = None;
-            self.workspace.files.clear();
-            self.workspace.files_open = false;
-            self.workspace.selected_file = None;
-            self.workspace.editor.clear();
-            self.workspace.editor_original.clear();
-            self.workspace.editor_toml_diagnostic = None;
-            self.workspace.editor_dirty = false;
-            self.workspace.new_file_path.clear();
+            self.catalog.clear_workspace_content();
+            self.workspace.clear_file_context();
             self.discover();
+        } else {
+            self.profile_composition.invalidate_preview();
         }
         self.status = format!(
             "Selected {} for profile {}. Preview its dependency plan before installing.",

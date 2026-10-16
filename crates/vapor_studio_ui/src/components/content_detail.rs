@@ -129,7 +129,8 @@ impl StudioApp {
                     }
                 }
                 let is_authored_here = self
-                    .contents
+                    .catalog
+                    .sources
                     .iter()
                     .any(|source| super::super::source_content_selector(source) == identity);
                 if is_authored_here {

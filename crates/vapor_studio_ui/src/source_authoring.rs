@@ -67,6 +67,23 @@ impl Default for AuthoringState {
     }
 }
 
+impl AuthoringState {
+    pub(super) fn clear_selected_source(&mut self) {
+        self.composition_edit_selector.clear();
+        self.composition_edit = None;
+        self.composition_original_links = None;
+        self.composition_link_candidate.clear();
+    }
+
+    pub(super) fn clear_workspace_context(&mut self) {
+        self.draft_dependencies.clear();
+        self.clear_selected_source();
+        self.workshop_metadata_edit = None;
+        self.runtime_outputs_edit = None;
+        self.manifest_metadata_dirty = false;
+    }
+}
+
 impl StudioApp {
     pub(super) fn load_source_composition(&mut self) {
         if !self.require_open_workspace("edit a source content dependency graph") { return; }
@@ -176,7 +193,9 @@ impl StudioApp {
             if affected {
                 profile.resolved_graph = None;
                 profile.installation = vapor_studio_core::InstallationState::NotInstalled;
-                self.repreview_after_catalog_refresh |= index == self.profile.active_index;
+                if index == self.profile.active_index {
+                    self.profile_composition.request_repreview_after_catalog_refresh();
+                }
             }
         }
     }

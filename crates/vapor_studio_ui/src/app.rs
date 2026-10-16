@@ -4,6 +4,8 @@ mod components;
 mod app_shell;
 #[path = "composition_lifecycle.rs"]
 mod composition_lifecycle;
+#[path = "content_creation.rs"]
+mod content_creation;
 #[path = "operation_center.rs"]
 mod operation_center;
 #[path = "operation_results.rs"]
@@ -28,6 +30,7 @@ use std::path::PathBuf;
 use operations::OperationState;
 use profiles::ProfileState;
 use source_authoring::AuthoringState;
+use composition_lifecycle::ProfileCompositionState;
 use workshop::WorkshopState;
 use workspace_ops::WorkspaceState;
 use vapor_core::ContentKind;
@@ -57,15 +60,22 @@ impl Default for CatalogState {
     }
 }
 
+impl CatalogState {
+    fn clear_workspace_content(&mut self) {
+        self.sources.clear();
+        self.items.clear();
+        self.selected = None;
+    }
+}
+
 pub struct StudioApp {
     section: Section,
     workspace: WorkspaceState,
     profile: ProfileState,
     catalog: CatalogState,
     authoring: AuthoringState,
-    repreview_after_catalog_refresh: bool,
+    profile_composition: ProfileCompositionState,
     workshop: WorkshopState,
-    composition_preview: Option<vapor_studio_core::CompositionPreview>,
     status: String,
     operation: OperationState,
     diagnostics: vapor_devtools::app::DevtoolsApp,
@@ -145,9 +155,8 @@ impl StudioApp {
             ),
             catalog: CatalogState::default(),
             workshop: WorkshopState::default(),
-            composition_preview: None,
             authoring: AuthoringState::default(),
-            repreview_after_catalog_refresh: false,
+            profile_composition: ProfileCompositionState::default(),
             status: "Choose a workspace or discover content in this folder.".to_owned(),
             operation: OperationState::default(),
             diagnostics: vapor_devtools::connect(None),
