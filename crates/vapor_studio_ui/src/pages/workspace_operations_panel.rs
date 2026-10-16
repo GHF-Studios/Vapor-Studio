@@ -1,0 +1,39 @@
+use super::super::StudioApp;
+use eframe::egui;
+use vapor_core::DevelopmentOperation;
+
+impl StudioApp {
+    pub(super) fn draw_workspace_operations_panel(&mut self, ui: &mut egui::Ui) {
+        let has_workspace = !self.workspace.root.trim().is_empty();
+        ui.horizontal_wrapped(|ui| {
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && !self.workspace.root.trim().is_empty(), egui::Button::new("Validate content"))
+                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; validation reads workspace files from disk.")
+                .clicked()
+            {
+                self.validate_workspace_source();
+            }
+            for (label, operation) in [
+                ("Format", DevelopmentOperation::Fmt),
+                ("Check", DevelopmentOperation::Check),
+                ("Test", DevelopmentOperation::Test),
+                ("Build", DevelopmentOperation::Build),
+                ("Clean", DevelopmentOperation::Clean),
+            ] {
+                if ui
+                    .add_enabled(
+                        !self.operation.running && !self.has_unsaved_workspace_edits() && has_workspace,
+                        egui::Button::new(label),
+                    )
+                    .on_disabled_hover_text(if has_workspace {
+                        "Save or discard workspace file and structured metadata drafts first; workspace operations read files from disk."
+                    } else {
+                        "Open a Vapor Workspace before running workspace operations."
+                    })
+                    .clicked()
+                {
+                    self.run_operation(operation);
+                }
+            }
+        });
+    }
+}

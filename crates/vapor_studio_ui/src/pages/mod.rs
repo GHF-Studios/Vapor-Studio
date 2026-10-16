@@ -5,3 +5,7 @@ mod home;
 mod library;
 mod workspace;
 mod workspace_files_panel;
+mod workspace_authoring_panel;
+mod workspace_content_panel;
+mod workspace_operations_panel;
+mod workspace_registry_panel;

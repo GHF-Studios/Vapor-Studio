@@ -28,6 +28,8 @@ mod workspace_files;
 mod workspace_ops;
 #[path = "workspace_editor.rs"]
 mod workspace_editor;
+#[path = "workspace_content.rs"]
+mod workspace_content;
 #[path = "workshop.rs"]
 mod workshop;
 
