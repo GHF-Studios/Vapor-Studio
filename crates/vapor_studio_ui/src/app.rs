@@ -12,6 +12,8 @@ mod composition_lifecycle;
 mod content_creation;
 #[path = "operation_center.rs"]
 mod operation_center;
+#[path = "operation_protocol.rs"]
+mod operation_protocol;
 #[path = "operation_results.rs"]
 mod operation_results;
 #[path = "operations.rs"]

@@ -1,4 +1,4 @@
-use super::operations::OperationResult;
+use super::operation_protocol::OperationResult;
 use super::workspace_files::discover_workspace_files;
 use super::StudioApp;
 use std::{fs, path::PathBuf};

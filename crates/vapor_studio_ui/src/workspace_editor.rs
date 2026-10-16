@@ -1,4 +1,4 @@
-use super::operations::OperationResult;
+use super::operation_protocol::OperationResult;
 use super::workspace_files::{
     create_new_workspace_file, discover_workspace_files, read_workspace_file,
     write_workspace_file,

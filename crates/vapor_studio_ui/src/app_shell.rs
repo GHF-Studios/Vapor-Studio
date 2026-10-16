@@ -1,5 +1,5 @@
 use super::{Section, StudioApp};
-use super::operations::OperationResult;
+use super::operation_protocol::OperationResult;
 use eframe::egui;
 use vapor_studio_core::{CURRENT_SCHEMA_VERSION, OperationKind, ProfileDocument};
 
@@ -34,20 +34,22 @@ impl StudioApp {
 
     fn draw_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let previous_profile = self.profile.active_index;
             ui.heading(self.section.label());
             ui.separator();
             ui.label("Profile");
+            let active_profile = self.profile.active_index;
+            let mut requested_profile = None;
             egui::ComboBox::from_id_salt("active-profile")
-                .selected_text(&self.profile.items[self.profile.active_index].name)
+                .selected_text(&self.profile.items[active_profile].name)
                 .show_ui(ui, |ui| {
                     for (index, profile) in self.profile.items.iter().enumerate() {
-                        ui.selectable_value(&mut self.profile.active_index, index, &profile.name);
+                        let selected = index == active_profile;
+                        if ui.selectable_label(selected, &profile.name).clicked() && !selected {
+                            requested_profile = Some(index);
+                        }
                     }
                 });
-            if self.profile.active_index != previous_profile {
-                let requested_profile = self.profile.active_index;
-                self.profile.active_index = previous_profile;
+            if let Some(requested_profile) = requested_profile {
                 self.select_profile(requested_profile);
             }
             ui.add(egui::TextEdit::singleline(&mut self.catalog.search_query).hint_text("Search content"))

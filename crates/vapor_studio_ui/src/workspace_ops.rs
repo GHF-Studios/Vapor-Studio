@@ -1,11 +1,11 @@
 use super::StudioApp;
-use super::operations::{OperationResult, discover_workspace_and_catalog};
+use super::catalog::discover_workspace_and_catalog;
+use super::operation_protocol::OperationResult;
 use super::workspace_files::discover_workspace_files;
 use crate::navigation::Section;
 use std::{fs, path::PathBuf};
 use vapor_core::{DevelopmentOperation, VaporWorkspace};
 use vapor_studio_core::{OperationKind, WorkspaceAssociation};
-
 
 pub(super) struct WorkspaceState {
     pub(super) root: String,

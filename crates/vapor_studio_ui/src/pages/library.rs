@@ -42,7 +42,7 @@ impl StudioApp {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(
-                        !self.has_unsaved_workspace_edits(),
+                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                         egui::Button::selectable(selected, name),
                     )
                     .on_disabled_hover_text(

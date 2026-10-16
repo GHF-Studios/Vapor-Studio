@@ -1,5 +1,5 @@
 use super::StudioApp;
-use super::operations::OperationResult;
+use super::operation_protocol::OperationResult;
 
 impl StudioApp {
     pub(super) fn apply_operation_result(&mut self, result: OperationResult) {

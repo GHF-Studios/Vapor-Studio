@@ -1,7 +1,22 @@
 use super::StudioApp;
+use super::operation_protocol::OperationResult;
 use crate::navigation::CatalogSourceFilter;
 use vapor_core::ContentKind;
 use vapor_studio_core::ContentIdentity;
+
+pub(super) fn discover_workspace_and_catalog(
+    executable: &std::path::Path,
+    workspace_root: Option<&std::path::Path>,
+) -> (
+    Result<Vec<vapor_studio_core::SourceContent>, String>,
+    Result<Vec<vapor_studio_core::CatalogContent>, String>,
+) {
+    let source = workspace_root
+        .map(|root| vapor_studio_core::discover_source_content(executable, root))
+        .unwrap_or_else(|| Err("Open a workspace to browse authored source content.".to_owned()));
+    let catalog = vapor_studio_core::discover_content_catalog(executable, workspace_root);
+    (source, catalog)
+}
 
 pub(super) struct CatalogState {
     pub(super) search_query: String,
@@ -34,6 +49,27 @@ impl CatalogState {
 }
 
 impl StudioApp {
+    pub(super) fn refresh_content_catalog(&mut self) {
+        self.profile_composition.invalidate_preview();
+        let root = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .and_then(|profile| profile.workspace.as_ref())
+            .map(|workspace| workspace.root.clone());
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Content action succeeded; catalog refresh failed: {error}");
+                return;
+            }
+        };
+        self.spawn(vapor_studio_core::OperationKind::Discover, move |_context| {
+            let (source, catalog) = discover_workspace_and_catalog(&executable, root.as_deref());
+            OperationResult::Discovery(source, catalog)
+        });
+    }
+
     pub(super) fn apply_catalog_discovery(
         &mut self,
         source_result: Result<Vec<vapor_studio_core::SourceContent>, String>,

@@ -1,5 +1,5 @@
 use super::{StudioApp, content_selector, source_content_selector};
-use super::operations::OperationResult;
+use super::operation_protocol::OperationResult;
 use std::path::PathBuf;
 use vapor_core::OperationKind;
 

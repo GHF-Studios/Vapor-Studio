@@ -1,7 +1,8 @@
 use super::StudioApp;
+use super::operation_protocol::OperationResult;
 use std::{
     collections::VecDeque,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex, mpsc::{self, Receiver, TryRecvError}},
     thread,
 };
@@ -9,10 +10,9 @@ use vapor_core::{
     OperationEvent as CoreOperationEvent,
     OperationRequest as CoreOperationRequest,
     OperationService,
-    VaporWorkspace,
 };
 use vapor_studio_core::{
-    ContentIdentity, OperationEvent, OperationId, OperationKind,
+    OperationEvent, OperationId, OperationKind,
     OperationPhase, OperationRequest, OperationStatus,
 };
 
@@ -33,90 +33,6 @@ impl Default for OperationState {
             active_operation: None,
             operation_history: VecDeque::new(),
         }
-    }
-}
-
-pub(super) enum OperationResult {
-    Workspace(Result<VaporWorkspace, String>),
-    WorkspaceSelection(Result<WorkspaceSelectionData, String>),
-    RememberedSources(Result<Vec<PathBuf>, String>),
-    AdoptedContentProject(Result<(String, Vec<vapor_studio_core::SourceContent>), String>),
-    UnregisteredContentProject(
-        Result<(String, Vec<vapor_studio_core::SourceContent>, ContentIdentity), String>,
-    ),
-    UnregisteredProjectScan(Result<vapor_studio_core::UnregisteredProjectScan, String>),
-    Discovery(
-        Result<Vec<vapor_studio_core::SourceContent>, String>,
-        Result<Vec<vapor_studio_core::CatalogContent>, String>,
-    ),
-    Message(Result<String, String>),
-    CompositionPreview(Result<vapor_studio_core::CompositionPreview, String>),
-    WorkspaceFiles(Result<Vec<PathBuf>, String>),
-    WorkspaceFileCreated(Result<PathBuf, String>),
-    FileContents(Result<(PathBuf, String), String>),
-    FileSaved(Result<PathBuf, String>),
-    ContentWorkspace(Result<(PathBuf, String, Vec<PathBuf>), String>),
-    SourceCompositionLoaded(Result<vapor_studio_core::SourceComposition, String>),
-    SourceCompositionSaved(Result<vapor_studio_core::SourceComposition, String>),
-    SourceWorkshopLoaded(Result<vapor_studio_core::SourceWorkshopMetadata, String>),
-    SourceWorkshopSaved(Result<vapor_studio_core::SourceWorkshopMetadata, String>),
-    SourceRuntimeOutputsLoaded(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
-    SourceRuntimeOutputsSaved(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
-    Install(Result<vapor_studio_core::InstalledComposition, String>),
-    Update(Result<vapor_studio_core::InstalledComposition, String>),
-    RunProfile(Result<vapor_studio_core::InstalledComposition, String>),
-    Verify(Result<vapor_studio_core::InstallationCheck, String>),
-    Repair(Result<vapor_studio_core::InstalledComposition, String>),
-    WorkshopStage(Result<vapor_studio_core::WorkshopPackagePreview, String>),
-    WorkshopAcquisition(Result<vapor_studio_core::WorkshopAcquisition, String>),
-    WorkshopPublish(Result<vapor_studio_core::WorkshopPublication, String>),
-    WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>, String),
-    WorkshopSubscriptions(Result<Vec<vapor_studio_core::WorkshopSubscription>, String>),
-    WorkshopSubscriptionChange(Result<(), String>, String, bool),
-}
-
-pub(super) type WorkspaceSelectionData = (
-    PathBuf,
-    Vec<vapor_studio_core::SourceContent>,
-    Result<Vec<vapor_studio_core::CatalogContent>, String>,
-    Vec<PathBuf>,
-);
-
-fn operation_failure(result: &OperationResult) -> Option<String> {
-    match result {
-        OperationResult::Workspace(Err(error))
-        | OperationResult::WorkspaceSelection(Err(error))
-        | OperationResult::RememberedSources(Err(error))
-        | OperationResult::AdoptedContentProject(Err(error))
-        | OperationResult::UnregisteredContentProject(Err(error))
-        | OperationResult::UnregisteredProjectScan(Err(error))
-        | OperationResult::CompositionPreview(Err(error))
-        | OperationResult::Message(Err(error))
-        | OperationResult::WorkspaceFiles(Err(error))
-        | OperationResult::WorkspaceFileCreated(Err(error))
-        | OperationResult::FileContents(Err(error))
-        | OperationResult::FileSaved(Err(error))
-        | OperationResult::ContentWorkspace(Err(error))
-        | OperationResult::SourceCompositionLoaded(Err(error))
-        | OperationResult::SourceCompositionSaved(Err(error))
-        | OperationResult::SourceWorkshopLoaded(Err(error))
-        | OperationResult::SourceWorkshopSaved(Err(error))
-        | OperationResult::SourceRuntimeOutputsLoaded(Err(error))
-        | OperationResult::SourceRuntimeOutputsSaved(Err(error))
-        | OperationResult::Install(Err(error))
-        | OperationResult::Update(Err(error))
-        | OperationResult::RunProfile(Err(error))
-        | OperationResult::Verify(Err(error))
-        | OperationResult::Repair(Err(error))
-        | OperationResult::WorkshopStage(Err(error))
-        | OperationResult::WorkshopAcquisition(Err(error))
-        | OperationResult::WorkshopPublish(Err(error))
-        | OperationResult::WorkshopSearch(Err(error), _)
-        | OperationResult::WorkshopSubscriptions(Err(error))
-        | OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => Some(error.clone()),
-        OperationResult::Discovery(_, Err(error)) => Some(error.clone()),
-        OperationResult::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
-        _ => None,
     }
 }
 
@@ -163,27 +79,9 @@ impl StudioApp {
         if let Some((operation_id, result)) = result {
             self.operation.receiver = None;
             self.operation.running = false;
-            let refresh_after_content_change = matches!(
-                &result,
-                OperationResult::WorkshopPublish(Ok(_))
-                    | OperationResult::WorkshopAcquisition(Ok(_))
-                    | OperationResult::ContentWorkspace(Ok(_))
-                    | OperationResult::AdoptedContentProject(Ok(_))
-                    | OperationResult::UnregisteredContentProject(Ok(_))
-                    | OperationResult::SourceCompositionSaved(Ok(_))
-                    | OperationResult::SourceWorkshopSaved(Ok(_))
-                    | OperationResult::SourceRuntimeOutputsSaved(Ok(_))
-            );
-            let refresh_after_manifest_save = matches!(
-                &result,
-                OperationResult::FileSaved(Ok(path))
-                    if path.file_name().is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml"))
-            );
-            let refresh_after_subscription_change = matches!(
-                &result,
-                OperationResult::WorkshopSubscriptionChange(Ok(()), _, _)
-            );
-            let failure = operation_failure(&result);
+            let refresh_content_catalog = result.refreshes_content_catalog();
+            let refresh_subscriptions = result.refreshes_workshop_subscriptions();
+            let failure = result.failure();
             self.apply_operation_result(result);
             if let Some(event) = self
                 .operation
@@ -202,34 +100,13 @@ impl StudioApp {
                 self.operation.operation_history.truncate(20);
             }
             self.operation.active_operation = None;
-            if refresh_after_content_change || refresh_after_manifest_save {
+            if refresh_content_catalog {
                 self.refresh_content_catalog();
             }
-            if refresh_after_subscription_change {
+            if refresh_subscriptions {
                 self.refresh_workshop_subscriptions();
             }
         }
-    }
-
-    fn refresh_content_catalog(&mut self) {
-        self.profile_composition.invalidate_preview();
-        let root = self
-            .profile
-            .items
-            .get(self.profile.active_index)
-            .and_then(|profile| profile.workspace.as_ref())
-            .map(|workspace| workspace.root.clone());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Content action succeeded; catalog refresh failed: {error}");
-                return;
-            }
-        };
-        self.spawn(OperationKind::Discover, move |_context| {
-            let (source, catalog) = discover_workspace_and_catalog(&executable, root.as_deref());
-            OperationResult::Discovery(source, catalog)
-        });
     }
 
     pub(super) fn spawn(
@@ -316,7 +193,7 @@ impl StudioApp {
                     context.set_phase(initial_phase);
                     operation(context)
                 },
-                |result| match operation_failure(result) {
+                |result| match result.failure() {
                     Some(message) => Err(message),
                     None => Ok("Completed".to_owned()),
                 },
@@ -327,19 +204,5 @@ impl StudioApp {
         self.operation.running = true;
     }
 
-}
-
-pub(super) fn discover_workspace_and_catalog(
-    executable: &std::path::Path,
-    workspace_root: Option<&std::path::Path>,
-) -> (
-    Result<Vec<vapor_studio_core::SourceContent>, String>,
-    Result<Vec<vapor_studio_core::CatalogContent>, String>,
-) {
-    let source = workspace_root
-        .map(|root| vapor_studio_core::discover_source_content(executable, root))
-        .unwrap_or_else(|| Err("Open a workspace to browse authored source content.".to_owned()));
-    let catalog = vapor_studio_core::discover_content_catalog(executable, workspace_root);
-    (source, catalog)
 }
 

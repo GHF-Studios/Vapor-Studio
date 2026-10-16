@@ -95,7 +95,11 @@ impl StudioApp {
     }
 
     pub(super) fn select_profile(&mut self, index: usize) {
-        if self.operation.running || index >= self.profile.items.len() {
+        if index >= self.profile.items.len() || index == self.profile.active_index {
+            return;
+        }
+        if self.operation.running {
+            self.status = "Finish the current operation before switching profiles.".to_owned();
             return;
         }
         if self.has_unsaved_workspace_edits() {
