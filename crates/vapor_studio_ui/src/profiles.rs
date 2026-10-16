@@ -57,6 +57,7 @@ impl StudioApp {
     pub(super) fn use_available_workshop_package_as_profile_root(&mut self, published_file_id: &str) {
         let matches = self
             .catalog
+            .items
             .iter()
             .filter(|content| {
                 content.published_file_id.as_deref() == Some(published_file_id)
@@ -72,10 +73,10 @@ impl StudioApp {
             return;
         };
         if matches.len() > 1 {
-            self.selected_catalog_content = Some(catalog_content_selector(&content));
-            self.catalog_source_filter = CatalogSourceFilter::Workshop;
-            self.catalog_kind_filter = Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
-            self.search_query = published_file_id.to_owned();
+            self.catalog.selected = Some(catalog_content_selector(&content));
+            self.catalog.source_filter = CatalogSourceFilter::Workshop;
+            self.catalog.kind_filter = Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
+            self.catalog.search_query = published_file_id.to_owned();
             self.section = Section::Discover;
             self.status = format!(
                 "Workshop item {published_file_id} has multiple local Packagepack versions. Choose the exact version in the catalog before assigning it."
@@ -94,10 +95,10 @@ impl StudioApp {
     }
 
     pub(super) fn select_profile(&mut self, index: usize) {
-        if self.running || index >= self.profile.items.len() {
+        if self.operation.running || index >= self.profile.items.len() {
             return;
         }
-        if self.workspace.editor_dirty || self.manifest_metadata_dirty {
+        if self.workspace.editor_dirty || self.authoring.manifest_metadata_dirty {
             self.status =
                 "Save or discard workspace file or manifest metadata edits before switching profiles.".to_owned();
             return;
@@ -115,21 +116,21 @@ impl StudioApp {
         } else {
             self.workspace.root.clone()
         };
-        self.draft_dependencies.clear();
-        self.contents.clear();
-        self.catalog.clear();
-        self.selected_catalog_content = None;
+        self.authoring.draft_dependencies.clear();
+        self.catalog.sources.clear();
+        self.catalog.items.clear();
+        self.catalog.selected = None;
         self.composition_preview = None;
-        self.composition_edit = None;
-        self.composition_original_links = None;
-        self.composition_edit_selector.clear();
-        self.composition_link_candidate.clear();
+        self.authoring.composition_edit = None;
+        self.authoring.composition_original_links = None;
+        self.authoring.composition_edit_selector.clear();
+        self.authoring.composition_link_candidate.clear();
         self.repreview_after_catalog_refresh = false;
         self.invalidate_workshop_review();
         self.workspace.pending_unregistration = None;
-        self.workshop_metadata_edit = None;
-        self.runtime_outputs_edit = None;
-        self.manifest_metadata_dirty = false;
+        self.authoring.workshop_metadata_edit = None;
+        self.authoring.runtime_outputs_edit = None;
+        self.authoring.manifest_metadata_dirty = false;
         self.workspace.files.clear();
         self.workspace.selected_file = None;
         self.workspace.editor.clear();
@@ -147,7 +148,7 @@ impl StudioApp {
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
     ) {
-        if self.manifest_metadata_dirty {
+        if self.authoring.manifest_metadata_dirty {
             self.status = "Save or discard structured manifest edits before changing the profile composition.".to_owned();
             return;
         }
@@ -155,7 +156,7 @@ impl StudioApp {
             .workspace
             .as_ref()
             .map(|association| association.root.clone());
-        if self.catalog.iter().any(|content| {
+        if self.catalog.items.iter().any(|content| {
             content.identity() == identity
                 && !content.is_unambiguous()
         }) {
@@ -179,10 +180,10 @@ impl StudioApp {
         profile.installation = vapor_studio_core::InstallationState::NotInstalled;
         self.composition_preview = None;
         if workspace_changed {
-            self.composition_edit = None;
-            self.composition_original_links = None;
-            self.composition_edit_selector.clear();
-            self.composition_link_candidate.clear();
+            self.authoring.composition_edit = None;
+            self.authoring.composition_original_links = None;
+            self.authoring.composition_edit_selector.clear();
+            self.authoring.composition_link_candidate.clear();
             self.repreview_after_catalog_refresh = false;
             self.workspace.root = workspace
                 .as_ref()
@@ -193,9 +194,9 @@ impl StudioApp {
             } else {
                 self.workspace.root.clone()
             };
-            self.contents.clear();
-            self.catalog.clear();
-            self.selected_catalog_content = None;
+            self.catalog.sources.clear();
+            self.catalog.items.clear();
+            self.catalog.selected = None;
             self.workspace.files.clear();
             self.workspace.files_open = false;
             self.workspace.selected_file = None;
@@ -254,7 +255,7 @@ impl StudioApp {
     }
 
     pub(super) fn remove_active_profile(&mut self) {
-        if self.running || self.workspace.editor_dirty || self.manifest_metadata_dirty {
+        if self.operation.running || self.workspace.editor_dirty || self.authoring.manifest_metadata_dirty {
             self.status = "Finish or discard the current operation and edits before removing a profile.".to_owned();
             return;
         }
@@ -274,7 +275,7 @@ impl StudioApp {
     }
 
     pub(super) fn duplicate_active_profile(&mut self) {
-        if self.running || self.workspace.editor_dirty {
+        if self.operation.running || self.workspace.editor_dirty {
             return;
         }
         let source_name = self.profile.items[self.profile.active_index].name.clone();

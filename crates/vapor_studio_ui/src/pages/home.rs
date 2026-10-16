@@ -6,7 +6,7 @@ impl StudioApp {
         ui.heading("Vapor Studio");
         ui.label("Find content, manage launchable compositions, or continue authoring.");
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Discover content"))
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Discover content"))
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
                 .clicked()
             {
@@ -50,7 +50,7 @@ impl StudioApp {
             };
             if ui
                 .add_enabled(
-                    !self.running && (installed || !self.workspace.editor_dirty),
+                    !self.operation.running && (installed || !self.workspace.editor_dirty),
                     egui::Button::new(action),
                 )
                 .on_disabled_hover_text(
@@ -69,7 +69,7 @@ impl StudioApp {
             }
         } else {
             ui.weak("No root Packagepack selected for this composition yet.");
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Choose content"))
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Choose content"))
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
                 .clicked()
             {

@@ -20,7 +20,7 @@ impl StudioApp {
                     ui.label("Workspace name");
                     ui.text_edit_singleline(&mut self.workspace.starter_name);
                 });
-                if ui.add_enabled(!self.running && !self.workspace.editor_dirty, egui::Button::new("Create and open starter workspace"))
+                if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Create and open starter workspace"))
                     .on_disabled_hover_text("Save or reload the open file before creating and opening another workspace.")
                     .clicked()
                 {
@@ -31,7 +31,7 @@ impl StudioApp {
         ui.separator();
         let mut content_kind_changed = false;
         egui::ComboBox::from_id_salt("new-content-kind")
-            .selected_text(self.draft_content_kind.as_str())
+            .selected_text(self.authoring.draft_content_kind.as_str())
             .show_ui(ui, |ui| {
                 for kind in [
                     vapor_core::ContentKind::Packagepack,
@@ -45,21 +45,21 @@ impl StudioApp {
                     vapor_core::ContentKind::ExtensionMod,
                 ] {
                     content_kind_changed |= ui
-                        .selectable_value(&mut self.draft_content_kind, kind, kind.as_str())
+                        .selectable_value(&mut self.authoring.draft_content_kind, kind, kind.as_str())
                         .changed();
                 }
             });
         if content_kind_changed {
-            self.draft_dependencies.clear();
+            self.authoring.draft_dependencies.clear();
         }
-        let role_constraints = match self.draft_content_kind {
+        let role_constraints = match self.authoring.draft_content_kind {
             vapor_core::ContentKind::Packagepack => "Choose exactly one Engine or Enginepack; optionally choose at most one Game or Gamepack.",
             vapor_core::ContentKind::Game => "Choose exactly one Engine.",
             vapor_core::ContentKind::Enginepack => "Choose exactly one Engine.",
             vapor_core::ContentKind::Gamepack => "Choose exactly one Game.",
             _ => "Dependencies are checked against this role's supported content kinds.",
         };
-        let source_shape = match self.draft_content_kind {
+        let source_shape = match self.authoring.draft_content_kind {
             vapor_core::ContentKind::Packagepack
             | vapor_core::ContentKind::Enginepack
             | vapor_core::ContentKind::Gamepack
@@ -80,15 +80,15 @@ impl StudioApp {
             }
         };
         let required_role_group =
-            vapor_studio_core::source_required_dependency_choice_group(self.draft_content_kind);
+            vapor_studio_core::source_required_dependency_choice_group(self.authoring.draft_content_kind);
         let required_role_selected = required_role_group.is_none_or(|required_group| {
-            self.contents.iter().any(|content| {
-                self.draft_dependencies
+            self.catalog.sources.iter().any(|content| {
+                self.authoring.draft_dependencies
                     .iter()
                     .any(|selected| selected == super::super::source_content_selector(content))
                     && super::super::source_content_kind(&content.kind).is_some_and(|kind| {
                         vapor_studio_core::source_dependency_choice_group(
-                            self.draft_content_kind,
+                            self.authoring.draft_content_kind,
                             kind,
                         ) == Some(required_group)
                     })
@@ -98,11 +98,11 @@ impl StudioApp {
         ui.small(source_shape);
         ui.horizontal(|ui| {
             ui.label("Content ID under this workspace's namespace");
-            ui.text_edit_singleline(&mut self.draft_content_id);
+            ui.text_edit_singleline(&mut self.authoring.draft_content_id);
         });
         ui.horizontal(|ui| {
             ui.label("Version");
-            ui.text_edit_singleline(&mut self.draft_content_version);
+            ui.text_edit_singleline(&mut self.authoring.draft_content_version);
         });
         egui::CollapsingHeader::new("Workshop publication metadata · optional")
             .default_open(false)
@@ -110,48 +110,48 @@ impl StudioApp {
                 ui.label("These fields are authored into the role manifest. Creating content never publishes it.");
                 ui.horizontal(|ui| {
                     ui.label("Steam AppID");
-                    ui.text_edit_singleline(&mut self.draft_workshop_app_id);
+                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_app_id);
                     ui.label("Existing PublishedFileId");
-                    ui.text_edit_singleline(&mut self.draft_workshop_published_file_id);
+                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_published_file_id);
                 });
                 ui.horizontal(|ui| {
                     ui.label("Visibility");
                     egui::ComboBox::from_id_salt("new-content-workshop-visibility")
-                        .selected_text(if self.draft_workshop_visibility.is_empty() {
+                        .selected_text(if self.authoring.draft_workshop_visibility.is_empty() {
                             "Not set"
                         } else {
-                            &self.draft_workshop_visibility
+                            &self.authoring.draft_workshop_visibility
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.draft_workshop_visibility, String::new(), "Not set");
+                            ui.selectable_value(&mut self.authoring.draft_workshop_visibility, String::new(), "Not set");
                             for visibility in ["private", "friends-only", "public"] {
                                 ui.selectable_value(
-                                    &mut self.draft_workshop_visibility,
+                                    &mut self.authoring.draft_workshop_visibility,
                                     visibility.to_owned(),
                                     visibility,
                                 );
                             }
                         });
                     ui.label("Title");
-                    ui.text_edit_singleline(&mut self.draft_workshop_title);
+                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_title);
                 });
                 ui.label("Description");
                 ui.add(
-                    egui::TextEdit::multiline(&mut self.draft_workshop_description)
+                    egui::TextEdit::multiline(&mut self.authoring.draft_workshop_description)
                         .desired_rows(3)
                         .desired_width(f32::INFINITY),
                 );
                 ui.horizontal(|ui| {
                     ui.label("Tags · comma separated");
-                    ui.text_edit_singleline(&mut self.draft_workshop_tags);
+                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_tags);
                     ui.label("Change note");
-                    ui.text_edit_singleline(&mut self.draft_workshop_change_note);
+                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_change_note);
                 });
             });
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.workspace.editor_dirty,
                     egui::Button::new("Refresh available content"),
                 )
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
@@ -161,7 +161,7 @@ impl StudioApp {
             }
             if ui
                 .add_enabled(
-                    !self.running
+                    !self.operation.running
                         && !self.workspace.editor_dirty
                         && !self.workspace.root.trim().is_empty()
                         && required_role_selected,
@@ -180,27 +180,27 @@ impl StudioApp {
             }
         });
         ui.separator();
-        ui.label(format!("{} contents", self.draft_content_kind.as_str()));
-        if self.contents.is_empty() {
+        ui.label(format!("{} contents", self.authoring.draft_content_kind.as_str()));
+        if self.catalog.sources.is_empty() {
             ui.weak("Discover registered workspace content to choose dependencies.");
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for content in &self.contents {
+            for content in &self.catalog.sources {
                 let id = super::super::source_content_selector(content);
                 let child_kind = super::super::source_content_kind(&content.kind);
                 let allowed = child_kind.is_some_and(|kind| {
-                    vapor_studio_core::source_dependency_allowed(self.draft_content_kind, kind)
+                    vapor_studio_core::source_dependency_allowed(self.authoring.draft_content_kind, kind)
                 });
                 if !allowed {
                     continue;
                 }
                 let role_group = child_kind.and_then(|kind| {
                     vapor_studio_core::source_dependency_choice_group(
-                        self.draft_content_kind,
+                        self.authoring.draft_content_kind,
                         kind,
                     )
                 });
-                let mut included = self.draft_dependencies.iter().any(|value| value == &id);
+                let mut included = self.authoring.draft_dependencies.iter().any(|value| value == &id);
                 let choice_help = if role_group.is_some() {
                     "This occupies one exclusive role slot. Selecting it replaces the current choice for that slot."
                 } else {
@@ -233,7 +233,7 @@ impl StudioApp {
                                         return false;
                                     };
                                     let candidate_group = vapor_studio_core::source_dependency_choice_group(
-                                        self.draft_content_kind,
+                                        self.authoring.draft_content_kind,
                                         candidate_kind,
                                     );
                                     candidate_group == Some(role_group)
@@ -246,13 +246,13 @@ impl StudioApp {
                                     super::super::source_content_selector(candidate).to_owned()
                                 })
                                 .collect::<Vec<_>>();
-                            self.draft_dependencies.retain(|value| {
+                            self.authoring.draft_dependencies.retain(|value| {
                                 !old_role_choices.iter().any(|old| old == value)
                             });
                         }
-                        self.draft_dependencies.push(id.to_owned());
+                        self.authoring.draft_dependencies.push(id.to_owned());
                     } else {
-                        self.draft_dependencies.retain(|value| value != &id);
+                        self.authoring.draft_dependencies.retain(|value| value != &id);
                     }
                 }
             }

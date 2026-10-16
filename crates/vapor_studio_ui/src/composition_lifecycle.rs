@@ -115,7 +115,8 @@ impl StudioApp {
 
     pub(super) fn verify_selected_installation(&mut self) {
         let Some(root_package) = self
-            .profiles
+            .profile
+            .items
             .get(self.profile.active_index)
             .and_then(|profile| profile.root_package.clone())
         else {
@@ -154,7 +155,8 @@ impl StudioApp {
             return;
         }
         let Some(root_package) = self
-            .profiles
+            .profile
+            .items
             .get(self.profile.active_index)
             .and_then(|profile| profile.root_package.clone())
         else {

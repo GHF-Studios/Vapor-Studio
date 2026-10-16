@@ -14,7 +14,7 @@ impl StudioApp {
                 .clicked()
             {
                 self.section = section;
-                if section == Section::Workspace && self.workspace.files.is_empty() && !self.running
+                if section == Section::Workspace && self.workspace.files.is_empty() && !self.operation.running
                 {
                     self.refresh_workspace_files();
                 }
@@ -50,11 +50,11 @@ impl StudioApp {
                 self.profile.active_index = previous_profile;
                 self.select_profile(requested_profile);
             }
-            ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Search content"))
+            ui.add(egui::TextEdit::singleline(&mut self.catalog.search_query).hint_text("Search content"))
                 .on_hover_text("Search the current catalog");
             if ui
                 .add_enabled(
-                    !self.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.workspace.editor_dirty,
                     egui::Button::new("+ Profile"),
                 )
                 .clicked()
@@ -62,7 +62,7 @@ impl StudioApp {
                 self.profile.new_name = format!("Composition {}", self.profile.items.len() + 1);
                 self.add_profile();
             }
-            if self.running {
+            if self.operation.running {
                 ui.separator();
                 ui.spinner();
                 ui.label("Working…");
@@ -119,7 +119,7 @@ impl eframe::App for StudioApp {
                     self.diagnostics.show(ui);
                     egui::CollapsingHeader::new("Steam root package tools").show(ui, |ui| {
                         ui.label("Root app/depot publishing is separate from Workshop content publishing.");
-                        if ui.add_enabled(!self.running, egui::Button::new("Preview root package")).clicked() {
+                        if ui.add_enabled(!self.operation.running, egui::Button::new("Preview root package")).clicked() {
                             self.preview_steam_package();
                         }
                     });
@@ -131,7 +131,7 @@ impl eframe::App for StudioApp {
                 ui.colored_label(egui::Color32::YELLOW, recovery);
             }
         });
-        if self.running {
+        if self.operation.running {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         }

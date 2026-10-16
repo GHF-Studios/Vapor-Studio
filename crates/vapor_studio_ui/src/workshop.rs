@@ -42,7 +42,7 @@ impl Default for WorkshopState {
 
 impl StudioApp {
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
-        self.catalog.iter().any(|content| {
+        self.catalog.items.iter().any(|content| {
             catalog_content_selector(content) == selector && !content.is_unambiguous()
         })
     }

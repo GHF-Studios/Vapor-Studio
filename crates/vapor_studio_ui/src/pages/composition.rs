@@ -23,31 +23,31 @@ impl StudioApp {
         ui.horizontal(|ui| {
             ui.label("Source project");
             egui::ComboBox::from_id_salt("composition-source-project")
-                .selected_text(if self.composition_edit_selector.is_empty() {
+                .selected_text(if self.authoring.composition_edit_selector.is_empty() {
                     "Select content".to_owned()
                 } else {
-                    self.composition_edit_selector.clone()
+                    self.authoring.composition_edit_selector.clone()
                 })
                 .show_ui(ui, |ui| {
                     for (selector, kind, _) in &source_projects {
                         if ui
                             .selectable_label(
-                                self.composition_edit_selector == *selector,
+                                self.authoring.composition_edit_selector == *selector,
                                 format!("{selector} · {kind}"),
                             )
                             .clicked()
                         {
-                            self.composition_edit_selector = selector.clone();
-                            self.composition_edit = None;
-                            self.composition_original_links = None;
+                            self.authoring.composition_edit_selector = selector.clone();
+                            self.authoring.composition_edit = None;
+                            self.authoring.composition_original_links = None;
                         }
                     }
                 });
             if ui
                 .add_enabled(
-                    !self.running
+                    !self.operation.running
                         && !self.workspace.editor_dirty
-                    && !self.composition_edit_selector.trim().is_empty(),
+                    && !self.authoring.composition_edit_selector.trim().is_empty(),
                     egui::Button::new("Load dependencies"),
                 )
                 .clicked()
@@ -55,7 +55,7 @@ impl StudioApp {
                 self.load_source_composition();
             }
             if ui
-                .add_enabled(!self.running && self.composition_edit.is_some(), egui::Button::new("Save dependencies"))
+                .add_enabled(!self.operation.running && self.authoring.composition_edit.is_some(), egui::Button::new("Save dependencies"))
                 .clicked()
             {
                 self.save_source_composition();
@@ -71,7 +71,7 @@ impl StudioApp {
         let mut preview_source_selector = None;
         let mut stage_source_selector = None;
         let mut source_graph_saved = false;
-        if let Some(composition) = self.composition_edit.as_mut() {
+        if let Some(composition) = self.authoring.composition_edit.as_mut() {
             ui.separator();
             ui.label(format!("Editing {} · {}", composition.id, composition.kind));
             ui.small(format!("Manifest: {}", composition.manifest.display()));
@@ -143,16 +143,16 @@ impl StudioApp {
                 .collect::<Vec<_>>();
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt("composition-link-candidate")
-                    .selected_text(if self.composition_link_candidate.is_empty() {
+                    .selected_text(if self.authoring.composition_link_candidate.is_empty() {
                         "Choose local content".to_owned()
                     } else {
-                        self.composition_link_candidate.clone()
+                        self.authoring.composition_link_candidate.clone()
                     })
                     .show_ui(ui, |ui| {
                         for (selector, kind, version) in &choices {
                             let label = format!("{selector} · {kind} · {}", version.as_deref().unwrap_or("unversioned"));
                             ui.selectable_value(
-                                &mut self.composition_link_candidate,
+                                &mut self.authoring.composition_link_candidate,
                                 selector.clone(),
                                 label,
                             );
@@ -160,16 +160,16 @@ impl StudioApp {
                     });
                 if ui
                     .add_enabled(
-                        !self.running
-                            && !self.composition_link_candidate.is_empty()
-                            && choices.iter().any(|(selector, _, _)| selector == &self.composition_link_candidate),
+                        !self.operation.running
+                            && !self.authoring.composition_link_candidate.is_empty()
+                            && choices.iter().any(|(selector, _, _)| selector == &self.authoring.composition_link_candidate),
                         egui::Button::new("Add edge"),
                     )
                     .clicked()
                 {
                     if let Some((selector, kind, version)) = choices
                         .iter()
-                        .find(|(selector, _, _)| selector == &self.composition_link_candidate)
+                        .find(|(selector, _, _)| selector == &self.authoring.composition_link_candidate)
                     {
                         let id = selector.split('@').next().unwrap_or(selector).to_owned();
                         let relationship = super::super::source_content_kind(&composition.kind)
@@ -191,16 +191,16 @@ impl StudioApp {
                     }
                 }
             });
-            source_graph_saved = self.composition_original_links.as_ref() == Some(&composition.links);
+            source_graph_saved = self.authoring.composition_original_links.as_ref() == Some(&composition.links);
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.horizontal_wrapped(|ui| {
                     let source_selector = composition.version.as_ref()
                         .map(|version| format!("{}@{version}", composition.id))
                         .unwrap_or_else(|| composition.id.clone());
-                    if ui.add_enabled(!self.running && source_graph_saved, egui::Button::new("Preview availability")).clicked() {
+                    if ui.add_enabled(!self.operation.running && source_graph_saved, egui::Button::new("Preview availability")).clicked() {
                         preview_source_selector = Some(source_selector);
                     }
-                    if ui.add_enabled(!self.running && source_graph_saved, egui::Button::new("Use as active profile root"))
+                    if ui.add_enabled(!self.operation.running && source_graph_saved, egui::Button::new("Use as active profile root"))
                         .on_disabled_hover_text("Save the current graph before resolving it into a profile.")
                         .clicked()
                     {
@@ -211,7 +211,7 @@ impl StudioApp {
             }
             if ui
                 .add_enabled(
-                    !self.running && source_graph_saved,
+                    !self.operation.running && source_graph_saved,
                     egui::Button::new("Stage Workshop review"),
                 )
                 .on_disabled_hover_text("Save the current graph before staging its source content for review.")
@@ -234,11 +234,11 @@ impl StudioApp {
             self.use_edited_composition_for_profile();
         }
         if let Some(selector) = stage_source_selector {
-            self.selected_catalog_content = Some(selector.clone());
+            self.catalog.selected = Some(selector.clone());
             self.section = super::super::Section::Discover;
             self.stage_workshop_content(selector);
         }
-        let selector = self.composition_edit.as_ref().map(|composition| {
+        let selector = self.authoring.composition_edit.as_ref().map(|composition| {
             composition.version.as_ref()
                 .map(|version| format!("{}@{version}", composition.id))
                 .unwrap_or_else(|| composition.id.clone())

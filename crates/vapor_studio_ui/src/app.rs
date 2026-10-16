@@ -24,64 +24,50 @@ mod workspace_ops;
 mod workshop;
 
 use crate::navigation::{CatalogSourceFilter, Section};
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, mpsc::Receiver};
-use operations::OperationResult;
+use operations::OperationState;
 use profiles::ProfileState;
+use source_authoring::AuthoringState;
 use workshop::WorkshopState;
 use workspace_ops::WorkspaceState;
-use vapor_core::{ContentKind, OperationEvent as CoreOperationEvent};
+use vapor_core::ContentKind;
 use vapor_studio_core::{
-    ContentIdentity, OperationEvent, OperationId, OperationKind, decode_profiles,
+    ContentIdentity, decode_profiles,
 };
+
+struct CatalogState {
+    search_query: String,
+    sources: Vec<vapor_studio_core::SourceContent>,
+    items: Vec<vapor_studio_core::CatalogContent>,
+    source_filter: CatalogSourceFilter,
+    kind_filter: Option<String>,
+    selected: Option<String>,
+}
+
+impl Default for CatalogState {
+    fn default() -> Self {
+        Self {
+            search_query: String::new(),
+            sources: Vec::new(),
+            items: Vec::new(),
+            source_filter: CatalogSourceFilter::All,
+            kind_filter: None,
+            selected: None,
+        }
+    }
+}
 
 pub struct StudioApp {
     section: Section,
     workspace: WorkspaceState,
     profile: ProfileState,
-    search_query: String,
-    draft_content_id: String,
-    draft_content_version: String,
-    draft_content_kind: ContentKind,
-    draft_dependencies: Vec<String>,
-    draft_workshop_app_id: String,
-    draft_workshop_published_file_id: String,
-    draft_workshop_visibility: String,
-    draft_workshop_title: String,
-    draft_workshop_description: String,
-    draft_workshop_tags: String,
-    draft_workshop_change_note: String,
-    composition_edit_selector: String,
-    composition_edit: Option<vapor_studio_core::SourceComposition>,
-    composition_original_links: Option<Vec<vapor_studio_core::SourceCompositionLink>>,
-    composition_link_candidate: String,
-    workshop_metadata_edit: Option<vapor_studio_core::SourceWorkshopMetadata>,
-    manifest_metadata_dirty: bool,
-    runtime_outputs_edit: Option<vapor_studio_core::SourceRuntimeOutputs>,
-    runtime_binaries_text: String,
-    runtime_libraries_text: String,
-    workshop_metadata_app_id: String,
-    workshop_metadata_published_file_id: String,
-    workshop_metadata_visibility: String,
-    workshop_metadata_title: String,
-    workshop_metadata_description: String,
-    workshop_metadata_tags: String,
-    workshop_metadata_change_note: String,
+    catalog: CatalogState,
+    authoring: AuthoringState,
     repreview_after_catalog_refresh: bool,
-    contents: Vec<vapor_studio_core::SourceContent>,
-    catalog: Vec<vapor_studio_core::CatalogContent>,
-    catalog_source_filter: CatalogSourceFilter,
-    catalog_kind_filter: Option<String>,
-    selected_catalog_content: Option<String>,
     workshop: WorkshopState,
     composition_preview: Option<vapor_studio_core::CompositionPreview>,
     status: String,
-    running: bool,
-    receiver: Option<Receiver<(OperationId, OperationResult)>>,
-    latest_operation_event: Arc<Mutex<Option<CoreOperationEvent>>>,
-    active_operation: Option<OperationEvent>,
-    operation_history: VecDeque<OperationEvent>,
+    operation: OperationState,
     diagnostics: vapor_devtools::app::DevtoolsApp,
 }
 
@@ -157,48 +143,13 @@ impl StudioApp {
                     .map(|recovery| recovery.message.clone()),
                 if profile_recovery.is_some() { saved_profiles } else { None },
             ),
-            search_query: String::new(),
-            contents: Vec::new(),
-            catalog: Vec::new(),
-            catalog_source_filter: CatalogSourceFilter::All,
-            catalog_kind_filter: None,
-            selected_catalog_content: None,
+            catalog: CatalogState::default(),
             workshop: WorkshopState::default(),
             composition_preview: None,
-            composition_edit_selector: String::new(),
-            composition_edit: None,
-            composition_original_links: None,
-            composition_link_candidate: String::new(),
-            workshop_metadata_edit: None,
-            manifest_metadata_dirty: false,
-            runtime_outputs_edit: None,
-            runtime_binaries_text: String::new(),
-            runtime_libraries_text: String::new(),
-            workshop_metadata_app_id: String::new(),
-            workshop_metadata_published_file_id: String::new(),
-            workshop_metadata_visibility: String::new(),
-            workshop_metadata_title: String::new(),
-            workshop_metadata_description: String::new(),
-            workshop_metadata_tags: String::new(),
-            workshop_metadata_change_note: String::new(),
+            authoring: AuthoringState::default(),
             repreview_after_catalog_refresh: false,
-            draft_content_id: String::new(),
-            draft_content_version: "0.1.0".to_owned(),
-            draft_content_kind: ContentKind::Packagepack,
-            draft_dependencies: Vec::new(),
-            draft_workshop_app_id: String::new(),
-            draft_workshop_published_file_id: String::new(),
-            draft_workshop_visibility: String::new(),
-            draft_workshop_title: String::new(),
-            draft_workshop_description: String::new(),
-            draft_workshop_tags: String::new(),
-            draft_workshop_change_note: String::new(),
             status: "Choose a workspace or discover content in this folder.".to_owned(),
-            running: false,
-            receiver: None,
-            latest_operation_event: Arc::new(Mutex::new(None)),
-            active_operation: None,
-            operation_history: VecDeque::new(),
+            operation: OperationState::default(),
             diagnostics: vapor_devtools::connect(None),
         };
         app.refresh_registered_sources();

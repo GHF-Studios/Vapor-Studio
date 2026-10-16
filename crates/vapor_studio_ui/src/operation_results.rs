@@ -24,12 +24,12 @@ impl StudioApp {
                 self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
             }
             OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
-                self.contents = contents;
+                self.catalog.sources = contents;
                 self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
                 self.status = summary;
             }
             OperationResult::UnregisteredContentProject(Ok((summary, contents, identity))) => {
-                self.contents = contents;
+                self.catalog.sources = contents;
                 self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
                 self.workspace.pending_unregistration = None;
                 self.invalidate_profiles_for_source_content(&identity);
@@ -46,27 +46,27 @@ impl StudioApp {
                 self.workspace.unregistered_projects = scan;
             }
             OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
-                self.workshop_metadata_edit = None;
-                self.runtime_outputs_edit = None;
-                self.manifest_metadata_dirty = false;
+                self.authoring.workshop_metadata_edit = None;
+                self.authoring.runtime_outputs_edit = None;
+                self.authoring.manifest_metadata_dirty = false;
                 self.workspace.pending_unregistration = None;
                 self.activate_workspace(root, contents, catalog, files)
             }
             OperationResult::Discovery(source_result, catalog_result) => {
                 let source_error = match source_result {
                     Ok(contents) => {
-                        self.contents = contents;
+                        self.catalog.sources = contents;
                         None
                     }
                     Err(error) => {
-                        self.contents.clear();
+                        self.catalog.sources.clear();
                         Some(error)
                     }
                 };
                 match catalog_result {
                     Ok(catalog) => {
                         let count = catalog.len();
-                        self.catalog = catalog;
+                        self.catalog.items = catalog;
                         self.status = if self.profile.items[self.profile.active_index].workspace.is_some()
                         {
                             source_error.map(|error| format!("Found {count} local items, but workspace sources could not load: {error}"))
@@ -78,8 +78,8 @@ impl StudioApp {
                         };
                     }
                     Err(error) => {
-                        self.catalog.clear();
-                        self.selected_catalog_content = None;
+                        self.catalog.items.clear();
+                        self.catalog.selected = None;
                         self.status = source_error.map_or_else(
                             || format!("Could not refresh the local content catalog: {error}"),
                             |source_error| format!("Workspace sources failed: {source_error}. Local catalog failed: {error}"),
@@ -91,16 +91,18 @@ impl StudioApp {
                     self.preview_selected_composition();
                 }
                 if self
-                    .selected_catalog_content
+                    .catalog
+                    .selected
                     .as_ref()
                     .is_some_and(|identity| {
                         !self
                             .catalog
+                            .items
                             .iter()
                             .any(|content| catalog_content_selector(content) == *identity)
                     })
                 {
-                    self.selected_catalog_content = None;
+                    self.catalog.selected = None;
                 }
             }
             OperationResult::Message(Err(error))
@@ -295,16 +297,16 @@ impl StudioApp {
                 self.status = "Created content and opened its manifest.".to_owned();
             }
             OperationResult::SourceCompositionLoaded(Ok(composition)) => {
-                self.composition_edit_selector = composition
+                self.authoring.composition_edit_selector = composition
                     .version
                     .as_deref()
                     .map(|version| format!("{}@{version}", composition.id))
                     .unwrap_or_else(|| composition.id.clone());
-                self.composition_original_links = Some(composition.links.clone());
-                self.composition_edit = Some(composition);
+                self.authoring.composition_original_links = Some(composition.links.clone());
+                self.authoring.composition_edit = Some(composition);
                 self.status = format!(
                     "Loaded the {} dependency graph. Review its edges before saving.",
-                    self.composition_edit.as_ref().map(|graph| graph.kind.as_str()).unwrap_or("source content"),
+                    self.authoring.composition_edit.as_ref().map(|graph| graph.kind.as_str()).unwrap_or("source content"),
                 );
             }
             OperationResult::SourceCompositionSaved(Ok(composition)) => {
@@ -313,23 +315,23 @@ impl StudioApp {
                     id: composition.id.clone(),
                     version: composition.version.clone(),
                 };
-                self.composition_original_links = Some(composition.links.clone());
-                self.composition_edit = Some(composition);
+                self.authoring.composition_original_links = Some(composition.links.clone());
+                self.authoring.composition_edit = Some(composition);
                 self.invalidate_profiles_for_source_content(&identity);
                 self.status = "Saved the source content graph. Studio is refreshing its catalog and composition plan.".to_owned();
             }
             OperationResult::SourceWorkshopLoaded(Ok(metadata)) => {
                 self.set_workshop_metadata_fields(&metadata.policy);
-                self.workshop_metadata_edit = Some(metadata);
-                self.runtime_outputs_edit = None;
-                self.manifest_metadata_dirty = false;
+                self.authoring.workshop_metadata_edit = Some(metadata);
+                self.authoring.runtime_outputs_edit = None;
+                self.authoring.manifest_metadata_dirty = false;
                 self.status = "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell.".to_owned();
             }
             OperationResult::SourceWorkshopSaved(Ok(metadata)) => {
                 self.invalidate_workshop_review();
                 self.set_workshop_metadata_fields(&metadata.policy);
-                self.workshop_metadata_edit = Some(metadata.clone());
-                self.manifest_metadata_dirty = false;
+                self.authoring.workshop_metadata_edit = Some(metadata.clone());
+                self.authoring.manifest_metadata_dirty = false;
                 self.invalidate_profiles_for_source_content(&ContentIdentity {
                     id: metadata.id.clone(),
                     version: metadata.version.clone(),
@@ -347,16 +349,16 @@ impl StudioApp {
             }
             OperationResult::SourceRuntimeOutputsLoaded(Ok(outputs)) => {
                 self.set_runtime_output_fields(&outputs);
-                self.runtime_outputs_edit = Some(outputs);
-                self.workshop_metadata_edit = None;
-                self.manifest_metadata_dirty = false;
+                self.authoring.runtime_outputs_edit = Some(outputs);
+                self.authoring.workshop_metadata_edit = None;
+                self.authoring.manifest_metadata_dirty = false;
                 self.status = "Loaded runtime output declarations. Edit the executable and library lists, then save through Vapor Shell.".to_owned();
             }
             OperationResult::SourceRuntimeOutputsSaved(Ok(outputs)) => {
                 self.invalidate_workshop_review();
                 self.set_runtime_output_fields(&outputs);
-                self.runtime_outputs_edit = Some(outputs.clone());
-                self.manifest_metadata_dirty = false;
+                self.authoring.runtime_outputs_edit = Some(outputs.clone());
+                self.authoring.manifest_metadata_dirty = false;
                 self.invalidate_profiles_for_source_content(&ContentIdentity {
                     id: outputs.id.clone(),
                     version: outputs.version.clone(),

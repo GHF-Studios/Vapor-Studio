@@ -83,7 +83,8 @@ impl StudioApp {
         }
         self.invalidate_workshop_review();
         let root = self
-            .profiles
+            .profile
+            .items
             .get(self.profile.active_index)
             .and_then(|profile| profile.workspace.as_ref())
             .map(|workspace| workspace.root.clone());
@@ -115,7 +116,7 @@ impl StudioApp {
         let catalog_error = catalog.as_ref().err().cloned();
         self.workspace.root = root.display().to_string();
         self.workspace.root_draft = self.workspace.root.clone();
-        self.draft_dependencies.clear();
+        self.authoring.draft_dependencies.clear();
         let profile = &mut self.profile.items[self.profile.active_index];
         profile.workspace = Some(WorkspaceAssociation { root });
         if workspace_changed {
@@ -123,14 +124,14 @@ impl StudioApp {
             profile.resolved_graph = None;
             profile.installation = vapor_studio_core::InstallationState::Unknown;
         }
-        self.contents = contents;
-        self.catalog = catalog.unwrap_or_default();
-        self.selected_catalog_content = None;
+        self.catalog.sources = contents;
+        self.catalog.items = catalog.unwrap_or_default();
+        self.catalog.selected = None;
         self.composition_preview = None;
-        self.composition_edit = None;
-        self.composition_original_links = None;
-        self.composition_edit_selector.clear();
-        self.composition_link_candidate.clear();
+        self.authoring.composition_edit = None;
+        self.authoring.composition_original_links = None;
+        self.authoring.composition_edit_selector.clear();
+        self.authoring.composition_link_candidate.clear();
         self.repreview_after_catalog_refresh = false;
         self.invalidate_workshop_review();
         self.workspace.files = files;
@@ -145,13 +146,13 @@ impl StudioApp {
         self.workspace.pending_unregistration = None;
         self.section = Section::Workspace;
         self.status = catalog_error.map_or_else(
-            || format!("Opened workspace {} · {} source items · {} local catalog entries.", self.workspace.root, self.contents.len(), self.catalog.len()),
-            |error| format!("Opened workspace {} · {} source items. Local cache/install catalog could not load: {error}", self.workspace.root, self.contents.len()),
+            || format!("Opened workspace {} · {} source items · {} local catalog entries.", self.workspace.root, self.catalog.sources.len(), self.catalog.items.len()),
+            |error| format!("Opened workspace {} · {} source items. Local cache/install catalog could not load: {error}", self.workspace.root, self.catalog.sources.len()),
         );
     }
 
     pub(super) fn open_workspace_path(&mut self, path: PathBuf) {
-        if self.manifest_metadata_dirty {
+        if self.authoring.manifest_metadata_dirty {
             self.workspace.root_draft = self.workspace.root.clone();
             self.status = "Save or discard the structured manifest edits before changing workspaces.".to_owned();
             return;
@@ -216,7 +217,8 @@ impl StudioApp {
             return;
         }
         let Some(root_package) = self
-            .profiles
+            .profile
+            .items
             .get(self.profile.active_index)
             .and_then(|profile| profile.root_package.clone())
         else {
@@ -263,7 +265,7 @@ impl StudioApp {
     }
 
     pub(super) fn require_saved_workspace(&mut self, action: &str) -> bool {
-        if self.manifest_metadata_dirty {
+        if self.authoring.manifest_metadata_dirty {
             self.status = format!(
                 "Save or discard structured manifest edits before you {action}.",
             );
@@ -283,7 +285,8 @@ impl StudioApp {
             return false;
         }
         if self
-            .profiles
+            .profile
+            .items
             .get(self.profile.active_index)
             .and_then(|profile| profile.workspace.as_ref())
             .is_some()
@@ -329,7 +332,7 @@ impl StudioApp {
         if !self.require_open_workspace("open a workspace file") {
             return;
         }
-        if self.manifest_metadata_dirty {
+        if self.authoring.manifest_metadata_dirty {
             self.status = "Save or discard structured manifest edits before opening another file.".to_owned();
             return;
         }
@@ -409,10 +412,10 @@ impl StudioApp {
                 return;
             }
         };
-        let id = self.draft_content_id.trim().to_owned();
-        let version = self.draft_content_version.trim().to_owned();
-        let selected = self.draft_dependencies.clone();
-        let app_id = match self.draft_workshop_app_id.trim() {
+        let id = self.authoring.draft_content_id.trim().to_owned();
+        let version = self.authoring.draft_content_version.trim().to_owned();
+        let selected = self.authoring.draft_dependencies.clone();
+        let app_id = match self.authoring.draft_workshop_app_id.trim() {
             "" => None,
             value => match value.parse::<u32>() {
                 Ok(value) if value > 0 => Some(value),
@@ -428,10 +431,10 @@ impl StudioApp {
         };
         let workshop = vapor_studio_core::WorkshopPolicyDraft {
             app_id,
-            published_file_id: non_empty(&self.draft_workshop_published_file_id),
-            visibility: non_empty(&self.draft_workshop_visibility),
-            title: non_empty(&self.draft_workshop_title),
-            description: non_empty(&self.draft_workshop_description),
+            published_file_id: non_empty(&self.authoring.draft_workshop_published_file_id),
+            visibility: non_empty(&self.authoring.draft_workshop_visibility),
+            title: non_empty(&self.authoring.draft_workshop_title),
+            description: non_empty(&self.authoring.draft_workshop_description),
             tags: self
                 .draft_workshop_tags
                 .split(',')
@@ -439,9 +442,9 @@ impl StudioApp {
                 .filter(|tag| !tag.is_empty())
                 .map(ToOwned::to_owned)
                 .collect(),
-            change_note: non_empty(&self.draft_workshop_change_note),
+            change_note: non_empty(&self.authoring.draft_workshop_change_note),
         };
-        let kind = self.draft_content_kind;
+        let kind = self.authoring.draft_content_kind;
         self.spawn(OperationKind::CreateContent, move |_context| {
             let result = vapor_studio_core::create_content_workspace_with_workshop(
                 &executable,

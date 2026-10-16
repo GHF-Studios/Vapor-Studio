@@ -8,23 +8,23 @@ impl StudioApp {
         ui.label("Browse workspace, cached, and installed content, or bring a published Workshop item into this app.");
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt("catalog-source-filter")
-                .selected_text(self.catalog_source_filter.label())
+                .selected_text(self.catalog.source_filter.label())
                 .show_ui(ui, |ui| {
                     for filter in CatalogSourceFilter::ALL {
-                        ui.selectable_value(&mut self.catalog_source_filter, filter, filter.label());
+                        ui.selectable_value(&mut self.catalog.source_filter, filter, filter.label());
                     }
                 });
-            let kinds = self.catalog.iter().map(|content| content.kind.clone())
+            let kinds = self.catalog.items.iter().map(|content| content.kind.clone())
                 .collect::<std::collections::BTreeSet<_>>();
             egui::ComboBox::from_id_salt("catalog-kind-filter")
-                .selected_text(self.catalog_kind_filter.as_deref().unwrap_or("All content types"))
+                .selected_text(self.catalog.kind_filter.as_deref().unwrap_or("All content types"))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.catalog_kind_filter, None, "All content types");
+                    ui.selectable_value(&mut self.catalog.kind_filter, None, "All content types");
                     for kind in kinds {
-                        ui.selectable_value(&mut self.catalog_kind_filter, Some(kind.clone()), kind);
+                        ui.selectable_value(&mut self.catalog.kind_filter, Some(kind.clone()), kind);
                     }
                 });
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty && !self.manifest_metadata_dirty, egui::Button::new("Refresh local catalog"))
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty, egui::Button::new("Refresh local catalog"))
                 .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
                 .clicked()
             {
@@ -34,14 +34,14 @@ impl StudioApp {
         ui.horizontal(|ui| {
             ui.weak(format!(
                 "{} matching content versions",
-                self.catalog
+                self.catalog.items
                     .iter()
                     .filter(|content| {
                         catalog_matches_filters(
                             content,
-                            self.catalog_source_filter,
-                            self.catalog_kind_filter.as_deref(),
-                            &self.search_query,
+                            self.catalog.source_filter,
+                            self.catalog.kind_filter.as_deref(),
+                            &self.catalog.search_query,
                         )
                     })
                     .count()
@@ -50,7 +50,7 @@ impl StudioApp {
         ui.group(|ui| {
             ui.horizontal(|ui| {
                 ui.heading("Steam Workshop");
-                if ui.add_enabled(!self.running, egui::Button::new("My subscriptions")).clicked() {
+                if ui.add_enabled(!self.operation.running, egui::Button::new("My subscriptions")).clicked() {
                     self.refresh_workshop_subscriptions();
                 }
             });
@@ -73,7 +73,7 @@ impl StudioApp {
                                     .map(|item| item.title.clone())
                             })
                             .unwrap_or_else(|| "Workshop item".to_owned());
-                        let locally_available = self.catalog.iter().any(|content| {
+                        let locally_available = self.catalog.items.iter().any(|content| {
                             content.published_file_id.as_deref() == Some(id.as_str())
                         });
                         ui.horizontal(|ui| {
@@ -96,7 +96,7 @@ impl StudioApp {
                             }
                             if locally_available {
                                 ui.weak("Available in Vapor Library");
-                                let available_packagepack = self.catalog.iter().any(|content| {
+                                let available_packagepack = self.catalog.items.iter().any(|content| {
                                     content.published_file_id.as_deref() == Some(id.as_str())
                                         && content.kind
                                             == vapor_core::ContentKind::Packagepack.as_str()
@@ -104,7 +104,7 @@ impl StudioApp {
                                 });
                                 if available_packagepack
                                     && ui.add_enabled(
-                                        !self.running && !self.workspace.editor_dirty,
+                                        !self.operation.running && !self.workspace.editor_dirty,
                                         egui::Button::new(format!(
                                             "Set {} root",
                                             self.profile.items[self.profile.active_index].name
@@ -116,7 +116,7 @@ impl StudioApp {
                                 }
                                 if self.profile.items[self.profile.active_index].root_package.is_some()
                                     && ui.add_enabled(
-                                        !self.running && !self.workspace.editor_dirty,
+                                        !self.operation.running && !self.workspace.editor_dirty,
                                         egui::Button::new(format!(
                                             "Recheck {} plan",
                                             self.profile.items[self.profile.active_index].name
@@ -130,11 +130,11 @@ impl StudioApp {
                                     self.section = super::super::Section::Library;
                                     self.preview_selected_composition();
                                 }
-                            } else if ui.add_enabled(!self.running, egui::Button::new("Import to Vapor Library")).clicked() {
+                            } else if ui.add_enabled(!self.operation.running, egui::Button::new("Import to Vapor Library")).clicked() {
                                 self.workshop.published_file_id = id.clone();
                                 self.download_workshop_item();
                             }
-                            if ui.add_enabled(!self.running, egui::Button::new("Unsubscribe")).clicked() {
+                            if ui.add_enabled(!self.operation.running, egui::Button::new("Unsubscribe")).clicked() {
                                 self.set_workshop_subscription(id.clone(), false);
                             }
                         });
@@ -148,10 +148,10 @@ impl StudioApp {
                 });
             }
             ui.horizontal(|ui| {
-                ui.add_enabled(!self.running, egui::TextEdit::singleline(&mut self.workshop.search_query)
+                ui.add_enabled(!self.operation.running, egui::TextEdit::singleline(&mut self.workshop.search_query)
                     .hint_text("Search Workshop items")
                     .desired_width(300.0));
-                if ui.add_enabled(!self.running, egui::Button::new("Search Workshop")).clicked() {
+                if ui.add_enabled(!self.operation.running, egui::Button::new("Search Workshop")).clicked() {
                     self.workshop.page = 1;
                     self.search_workshop();
                 }
@@ -160,8 +160,8 @@ impl StudioApp {
                 let page_count = self.workshop.total_results.div_ceil(50).max(1);
                 ui.horizontal(|ui| {
                     ui.weak(format!("Showing {} of {} results · page {} of {}", self.workshop.results.len(), self.workshop.total_results, self.workshop.page, page_count));
-                    let previous = ui.add_enabled(!self.running && self.workshop.page > 1, egui::Button::new("Previous")).clicked();
-                    let next = ui.add_enabled(!self.running && self.workshop.page < page_count, egui::Button::new("Next")).clicked();
+                    let previous = ui.add_enabled(!self.operation.running && self.workshop.page > 1, egui::Button::new("Previous")).clicked();
+                    let next = ui.add_enabled(!self.operation.running && self.workshop.page < page_count, egui::Button::new("Next")).clicked();
                     if previous {
                         self.workshop.page -= 1;
                         self.search_workshop();
@@ -194,14 +194,14 @@ impl StudioApp {
                 ui.horizontal(|ui| {
                     let subscribed = self.workshop.subscriptions.contains(&item.published_file_id);
                     let label = if subscribed { "Unsubscribe" } else { "Subscribe" };
-                    if ui.add_enabled(!self.running, egui::Button::new(label)).clicked() {
+                    if ui.add_enabled(!self.operation.running, egui::Button::new(label)).clicked() {
                         self.set_workshop_subscription(item.published_file_id.clone(), !subscribed);
                     }
-                    let locally_available = self.catalog.iter().any(|content| {
+                    let locally_available = self.catalog.items.iter().any(|content| {
                         content.published_file_id.as_deref()
                             == Some(item.published_file_id.as_str())
                     });
-                    let available_packagepack = self.catalog.iter().any(|content| {
+                    let available_packagepack = self.catalog.items.iter().any(|content| {
                         content.published_file_id.as_deref()
                             == Some(item.published_file_id.as_str())
                             && content.kind == vapor_core::ContentKind::Packagepack.as_str()
@@ -211,7 +211,7 @@ impl StudioApp {
                         ui.weak("In Vapor Library");
                         if available_packagepack
                             && ui.add_enabled(
-                                !self.running && !self.workspace.editor_dirty,
+                                !self.operation.running && !self.workspace.editor_dirty,
                                 egui::Button::new(format!(
                                     "Set {} root",
                                     self.profile.items[self.profile.active_index].name
@@ -224,7 +224,7 @@ impl StudioApp {
                         } else if !available_packagepack
                             && self.profile.items[self.profile.active_index].root_package.is_some()
                             && ui.add_enabled(
-                                !self.running && !self.workspace.editor_dirty,
+                                !self.operation.running && !self.workspace.editor_dirty,
                                 egui::Button::new(format!(
                                     "Recheck {} plan",
                                     self.profile.items[self.profile.active_index].name
@@ -240,7 +240,7 @@ impl StudioApp {
                     } else {
                         "Import to Vapor Library"
                     };
-                    if ui.add_enabled(!self.running, egui::Button::new(import_label)).clicked() {
+                    if ui.add_enabled(!self.operation.running, egui::Button::new(import_label)).clicked() {
                         self.workshop.published_file_id = item.published_file_id.clone();
                         self.download_workshop_item();
                     }
@@ -252,10 +252,10 @@ impl StudioApp {
             ui.separator();
             ui.label("Download a known public item");
             ui.horizontal(|ui| {
-                ui.add_enabled(!self.running, egui::TextEdit::singleline(&mut self.workshop.published_file_id)
+                ui.add_enabled(!self.operation.running, egui::TextEdit::singleline(&mut self.workshop.published_file_id)
                     .hint_text("PublishedFileId")
                     .desired_width(220.0));
-                if ui.add_enabled(!self.running, egui::Button::new("Download item")).clicked() {
+                if ui.add_enabled(!self.operation.running, egui::Button::new("Download item")).clicked() {
                     self.download_workshop_item();
                 }
             });
@@ -266,7 +266,7 @@ impl StudioApp {
                     acquisition.kind));
                 ui.label(format!("{} · {}", acquisition.cache_root.display(), acquisition.fingerprint));
                 if acquisition.kind == "packagepack" {
-                    if ui.add_enabled(!self.running && !self.workspace.editor_dirty,
+                    if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty,
                         egui::Button::new(format!(
                             "Use as {} root",
                             self.profile.items[self.profile.active_index].name
@@ -282,7 +282,7 @@ impl StudioApp {
                     let has_root = self.profile.items[self.profile.active_index].root_package.is_some();
                     if ui
                         .add_enabled(
-                            !self.running && !self.workspace.editor_dirty && has_root,
+                            !self.operation.running && !self.workspace.editor_dirty && has_root,
                             egui::Button::new(format!(
                                 "Recheck {} composition",
                                 self.profile.items[self.profile.active_index].name

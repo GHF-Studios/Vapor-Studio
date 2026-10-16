@@ -1,5 +1,6 @@
 use super::StudioApp;
 use std::{
+    collections::VecDeque,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc::{self, Receiver, TryRecvError}},
     thread,
@@ -14,6 +15,26 @@ use vapor_studio_core::{
     ContentIdentity, OperationEvent, OperationId, OperationKind,
     OperationPhase, OperationRequest, OperationStatus,
 };
+
+pub(super) struct OperationState {
+    pub(super) running: bool,
+    pub(super) receiver: Option<Receiver<(OperationId, OperationResult)>>,
+    pub(super) latest_operation_event: Arc<Mutex<Option<CoreOperationEvent>>>,
+    pub(super) active_operation: Option<OperationEvent>,
+    pub(super) operation_history: VecDeque<OperationEvent>,
+}
+
+impl Default for OperationState {
+    fn default() -> Self {
+        Self {
+            running: false,
+            receiver: None,
+            latest_operation_event: Arc::new(Mutex::new(None)),
+            active_operation: None,
+            operation_history: VecDeque::new(),
+        }
+    }
+}
 
 pub(super) enum OperationResult {
     Workspace(Result<VaporWorkspace, String>),
@@ -114,19 +135,20 @@ fn apply_core_operation_event(
 impl StudioApp {
     pub(super) fn poll_operation(&mut self) {
         let latest_event = self
+            .operation
             .latest_operation_event
             .lock()
             .ok()
             .and_then(|mut event| event.take());
-        if let (Some(event), Some(active)) = (latest_event.as_ref(), self.active_operation.as_mut())
+        if let (Some(event), Some(active)) = (latest_event.as_ref(), self.operation.active_operation.as_mut())
         {
             apply_core_operation_event(event, active);
         }
-        let received = self.receiver.as_ref().map(|receiver| receiver.try_recv());
+        let received = self.operation.receiver.as_ref().map(|receiver| receiver.try_recv());
         let result = match received {
             Some(Ok(result)) => Some(result),
             Some(Err(TryRecvError::Disconnected)) => {
-                self.active_operation.as_ref().map(|operation| {
+                self.operation.active_operation.as_ref().map(|operation| {
                     (
                         operation.id,
                         OperationResult::Message(Err(
@@ -139,8 +161,8 @@ impl StudioApp {
             Some(Err(TryRecvError::Empty)) | None => None,
         };
         if let Some((operation_id, result)) = result {
-            self.receiver = None;
-            self.running = false;
+            self.operation.receiver = None;
+            self.operation.running = false;
             let refresh_after_content_change = matches!(
                 &result,
                 OperationResult::WorkshopPublish(Ok(_))
@@ -164,6 +186,7 @@ impl StudioApp {
             let failure = operation_failure(&result);
             self.apply_operation_result(result);
             if let Some(event) = self
+                .operation
                 .active_operation
                 .as_mut()
                 .filter(|event| event.id == operation_id)
@@ -175,10 +198,10 @@ impl StudioApp {
                         summary: self.status.clone(),
                     },
                 };
-                self.operation_history.push_front(event.clone());
-                self.operation_history.truncate(20);
+                self.operation.operation_history.push_front(event.clone());
+                self.operation.operation_history.truncate(20);
             }
-            self.active_operation = None;
+            self.operation.active_operation = None;
             if refresh_after_content_change || refresh_after_manifest_save {
                 self.refresh_content_catalog();
             }
@@ -191,7 +214,8 @@ impl StudioApp {
     fn refresh_content_catalog(&mut self) {
         self.composition_preview = None;
         let root = self
-            .profiles
+            .profile
+            .items
             .get(self.profile.active_index)
             .and_then(|profile| profile.workspace.as_ref())
             .map(|workspace| workspace.root.clone());
@@ -216,7 +240,8 @@ impl StudioApp {
         let request = OperationRequest {
             id: OperationId::fresh(),
             profile_id: self
-                .profiles
+                .profile
+                .items
                 .get(self.profile.active_index)
                 .map(|profile| profile.id.clone()),
             kind,
@@ -258,7 +283,7 @@ impl StudioApp {
             OperationKind::PublishWorkshop => OperationPhase::Publishing,
             _ => OperationPhase::Queued,
         };
-        self.active_operation = Some(OperationEvent {
+        self.operation.active_operation = Some(OperationEvent {
             id: request.id,
             profile_id: request.profile_id.clone(),
             kind: request.kind.clone(),
@@ -273,10 +298,10 @@ impl StudioApp {
             domain: "studio".to_owned(),
             action: request.kind.action().to_owned(),
         };
-        if let Ok(mut latest) = self.latest_operation_event.lock() {
+        if let Ok(mut latest) = self.operation.latest_operation_event.lock() {
             *latest = None;
         }
-        let latest_event = Arc::clone(&self.latest_operation_event);
+        let latest_event = Arc::clone(&self.operation.latest_operation_event);
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
             let sink: vapor_core::OperationEventSink = Arc::new(move |event| {
@@ -298,8 +323,8 @@ impl StudioApp {
             );
             let _ = sender.send((operation_id, result));
         });
-        self.receiver = Some(receiver);
-        self.running = true;
+        self.operation.receiver = Some(receiver);
+        self.operation.running = true;
     }
 
 }

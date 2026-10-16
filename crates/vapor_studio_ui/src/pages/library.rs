@@ -9,7 +9,7 @@ impl StudioApp {
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.workspace.editor_dirty,
                     egui::Button::new("Duplicate active profile"),
                 )
                 .on_disabled_hover_text(
@@ -67,9 +67,9 @@ impl StudioApp {
                 ui.text_edit_singleline(&mut self.profile.name_draft);
                 if ui
                     .add_enabled(
-                        !self.running
+                        !self.operation.running
                             && !self.workspace.editor_dirty
-                            && !self.manifest_metadata_dirty
+                            && !self.authoring.manifest_metadata_dirty
                             && self.profile.name_draft.trim() != profile.name,
                         egui::Button::new("Rename"),
                     )
@@ -79,9 +79,9 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.running
+                        !self.operation.running
                             && !self.workspace.editor_dirty
-                            && !self.manifest_metadata_dirty
+                            && !self.authoring.manifest_metadata_dirty
                             && self.profile.items.len() > 1,
                         egui::Button::new("Remove profile"),
                     )
@@ -100,7 +100,7 @@ impl StudioApp {
                 );
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(!self.running, egui::Button::new("Confirm removal"))
+                        .add_enabled(!self.operation.running, egui::Button::new("Confirm removal"))
                         .clicked()
                     {
                         self.remove_active_profile();
@@ -119,27 +119,27 @@ impl StudioApp {
 
         if let Some(root) = &profile.root_package {
             let selector = content_identity(root);
-            let editable_source = self.contents.iter().any(|content| {
+            let editable_source = self.catalog.sources.iter().any(|content| {
                 content.id == root.id
                     && content.kind == vapor_core::ContentKind::Packagepack.as_str()
             });
             if ui
                 .add_enabled(
-                    !self.running && !self.workspace.editor_dirty && editable_source,
+                    !self.operation.running && !self.workspace.editor_dirty && editable_source,
                     egui::Button::new("Edit source graph"),
                 )
                 .on_disabled_hover_text("Only a Packagepack authored in the active workspace can be edited here.")
                 .clicked()
             {
-                self.composition_edit_selector = selector.clone();
-                self.composition_edit = None;
-                self.composition_original_links = None;
+                self.authoring.composition_edit_selector = selector.clone();
+                self.authoring.composition_edit = None;
+                self.authoring.composition_original_links = None;
                 self.section = super::super::Section::Compose;
                 self.load_source_composition();
             }
             if ui
                 .add_enabled(
-                    !self.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.workspace.editor_dirty,
                     egui::Button::new("Preview dependency plan"),
                 )
                 .on_disabled_hover_text(
@@ -223,7 +223,7 @@ impl StudioApp {
         ui.label("Launch arguments");
         ui.weak("Each row is passed as one argument to the installed Engine.");
         let active_profile = self.profile.active_index;
-        let can_edit = !self.running;
+        let can_edit = !self.operation.running;
         let mut remove_argument = None;
         for index in 0..self.profile.items[active_profile].launch.arguments.len() {
             ui.horizontal(|ui| {
@@ -276,21 +276,21 @@ impl StudioApp {
             let installed = matches!(&profile.installation, InstallationState::Installed { .. });
             let needs_repair = matches!(&profile.installation,
                 InstallationState::NeedsRepair { .. } | InstallationState::Partial { .. });
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty && has_root && has_source, egui::Button::new("Validate source"))
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && has_source, egui::Button::new("Validate source"))
                 .on_disabled_hover_text("Source validation needs this profile to be associated with a workspace. Cached or seeded compositions validate during install.")
                 .clicked() { self.validate_selected_source(); }
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty && has_root && preview_ready && !installed && !root_installed && root_has_refresh_source, egui::Button::new("Install composition"))
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && preview_ready && !installed && !root_installed && root_has_refresh_source, egui::Button::new("Install composition"))
                 .on_disabled_hover_text("Preview a ready plan with an installable workspace or cache root. An already installed root needs verification, playback, or an update.")
                 .clicked() { self.install_selected(); }
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty && has_root && installed && preview_ready && root_has_refresh_source, egui::Button::new("Update composition"))
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && installed && preview_ready && root_has_refresh_source, egui::Button::new("Update composition"))
                 .on_disabled_hover_text("Update uses the ready plan's current workspace or cached sources.")
                 .clicked() { self.update_selected(); }
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty && has_root && has_source && root_is_workspace_source, egui::Button::new("Build and play source"))
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && has_source && root_is_workspace_source, egui::Button::new("Build and play source"))
                 .on_disabled_hover_text("The selected Packagepack must resolve from this workspace before source build/play is available.")
                 .clicked() { self.run_selected(); }
-            if ui.add_enabled(!self.running && has_root && (installed || root_installed), egui::Button::new("Play installed")).clicked() { self.run_installed_selected(); }
-            if ui.add_enabled(!self.running && has_root && (installed || root_installed), egui::Button::new("Verify graph")).clicked() { self.verify_selected_installation(); }
-            if ui.add_enabled(!self.running && !self.workspace.editor_dirty && has_root && preview_ready && root_has_refresh_source && needs_repair, egui::Button::new("Repair"))
+            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Play installed")).clicked() { self.run_installed_selected(); }
+            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify graph")).clicked() { self.verify_selected_installation(); }
+            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && preview_ready && root_has_refresh_source && needs_repair, egui::Button::new("Repair"))
                 .on_disabled_hover_text("Repair needs a ready workspace or cached source to replace damaged installed files.")
                 .clicked() { self.repair_selected_installation(); }
         });
@@ -338,7 +338,7 @@ impl StudioApp {
         ui.separator();
         if ui
             .add_enabled(
-                !self.running && !self.workspace.editor_dirty,
+                !self.operation.running && !self.workspace.editor_dirty,
                 egui::Button::new("Discover content"),
             )
             .on_disabled_hover_text(

@@ -5,25 +5,25 @@ use vapor_studio_core::ContentIdentity;
 impl StudioApp {
     #[allow(clippy::collapsible_if)]
     pub(in crate::app) fn draw_content_list(&mut self, ui: &mut egui::Ui) {
-        if self.catalog.is_empty() {
+        if self.catalog.items.is_empty() {
             ui.weak("No workspace, cached, or installed content is available locally.");
             return;
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for content in self.catalog.clone() {
+            for content in self.catalog.items.clone() {
                 let id = content.id.as_str();
                 let version = content.version.clone().unwrap_or_else(|| "unversioned".to_owned());
                 let kind = content.kind.as_str();
                 let identity = super::super::catalog_content_selector(&content);
                 if !catalog_matches_filters(
                     &content,
-                    self.catalog_source_filter,
-                    self.catalog_kind_filter.as_deref(),
-                    &self.search_query,
+                    self.catalog.source_filter,
+                    self.catalog.kind_filter.as_deref(),
+                    &self.catalog.search_query,
                 ) { continue; }
-                let selected = self.selected_catalog_content.as_deref() == Some(identity.as_str());
+                let selected = self.catalog.selected.as_deref() == Some(identity.as_str());
                 if ui.selectable_label(selected, format!("{id} · {kind} · {version}")).clicked() {
-                    self.selected_catalog_content = Some(identity.clone());
+                    self.catalog.selected = Some(identity.clone());
                     self.workshop.preview = None;
                 }
                 if !content.is_unambiguous() {
@@ -48,7 +48,7 @@ impl StudioApp {
                 }).collect::<Vec<_>>().join(" · ");
                 ui.small(location_summary);
                 if selected && kind == vapor_core::ContentKind::Packagepack.as_str()
-                    && ui.add_enabled(!self.running && !self.workspace.editor_dirty && content.is_unambiguous(),
+                    && ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && content.is_unambiguous(),
                         egui::Button::new("Use this exact version as the profile root"))
                         .on_disabled_hover_text(if content.is_unambiguous() { "Save or discard editor changes before switching the profile's workspace." } else { "Resolve conflicting local records before selecting this content." })
                         .clicked()
@@ -66,9 +66,10 @@ impl StudioApp {
                 ui.separator();
             }
         });
-        if let Some(identity) = self.selected_catalog_content.clone() {
+        if let Some(identity) = self.catalog.selected.clone() {
             if let Some(content) = self
                 .catalog
+                .items
                 .iter()
                 .find(|content| super::super::catalog_content_selector(content) == identity)
                 .cloned()
@@ -132,7 +133,7 @@ impl StudioApp {
                     .iter()
                     .any(|source| super::super::source_content_selector(source) == identity);
                 if is_authored_here {
-                    if ui.add_enabled(!self.running && !self.workspace.editor_dirty && content.is_unambiguous(), egui::Button::new("Stage Workshop review package"))
+                    if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && content.is_unambiguous(), egui::Button::new("Stage Workshop review package"))
                         .on_disabled_hover_text(if content.is_unambiguous() { "Save or reload the open file first; staging reads the workspace source from disk." } else { "Resolve conflicting local records before staging this identity." })
                         .clicked()
                     {
@@ -194,12 +195,12 @@ impl StudioApp {
                             "Create and publish Workshop item"
                         });
                         ui.add_enabled(
-                            !self.running && content.is_unambiguous(),
+                            !self.operation.running && content.is_unambiguous(),
                             egui::TextEdit::singleline(&mut self.workshop.publisher_account)
                                 .hint_text("Steam publisher account"),
                         );
                         ui.add_enabled(
-                            !self.running && content.is_unambiguous(),
+                            !self.operation.running && content.is_unambiguous(),
                             egui::TextEdit::singleline(&mut self.workshop.change_note)
                                 .hint_text("Change note (optional)"),
                         );
@@ -208,13 +209,13 @@ impl StudioApp {
                             "This uploads to Steam. Type {confirmation} to confirm."
                         ));
                         ui.add_enabled(
-                            !self.running,
+                            !self.operation.running,
                             egui::TextEdit::singleline(&mut self.workshop.confirmation)
                                 .hint_text(&confirmation),
                         );
                         if ui
                             .add_enabled(
-                                !self.running
+                                !self.operation.running
                                     && content.is_unambiguous()
                                     && !self.workshop.publisher_account.trim().is_empty()
                                     && self.workshop.confirmation.trim() == confirmation,

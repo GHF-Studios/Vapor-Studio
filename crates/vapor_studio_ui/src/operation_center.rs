@@ -4,16 +4,16 @@ use eframe::egui;
 impl StudioApp {
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("studio-operation-center").show(ui, |ui| {
-            egui::CollapsingHeader::new(if self.running {
+            egui::CollapsingHeader::new(if self.operation.running {
                 "Operation running"
             } else {
                 "Operations and activity"
             })
-            .default_open(self.running)
+            .default_open(self.operation.running)
             .show(ui, |ui| {
-                if let Some(operation) = &self.active_operation {
+                if let Some(operation) = &self.operation.active_operation {
                     ui.horizontal(|ui| {
-                        if self.running {
+                        if self.operation.running {
                             ui.spinner();
                         }
                         ui.strong(operation_kind_label(&operation.kind));
@@ -41,7 +41,7 @@ impl StudioApp {
                 } else {
                     ui.label(&self.status);
                 }
-                for operation in self.operation_history.iter().take(5) {
+                for operation in self.operation.operation_history.iter().take(5) {
                     ui.horizontal(|ui| {
                         ui.small(operation_kind_label(&operation.kind));
                         ui.small(operation_status_label(&operation.status));
