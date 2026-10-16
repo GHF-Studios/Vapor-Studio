@@ -15,6 +15,7 @@ pub(super) struct WorkshopState {
     pub(super) results: Vec<vapor_studio_core::WorkshopItem>,
     pub(super) results_query: Option<String>,
     pub(super) subscriptions: std::collections::BTreeSet<String>,
+    pub(super) subscriptions_loaded: bool,
     pub(super) subscription_details:
         std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
     pub(super) total_results: u32,
@@ -35,6 +36,7 @@ impl Default for WorkshopState {
             results: Vec::new(),
             results_query: None,
             subscriptions: Default::default(),
+            subscriptions_loaded: false,
             subscription_details: Default::default(),
             total_results: 0,
             page: 1,
@@ -138,6 +140,7 @@ impl StudioApp {
         &mut self,
         subscriptions: Vec<vapor_studio_core::WorkshopSubscription>,
     ) {
+        self.workshop.subscriptions_loaded = true;
         self.workshop.subscriptions = subscriptions
             .iter()
             .map(|item| item.published_file_id.clone())

@@ -58,7 +58,7 @@ fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str
         Discover => "Refresh content catalog",
         SearchWorkshop => "Search Steam Workshop",
         LoadWorkshopSubscriptions => "Load Workshop subscriptions",
-        ChangeWorkshopSubscription => "Update Workshop subscription",
+        ChangeWorkshopSubscription => "Change Workshop subscriptions",
         Resolve => "Resolve composition",
         Acquire => "Download Workshop content",
         Install => "Install composition",

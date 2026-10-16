@@ -59,6 +59,11 @@ impl StudioApp {
                 "Target profile: {} · local catalog remains available when Steam is offline",
                 self.profile.items[self.profile.active_index].name
             ));
+            if !self.workshop.subscriptions_loaded {
+                ui.weak("Load your Steam Workshop subscriptions to review download state and import them into Vapor Library.");
+            } else if self.workshop.subscriptions.is_empty() {
+                ui.weak("This Steam account has no Workshop subscriptions for Vapor.");
+            }
             if !self.workshop.subscriptions.is_empty() {
                 ui.collapsing(format!("My subscriptions ({})", self.workshop.subscriptions.len()), |ui| {
                     for id in self.workshop.subscriptions.iter().cloned().collect::<Vec<_>>() {
@@ -77,6 +82,20 @@ impl StudioApp {
                             content.published_file_id.as_deref() == Some(id.as_str())
                         });
                         ui.horizontal(|ui| {
+                            let mut selected = self.workshop.selected_items.contains(&id);
+                            if ui
+                                .add_enabled(
+                                    !self.operation.running,
+                                    egui::Checkbox::new(&mut selected, ""),
+                                )
+                                .changed()
+                            {
+                                if selected {
+                                    self.workshop.selected_items.insert(id.clone());
+                                } else {
+                                    self.workshop.selected_items.remove(&id);
+                                }
+                            }
                             ui.strong(title);
                             ui.weak(format!("PublishedFileId {id}"));
                             if let Some(item) = &details {
@@ -130,7 +149,13 @@ impl StudioApp {
                                     self.section = super::super::Section::Library;
                                     self.preview_selected_composition();
                                 }
-                            } else if ui.add_enabled(!self.operation.running, egui::Button::new("Import to Vapor Library")).clicked() {
+                            }
+                            let import_label = if locally_available {
+                                "Update Vapor Library copy"
+                            } else {
+                                "Import to Vapor Library"
+                            };
+                            if ui.add_enabled(!self.operation.running, egui::Button::new(import_label)).clicked() {
                                 self.workshop.published_file_id = id.clone();
                                 self.download_workshop_item();
                             }
