@@ -28,6 +28,9 @@ enum OperationResult {
     WorkspaceSelection(Result<WorkspaceSelectionData, String>),
     RememberedSources(Result<Vec<PathBuf>, String>),
     AdoptedContentProject(Result<(String, Vec<vapor_studio_core::SourceContent>), String>),
+    UnregisteredContentProject(
+        Result<(String, Vec<vapor_studio_core::SourceContent>, ContentIdentity), String>,
+    ),
     UnregisteredProjectScan(Result<vapor_studio_core::UnregisteredProjectScan, String>),
     Discovery(
         Result<Vec<vapor_studio_core::SourceContent>, String>,
@@ -72,6 +75,7 @@ fn operation_failure(result: &OperationResult) -> Option<String> {
         | OperationResult::WorkspaceSelection(Err(error))
         | OperationResult::RememberedSources(Err(error))
         | OperationResult::AdoptedContentProject(Err(error))
+        | OperationResult::UnregisteredContentProject(Err(error))
         | OperationResult::UnregisteredProjectScan(Err(error))
         | OperationResult::CompositionPreview(Err(error))
         | OperationResult::Message(Err(error))
@@ -159,6 +163,7 @@ pub struct StudioApp {
     starter_workspace_name: String,
     new_workspace_file_path: String,
     unregistered_projects: vapor_studio_core::UnregisteredProjectScan,
+    pending_content_unregistration: Option<vapor_studio_core::SourceContent>,
     registered_sources: Vec<PathBuf>,
     active_source: Option<PathBuf>,
     contents: Vec<vapor_studio_core::SourceContent>,
@@ -315,6 +320,7 @@ impl StudioApp {
             starter_workspace_name: "my-game".to_owned(),
             new_workspace_file_path: String::new(),
             unregistered_projects: vapor_studio_core::UnregisteredProjectScan::default(),
+            pending_content_unregistration: None,
             registered_sources: Vec::new(),
             active_source: None,
             status: "Choose a workspace or discover content in this folder.".to_owned(),
@@ -369,6 +375,7 @@ impl StudioApp {
                     | OperationResult::WorkshopAcquisition(Ok(_))
                     | OperationResult::ContentWorkspace(Ok(_))
                     | OperationResult::AdoptedContentProject(Ok(_))
+                    | OperationResult::UnregisteredContentProject(Ok(_))
                     | OperationResult::SourceCompositionSaved(Ok(_))
                     | OperationResult::SourceWorkshopSaved(Ok(_))
                     | OperationResult::SourceRuntimeOutputsSaved(Ok(_))
@@ -405,6 +412,13 @@ impl StudioApp {
                     self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
                     self.status = summary;
                 }
+                OperationResult::UnregisteredContentProject(Ok((summary, contents, identity))) => {
+                    self.contents = contents;
+                    self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+                    self.pending_content_unregistration = None;
+                    self.invalidate_profiles_for_source_content(&identity);
+                    self.status = summary;
+                }
                 OperationResult::UnregisteredProjectScan(Ok(scan)) => {
                     self.status = format!(
                         "Found {} adoptable content project{} and {} diagnostic{}.",
@@ -419,6 +433,7 @@ impl StudioApp {
                     self.workshop_metadata_edit = None;
                     self.runtime_outputs_edit = None;
                     self.manifest_metadata_dirty = false;
+                    self.pending_content_unregistration = None;
                     self.activate_workspace(root, contents, catalog, files)
                 }
                 OperationResult::Discovery(source_result, catalog_result) => {
@@ -485,6 +500,7 @@ impl StudioApp {
                 | OperationResult::SourceWorkshopSaved(Err(error))
                 | OperationResult::SourceRuntimeOutputsLoaded(Err(error))
                 | OperationResult::SourceRuntimeOutputsSaved(Err(error))
+                | OperationResult::UnregisteredContentProject(Err(error))
                 | OperationResult::AdoptedContentProject(Err(error)) => self.status = error,
                 OperationResult::Verify(Err(error)) => {
                     let artifacts = match self.profiles[self.active_profile].installation.clone() {
@@ -932,6 +948,7 @@ impl StudioApp {
         self.workspace_editor_dirty = false;
         self.new_workspace_file_path.clear();
         self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
+        self.pending_content_unregistration = None;
         self.section = Section::Workspace;
         self.status = catalog_error.map_or_else(
             || format!("Opened workspace {} · {} source items · {} local catalog entries.", self.workspace_root, self.contents.len(), self.catalog.len()),
@@ -1661,6 +1678,7 @@ impl StudioApp {
             | OperationKind::OpenWorkspace
             | OperationKind::RememberWorkspace
             | OperationKind::AdoptContentProject
+            | OperationKind::UnregisterContentProject
             | OperationKind::DiscoverContentProjects
             | OperationKind::DiscoverWorkspace => OperationPhase::Resolving,
             OperationKind::CreateWorkspace => OperationPhase::Building,
@@ -1816,6 +1834,7 @@ impl StudioApp {
         self.selected_catalog_content = None;
         self.composition_preview = None;
         self.workshop_preview = None;
+        self.pending_content_unregistration = None;
         self.workshop_metadata_edit = None;
         self.runtime_outputs_edit = None;
         self.manifest_metadata_dirty = false;
@@ -2301,6 +2320,32 @@ impl StudioApp {
             )
         });
         self.status = format!("Validating and adopting {display_path}…");
+    }
+
+    pub(super) fn unregister_content_project(&mut self) {
+        if !self.require_saved_workspace("unregister a content project") {
+            return;
+        }
+        let Some(project) = self.pending_content_unregistration.clone() else {
+            self.status = "Select a registered content project to unregister.".to_owned();
+            return;
+        };
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        let root = PathBuf::from(self.workspace_root.trim());
+        let id = project.id.clone();
+        let display = format!("{} · {}", project.id, project.root.display());
+        self.spawn(OperationKind::UnregisterContentProject, move |_context| {
+            OperationResult::UnregisteredContentProject(
+                vapor_studio_core::unregister_workspace_content_project(&executable, &root, &id),
+            )
+        });
+        self.status = format!("Removing {display} from Vapor's content registry…");
     }
 
     pub(super) fn remember_open_workspace(&mut self) {

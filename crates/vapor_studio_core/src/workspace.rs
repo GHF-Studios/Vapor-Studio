@@ -304,6 +304,23 @@ pub fn adopt_workspace_content_project(
     Ok((summary, contents))
 }
 
+/// Remove a source content project from Vapor discovery while retaining its files and Cargo membership.
+pub fn unregister_workspace_content_project(
+    application_executable: &Path,
+    workspace_root: &Path,
+    id: &str,
+) -> Result<(String, Vec<SourceContent>, ContentIdentity), String> {
+    let before = discover_source_content(application_executable, workspace_root)?;
+    let identity = before.iter().find(|content| content.id == id)
+        .map(|content| ContentIdentity { id: content.id.clone(), version: content.version.clone() })
+        .ok_or_else(|| format!("content project is not currently discoverable in this Workspace: {id}"))?;
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    let summary = content::unregister_source_project(&paths, id)?;
+    let contents = discover_source_content(application_executable, workspace_root)?;
+    Ok((summary, contents, identity))
+}
+
 /// Find valid, unregistered content folders without changing the Workspace.
 pub fn scan_unregistered_content_projects(
     application_executable: &Path,

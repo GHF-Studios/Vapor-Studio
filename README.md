@@ -45,7 +45,11 @@ The same project overview opens a structured runtime-output editor for declared
 executables and libraries. Names are validated by Vapor Shell, and updates use
 the same stale-snapshot check, shared manifest lock, unknown-field preservation,
 atomic replacement, and post-save discovery as Workshop metadata. Changing
-outputs clears the affected active profile's installation plan so it must be
-resolved and installed again before Play. Any profile pinned to the exact
-edited content version is invalidated; profiles pinned to parallel versions
-remain intact.
+outputs clears each affected profile's installation plan so it must be resolved
+and installed again before Play. Any profile pinned to the exact edited content
+version is invalidated; profiles pinned to parallel versions remain intact.
+
+Each project can also be unregistered from Vapor discovery through a
+confirmation step. This removes only its `[[workspace.projects]]` entry; the
+project files and Cargo workspace membership remain unchanged. The existing
+Find projects / Adopt flow can register it again later.

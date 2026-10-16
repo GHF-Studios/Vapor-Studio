@@ -43,6 +43,7 @@ pub use workspace::{
     SourceComposition, SourceCompositionLink, SourceContent, UnregisteredProjectCandidate,
     SourceWorkshopMetadata, SourceRuntimeOutputs, UnregisteredProjectScan, WorkshopPolicyDraft,
     adopt_workspace_content_project, create_basic_content_workspace,
+    unregister_workspace_content_project,
     create_content_workspace, create_content_workspace_with_workshop,
     discover_source_content, load_source_composition,
     load_source_workshop_metadata, load_source_runtime_outputs, save_source_composition,

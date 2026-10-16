@@ -213,9 +213,40 @@ impl StudioApp {
                                     Some(PathBuf::from(self.workspace_root.trim())),
                                 );
                             }
+                            if ui
+                                .add_enabled(
+                                    !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                                    egui::Button::new("Unregister"),
+                                )
+                                .on_hover_text("Remove this project from Vapor discovery without deleting its files or changing Cargo membership.")
+                                .clicked()
+                            {
+                                self.pending_content_unregistration = Some(content.clone());
+                            }
                         });
                     });
                 }
+            });
+        }
+        if let Some(project) = self.pending_content_unregistration.clone() {
+            ui.group(|ui| {
+                ui.heading(format!("Unregister {}?", project.id));
+                ui.label(format!(
+                    "Vapor will stop discovering this {} at {}. The project files and Cargo workspace membership will remain unchanged; you can adopt it again later.",
+                    project.kind,
+                    project.root.display(),
+                ));
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(
+                        !self.running && !self.workspace_editor_dirty && !self.manifest_metadata_dirty,
+                        egui::Button::new("Unregister from Vapor"),
+                    ).clicked() {
+                        self.unregister_content_project();
+                    }
+                    if ui.add_enabled(!self.running, egui::Button::new("Keep registered")).clicked() {
+                        self.pending_content_unregistration = None;
+                    }
+                });
             });
         }
         if let Some(metadata) = self.workshop_metadata_edit.clone() {
