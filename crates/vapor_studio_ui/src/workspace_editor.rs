@@ -71,6 +71,34 @@ impl StudioApp {
         self.status = format!("Saved {}.", path.display());
     }
 
+    pub(super) fn apply_workspace_files_saved(&mut self, results: Vec<Result<PathBuf, String>>) {
+        let mut saved = 0;
+        let mut failures = Vec::new();
+        for result in results {
+            match result {
+                Ok(path) => {
+                    if let Some(document) = self.workspace.editor_documents.get_mut(&path) {
+                        document.original.clone_from(&document.contents);
+                        saved += 1;
+                    }
+                }
+                Err(error) => failures.push(error),
+            }
+        }
+        if saved > 0 {
+            self.invalidate_workshop_review();
+        }
+        self.status = if failures.is_empty() {
+            format!("Saved {saved} workspace file(s).")
+        } else {
+            format!(
+                "Saved {saved} file(s); {} remain unsaved: {}",
+                failures.len(),
+                failures.join("; ")
+            )
+        };
+    }
+
     pub(super) fn refresh_workspace_files(&mut self) {
         if !self.require_open_workspace("read workspace files") {
             return;
@@ -127,6 +155,41 @@ impl StudioApp {
             )
         });
         self.status = "Saving workspace file…".to_owned();
+    }
+
+    pub(super) fn save_all_workspace_files(&mut self) {
+        if !self.require_open_workspace_for_editor_save("save workspace files") {
+            return;
+        }
+        let documents = self
+            .workspace
+            .editor_documents
+            .iter()
+            .filter(|(_, document)| document.is_dirty())
+            .map(|(path, document)| (path.clone(), document.clone()))
+            .collect::<Vec<_>>();
+        if documents.is_empty() {
+            self.status = "All open workspace files are saved.".to_owned();
+            return;
+        }
+        let root = PathBuf::from(self.workspace.root.trim());
+        self.spawn(OperationKind::SaveWorkspaceFile, move |_context| {
+            OperationResult::WorkspaceFilesSaved(
+                documents
+                    .into_iter()
+                    .map(|(path, document)| {
+                        write_workspace_file(
+                            &root,
+                            &path,
+                            &document.original,
+                            &document.contents,
+                        )
+                        .map(|()| path)
+                    })
+                    .collect(),
+            )
+        });
+        self.status = "Saving all dirty workspace files…".to_owned();
     }
 
     pub(super) fn reload_workspace_file(&mut self) {

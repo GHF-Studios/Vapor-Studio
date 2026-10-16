@@ -97,6 +97,9 @@ impl StudioApp {
             OperationResult::FileSaved(Ok(path)) => {
                 self.apply_workspace_file_saved(path)
             }
+            OperationResult::WorkspaceFilesSaved(results) => {
+                self.apply_workspace_files_saved(results)
+            }
             OperationResult::ContentWorkspace(Ok((manifest, contents, files))) => {
                 self.apply_content_workspace_created(manifest, contents, files)
             }

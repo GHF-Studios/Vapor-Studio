@@ -80,6 +80,23 @@ impl StudioApp {
                 if self.workspace.active_document_is_dirty() {
                     ui.colored_label(egui::Color32::YELLOW, "Unsaved");
                 }
+                let dirty_count = self
+                    .workspace
+                    .editor_documents
+                    .values()
+                    .filter(|document| document.is_dirty())
+                    .count();
+                if ui
+                    .add_enabled(
+                        !self.operation.running
+                            && dirty_count > 0
+                            && !self.authoring.manifest_metadata_dirty,
+                        egui::Button::new(format!("Save all ({dirty_count})")),
+                    )
+                    .clicked()
+                {
+                    self.save_all_workspace_files();
+                }
             });
             let open_tabs = self
                 .workspace

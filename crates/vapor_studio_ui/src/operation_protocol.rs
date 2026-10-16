@@ -28,6 +28,7 @@ pub(super) enum OperationResult {
     WorkspaceFileCreated(Result<PathBuf, String>),
     FileContents(Result<(PathBuf, String), String>),
     FileSaved(Result<PathBuf, String>),
+    WorkspaceFilesSaved(Vec<Result<PathBuf, String>>),
     ContentWorkspace(Result<(PathBuf, String, Vec<PathBuf>), String>),
     SourceCompositionLoaded(Result<vapor_studio_core::SourceComposition, String>),
     SourceCompositionSaved(Result<vapor_studio_core::SourceComposition, String>),
@@ -81,6 +82,11 @@ impl OperationResult {
             | Self::WorkshopSearch(Err(error), _)
             | Self::WorkshopSubscriptions(Err(error))
             | Self::WorkshopSubscriptionBatchChange(Err(error), _, _) => Some(error.clone()),
+            Self::WorkspaceFilesSaved(results) => {
+                let errors = results.iter().filter_map(|result| result.as_ref().err());
+                let messages = errors.cloned().collect::<Vec<_>>();
+                (!messages.is_empty()).then(|| messages.join("; "))
+            }
             Self::Discovery(_, Err(error)) => Some(error.clone()),
             Self::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
             _ => None,
@@ -93,6 +99,12 @@ impl OperationResult {
             Self::FileSaved(Ok(path)) => path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml")),
+            Self::WorkspaceFilesSaved(results) => results.iter().any(|result| {
+                result.as_ref().is_ok_and(|path| {
+                    path.file_name()
+                        .is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml"))
+                })
+            }),
             _ => matches!(
                 self,
                 Self::WorkshopPublish(Ok(_))
