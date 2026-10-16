@@ -12,6 +12,8 @@ pub struct SourceContent {
     pub kind: String,
     pub root: PathBuf,
     pub manifest: PathBuf,
+    pub binaries: Vec<String>,
+    pub libraries: Vec<String>,
     pub dependencies: Vec<String>,
 }
 
@@ -72,6 +74,8 @@ pub fn discover_source_content(
             kind: artifact.kind().to_string(),
             root: artifact.root().to_path_buf(),
             manifest: artifact.manifest().to_path_buf(),
+            binaries: artifact.binaries().to_vec(),
+            libraries: artifact.libraries().to_vec(),
             dependencies: artifact
                 .dependencies()
                 .iter()

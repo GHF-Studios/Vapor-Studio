@@ -866,6 +866,27 @@ impl StudioApp {
         self.status = format!("Opening workspace {}…", path.display());
     }
 
+    pub(super) fn validate_source_project(&mut self, content: &vapor_studio_core::SourceContent) {
+        if !self.require_saved_workspace("validate this content project") {
+            return;
+        }
+        let root = PathBuf::from(self.workspace_root.trim());
+        let selector = source_content_selector(content);
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
+        };
+        self.spawn(OperationKind::Validate, move |_context| {
+            OperationResult::Message(vapor_studio_core::validate_profile_source(
+                &executable, &root, &selector,
+            ))
+        });
+        self.status = format!("Validating {selector} through Vapor Shell…");
+    }
+
     fn validate_selected_source(&mut self) {
         if !self.require_saved_workspace("validate source content") {
             return;

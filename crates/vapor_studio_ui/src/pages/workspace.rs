@@ -86,6 +86,16 @@ impl StudioApp {
                             ui.weak(&content.kind);
                             ui.weak(content.version.as_deref().unwrap_or("workspace version"));
                         });
+                        if !content.binaries.is_empty() || !content.libraries.is_empty() {
+                            let mut outputs = Vec::new();
+                            if !content.binaries.is_empty() {
+                                outputs.push(format!("binaries: {}", content.binaries.join(", ")));
+                            }
+                            if !content.libraries.is_empty() {
+                                outputs.push(format!("libraries: {}", content.libraries.join(", ")));
+                            }
+                            ui.small(format!("Declared runtime outputs · {}", outputs.join(" · ")));
+                        }
                         if !content.dependencies.is_empty() {
                             ui.small(format!("Dependencies: {}", content.dependencies.join(" · ")));
                         }
@@ -95,6 +105,16 @@ impl StudioApp {
                                 .strip_prefix(Path::new(self.workspace_root.trim()))
                                 .ok()
                                 .map(PathBuf::from);
+                            if ui
+                                .add_enabled(
+                                    !self.running && !self.workspace_editor_dirty,
+                                    egui::Button::new("Validate"),
+                                )
+                                .on_hover_text("Validate this content manifest and its local references through Vapor Shell.")
+                                .clicked()
+                            {
+                                self.validate_source_project(&content);
+                            }
                             if let Some(relative_manifest) = relative_manifest {
                                 if ui
                                     .add_enabled(
