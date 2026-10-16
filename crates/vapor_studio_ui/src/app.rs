@@ -4,6 +4,8 @@ mod components;
 mod composition_lifecycle;
 #[path = "operation_center.rs"]
 mod operation_center;
+#[path = "operation_results.rs"]
+mod operation_results;
 #[path = "operations.rs"]
 mod operations;
 #[path = "profiles.rs"]
