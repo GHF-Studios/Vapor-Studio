@@ -1147,6 +1147,23 @@ impl StudioApp {
         };
         let selector = content_selector(&root_package);
         let workspace = profile.workspace.map(|workspace| workspace.root);
+        self.preview_composition(selector, workspace, "Resolving this profile against workspace, cache, and installed content…");
+    }
+
+    pub(super) fn preview_source_composition(&mut self, selector: String) {
+        if !self.require_saved_workspace("preview this source composition") {
+            return;
+        }
+        let workspace = Some(PathBuf::from(self.workspace_root.trim()));
+        self.preview_composition(selector, workspace, "Resolving this source composition against workspace, cache, and installed content…");
+    }
+
+    fn preview_composition(
+        &mut self,
+        selector: String,
+        workspace: Option<PathBuf>,
+        status: &str,
+    ) {
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -1162,8 +1179,7 @@ impl StudioApp {
                 &selector,
             ))
         });
-        self.status =
-            "Resolving this profile against workspace, cache, and installed content…".to_owned();
+        self.status = status.to_owned();
     }
 
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {

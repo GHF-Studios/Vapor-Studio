@@ -68,6 +68,8 @@ impl StudioApp {
 
         let mut remove_link = None;
         let mut use_profile_root = false;
+        let mut preview_source_selector = None;
+        let mut source_graph_saved = false;
         if let Some(composition) = self.composition_edit.as_mut() {
             ui.separator();
             ui.label(format!("Editing {} · {}", composition.id, composition.kind));
@@ -189,9 +191,15 @@ impl StudioApp {
                 }
             });
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
+                source_graph_saved = self.composition_original_links.as_ref() == Some(&composition.links);
                 ui.horizontal(|ui| {
-                    let graph_saved = self.composition_original_links.as_ref() == Some(&composition.links);
-                    if ui.add_enabled(!self.running && graph_saved, egui::Button::new("Use as active profile root"))
+                    let source_selector = composition.version.as_ref()
+                        .map(|version| format!("{}@{version}", composition.id))
+                        .unwrap_or_else(|| composition.id.clone());
+                    if ui.add_enabled(!self.running && source_graph_saved, egui::Button::new("Preview availability")).clicked() {
+                        preview_source_selector = Some(source_selector);
+                    }
+                    if ui.add_enabled(!self.running && source_graph_saved, egui::Button::new("Use as active profile root"))
                         .on_disabled_hover_text("Save the current graph before resolving it into a profile.")
                         .clicked()
                     {
@@ -204,8 +212,31 @@ impl StudioApp {
             ui.separator();
             ui.weak("Load a source content project to inspect and edit its dependencies. Cache and installed copies remain read-only here.");
         }
+        if let Some(selector) = preview_source_selector {
+            self.preview_source_composition(selector);
+        }
         if use_profile_root {
             self.use_edited_composition_for_profile();
+        }
+        let selector = self.composition_edit.as_ref().map(|composition| {
+            composition.version.as_ref()
+                .map(|version| format!("{}@{version}", composition.id))
+                .unwrap_or_else(|| composition.id.clone())
+        });
+        let preview = self.composition_preview.clone();
+        if source_graph_saved
+            && let (Some(selector), Some(preview)) = (selector, preview)
+            && preview.selector == selector
+        {
+            if let Some(published_file_id) =
+                super::super::components::composition_preview::draw_composition_preview(
+                    ui, &preview,
+                )
+            {
+                self.workshop_id = published_file_id;
+                self.section = super::super::Section::Discover;
+                self.download_workshop_item();
+            }
         }
         ui.add_space(6.0);
         ui.small(format!("Workspace: {}", PathBuf::from(self.workspace_root.trim()).display()));

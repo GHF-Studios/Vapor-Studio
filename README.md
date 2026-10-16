@@ -10,8 +10,9 @@ content projects. It loads a snapshot through Vapor Shell, lets the creator add
 or remove workspace content edges, then asks Shell to enforce role,
 cardinality, version, cycle, and local-descendant rules before replacing the
 manifest. A saved Packagepack graph can become the active profile root and be
-resolved through the normal composition preview. Cache and installed content
-remain read-only.
+previewed directly against workspace, cache, and installed content, with source
+provenance, blockers, and Workshop acquisition links shown beside the graph.
+That preview is read-only; cache and installed content remain unchanged.
 
 The Workspace screen also surfaces projects from the explicit Vapor project
 registry. It shows their role, version, dependencies, and declared runtime

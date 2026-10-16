@@ -105,53 +105,15 @@ impl StudioApp {
                 .filter(|preview| preview.selector == selector)
                 .cloned();
             if let Some(preview) = preview {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.heading("Install plan");
-                        if preview.ready() {
-                            ui.colored_label(egui::Color32::LIGHT_GREEN, "Ready");
-                        } else {
-                            ui.colored_label(egui::Color32::YELLOW, format!("{} blocker(s)", preview.blockers.len()));
-                        }
-                    });
-                    ui.weak("Dependency-first resolution · no packages, downloads, or installed files were changed.");
-                    for node in &preview.nodes {
-                        let source = match (node.source, node.already_installed) {
-                            (vapor_studio_core::CompositionPreviewSource::Workspace, true) => "Workspace source · already installed",
-                            (vapor_studio_core::CompositionPreviewSource::Workspace, false) => "Workspace source",
-                            (vapor_studio_core::CompositionPreviewSource::Cache, true) => "Vapor cache · already installed",
-                            (vapor_studio_core::CompositionPreviewSource::Cache, false) => "Vapor cache",
-                            (vapor_studio_core::CompositionPreviewSource::Installed, _) => "Already installed · no source to update",
-                            (vapor_studio_core::CompositionPreviewSource::DownloadRequired, _) => "Workshop acquisition needed",
-                        };
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{} · {}{}", node.kind, node.id,
-                                node.version.as_ref().map(|version| format!("@{version}")).unwrap_or_default()));
-                            ui.weak(source);
-                        });
-                        for dependency in &node.dependencies {
-                            ui.small(format!("↳ {} · {}{}{}",
-                                dependency.relationship,
-                                dependency.id,
-                                dependency.version.as_ref().map(|version| format!(" ({version})")).unwrap_or_default(),
-                                if dependency.optional { " · optional" } else { "" },
-                            ));
-                        }
-                        if let Some(published_file_id) = node.published_file_id.as_ref().filter(|_| {
-                            node.source == vapor_studio_core::CompositionPreviewSource::DownloadRequired
-                        }) && ui.button(format!("Download Workshop item {published_file_id}")).clicked() {
-                            self.workshop_id = published_file_id.clone();
-                            self.section = super::super::Section::Discover;
-                            self.download_workshop_item();
-                        }
-                    }
-                    for blocker in &preview.blockers {
-                        ui.colored_label(egui::Color32::LIGHT_RED, blocker);
-                    }
-                    for warning in &preview.warnings {
-                        ui.weak(warning);
-                    }
-                });
+                if let Some(published_file_id) =
+                    super::super::components::composition_preview::draw_composition_preview(
+                        ui, &preview,
+                    )
+                {
+                    self.workshop_id = published_file_id;
+                    self.section = super::super::Section::Discover;
+                    self.download_workshop_item();
+                }
             }
         }
 
