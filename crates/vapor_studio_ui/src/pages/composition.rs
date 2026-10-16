@@ -47,7 +47,7 @@ impl StudioApp {
             if ui
                 .add_enabled(
                     !self.operation.running
-                        && !self.workspace.editor_dirty
+                        && !self.has_unsaved_workspace_edits()
                     && !self.authoring.composition_edit_selector.trim().is_empty(),
                     egui::Button::new("Load dependencies"),
                 )

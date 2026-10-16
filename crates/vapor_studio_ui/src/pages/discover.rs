@@ -24,8 +24,8 @@ impl StudioApp {
                         ui.selectable_value(&mut self.catalog.kind_filter, Some(kind.clone()), kind);
                     }
                 });
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty, egui::Button::new("Refresh local catalog"))
-                .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Refresh local catalog"))
+                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; discovery reads saved manifests.")
                 .clicked()
             {
                 self.discover();
@@ -104,7 +104,7 @@ impl StudioApp {
                                 });
                                 if available_packagepack
                                     && ui.add_enabled(
-                                        !self.operation.running && !self.workspace.editor_dirty,
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new(format!(
                                             "Set {} root",
                                             self.profile.items[self.profile.active_index].name
@@ -116,7 +116,7 @@ impl StudioApp {
                                 }
                                 if self.profile.items[self.profile.active_index].root_package.is_some()
                                     && ui.add_enabled(
-                                        !self.operation.running && !self.workspace.editor_dirty,
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new(format!(
                                             "Recheck {} plan",
                                             self.profile.items[self.profile.active_index].name
@@ -211,7 +211,7 @@ impl StudioApp {
                         ui.weak("In Vapor Library");
                         if available_packagepack
                             && ui.add_enabled(
-                                !self.operation.running && !self.workspace.editor_dirty,
+                                !self.operation.running && !self.has_unsaved_workspace_edits(),
                                 egui::Button::new(format!(
                                     "Set {} root",
                                     self.profile.items[self.profile.active_index].name
@@ -224,7 +224,7 @@ impl StudioApp {
                         } else if !available_packagepack
                             && self.profile.items[self.profile.active_index].root_package.is_some()
                             && ui.add_enabled(
-                                !self.operation.running && !self.workspace.editor_dirty,
+                                !self.operation.running && !self.has_unsaved_workspace_edits(),
                                 egui::Button::new(format!(
                                     "Recheck {} plan",
                                     self.profile.items[self.profile.active_index].name
@@ -266,12 +266,12 @@ impl StudioApp {
                     acquisition.kind));
                 ui.label(format!("{} · {}", acquisition.cache_root.display(), acquisition.fingerprint));
                 if acquisition.kind == "packagepack" {
-                    if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty,
+                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(),
                         egui::Button::new(format!(
                             "Use as {} root",
                             self.profile.items[self.profile.active_index].name
                         )))
-                        .on_disabled_hover_text("Save or discard editor changes before switching the profile's workspace.")
+                        .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts before changing the profile's workspace.")
                         .clicked()
                     {
                         self.use_workshop_as_profile_root();
@@ -282,7 +282,7 @@ impl StudioApp {
                     let has_root = self.profile.items[self.profile.active_index].root_package.is_some();
                     if ui
                         .add_enabled(
-                            !self.operation.running && !self.workspace.editor_dirty && has_root,
+                            !self.operation.running && !self.has_unsaved_workspace_edits() && has_root,
                             egui::Button::new(format!(
                                 "Recheck {} composition",
                                 self.profile.items[self.profile.active_index].name

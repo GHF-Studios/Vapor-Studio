@@ -6,8 +6,8 @@ impl StudioApp {
         ui.heading("Vapor Studio");
         ui.label("Find content, manage launchable compositions, or continue authoring.");
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Discover content"))
-                .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Discover content"))
+                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; discovery reads saved manifests.")
                 .clicked()
             {
                 self.section = Section::Discover;
@@ -31,7 +31,7 @@ impl StudioApp {
                 &self.profile.items[self.profile.active_index].installation,
                 vapor_studio_core::InstallationState::Installed { .. },
             );
-            let source_ready = !self.workspace.editor_dirty
+            let source_ready = !self.has_unsaved_workspace_edits()
                 && self.profile_composition.preview().is_some_and(|preview| {
                     preview.selector == content_id
                         && preview.ready()
@@ -41,7 +41,7 @@ impl StudioApp {
                 });
             let action = if installed {
                 "Play installed composition"
-            } else if self.workspace.editor_dirty {
+            } else if self.has_unsaved_workspace_edits() {
                 "Save workspace edits before source play"
             } else if source_ready {
                 "Build and play source composition"
@@ -50,11 +50,11 @@ impl StudioApp {
             };
             if ui
                 .add_enabled(
-                    !self.operation.running && (installed || !self.workspace.editor_dirty),
+                    !self.operation.running && (installed || !self.has_unsaved_workspace_edits()),
                     egui::Button::new(action),
                 )
                 .on_disabled_hover_text(
-                    "Save or reload the open file before resolving and playing source content.",
+                    "Save or discard workspace file and structured metadata drafts before resolving and playing source content.",
                 )
                 .clicked()
             {
@@ -69,8 +69,8 @@ impl StudioApp {
             }
         } else {
             ui.weak("No root Packagepack selected for this composition yet.");
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Choose content"))
-                .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Choose content"))
+                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; discovery reads saved manifests.")
                 .clicked()
             {
                 self.section = Section::Discover;

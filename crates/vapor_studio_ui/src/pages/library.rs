@@ -9,11 +9,11 @@ impl StudioApp {
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
                     egui::Button::new("Duplicate active profile"),
                 )
                 .on_disabled_hover_text(
-                    "Save or discard editor changes before duplicating a profile.",
+                    "Save or discard workspace file and structured metadata drafts before duplicating a profile.",
                 )
                 .clicked()
             {
@@ -42,11 +42,11 @@ impl StudioApp {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(
-                        !self.workspace.editor_dirty,
+                        !self.has_unsaved_workspace_edits(),
                         egui::Button::selectable(selected, name),
                     )
                     .on_disabled_hover_text(
-                        "Save or discard editor changes before switching profiles.",
+                        "Save or discard workspace file and structured metadata drafts before switching profiles.",
                     )
                     .clicked()
                 {
@@ -68,8 +68,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running
-                            && !self.workspace.editor_dirty
-                            && !self.authoring.manifest_metadata_dirty
+                            && !self.has_unsaved_workspace_edits()
                             && self.profile.name_draft.trim() != profile.name,
                         egui::Button::new("Rename"),
                     )
@@ -80,8 +79,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running
-                            && !self.workspace.editor_dirty
-                            && !self.authoring.manifest_metadata_dirty
+                            && !self.has_unsaved_workspace_edits()
                             && self.profile.items.len() > 1,
                         egui::Button::new("Remove profile"),
                     )
@@ -125,7 +123,7 @@ impl StudioApp {
             });
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.workspace.editor_dirty && editable_source,
+                    !self.operation.running && !self.has_unsaved_workspace_edits() && editable_source,
                     egui::Button::new("Edit source graph"),
                 )
                 .on_disabled_hover_text("Only a Packagepack authored in the active workspace can be edited here.")
@@ -139,11 +137,11 @@ impl StudioApp {
             }
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
                     egui::Button::new("Preview dependency plan"),
                 )
                 .on_disabled_hover_text(
-                    "Save or reload the open file first; resolution reads manifests from disk.",
+                    "Save or discard workspace file and structured metadata drafts first; resolution reads manifests from disk.",
                 )
                 .clicked()
             {
@@ -274,21 +272,21 @@ impl StudioApp {
             let installed = matches!(&profile.installation, InstallationState::Installed { .. });
             let needs_repair = matches!(&profile.installation,
                 InstallationState::NeedsRepair { .. } | InstallationState::Partial { .. });
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && has_source, egui::Button::new("Validate source"))
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && has_source, egui::Button::new("Validate source"))
                 .on_disabled_hover_text("Source validation needs this profile to be associated with a workspace. Cached or seeded compositions validate during install.")
                 .clicked() { self.validate_selected_source(); }
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && preview_ready && !installed && !root_installed && root_has_refresh_source, egui::Button::new("Install composition"))
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && preview_ready && !installed && !root_installed && root_has_refresh_source, egui::Button::new("Install composition"))
                 .on_disabled_hover_text("Preview a ready plan with an installable workspace or cache root. An already installed root needs verification, playback, or an update.")
                 .clicked() { self.install_selected(); }
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && installed && preview_ready && root_has_refresh_source, egui::Button::new("Update composition"))
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && installed && preview_ready && root_has_refresh_source, egui::Button::new("Update composition"))
                 .on_disabled_hover_text("Update uses the ready plan's current workspace or cached sources.")
                 .clicked() { self.update_selected(); }
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && has_source && root_is_workspace_source, egui::Button::new("Build and play source"))
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && has_source && root_is_workspace_source, egui::Button::new("Build and play source"))
                 .on_disabled_hover_text("The selected Packagepack must resolve from this workspace before source build/play is available.")
                 .clicked() { self.run_selected(); }
             if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Play installed")).clicked() { self.run_installed_selected(); }
             if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify graph")).clicked() { self.verify_selected_installation(); }
-            if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && has_root && preview_ready && root_has_refresh_source && needs_repair, egui::Button::new("Repair"))
+            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && preview_ready && root_has_refresh_source && needs_repair, egui::Button::new("Repair"))
                 .on_disabled_hover_text("Repair needs a ready workspace or cached source to replace damaged installed files.")
                 .clicked() { self.repair_selected_installation(); }
         });
@@ -336,11 +334,11 @@ impl StudioApp {
         ui.separator();
         if ui
             .add_enabled(
-                !self.operation.running && !self.workspace.editor_dirty,
+                !self.operation.running && !self.has_unsaved_workspace_edits(),
                 egui::Button::new("Discover content"),
             )
             .on_disabled_hover_text(
-                "Save or reload the open file first; discovery reads saved workspace manifests.",
+                "Save or discard workspace file and structured metadata drafts first; discovery reads saved manifests.",
             )
             .clicked()
         {

@@ -153,7 +153,7 @@ impl StudioApp {
                                     .map(PathBuf::from);
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty,
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Validate"),
                                     )
                                     .on_hover_text("Validate this content manifest and its local references through Vapor Shell.")
@@ -164,7 +164,7 @@ impl StudioApp {
                                 if let Some(relative_manifest) = relative_manifest {
                                     if ui
                                         .add_enabled(
-                                            !self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty,
+                                            !self.operation.running && !self.has_unsaved_workspace_edits(),
                                             egui::Button::new("Edit manifest"),
                                         )
                                         .on_disabled_hover_text("Save or discard the current file before opening a project manifest.")
@@ -175,17 +175,17 @@ impl StudioApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty,
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Edit Workshop metadata"),
                                     )
-                                    .on_disabled_hover_text("Save or reload the open file first; Workshop edits use a fresh Shell-validated manifest snapshot.")
+                                    .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; Workshop edits use a fresh Shell-validated manifest snapshot.")
                                     .clicked()
                                 {
                                     self.load_source_workshop_metadata(&content);
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty,
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Edit runtime outputs"),
                                     )
                                     .on_disabled_hover_text("Save or discard open edits first; runtime output edits use a fresh Shell-validated manifest snapshot.")
@@ -194,7 +194,7 @@ impl StudioApp {
                                     self.load_source_runtime_outputs(&content);
                                 }
                                 if ui
-                                        .add_enabled(!self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty, egui::Button::new("Edit dependencies"))
+                                        .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Edit dependencies"))
                                         .clicked()
                                 {
                                     self.authoring.composition_edit_selector =
@@ -206,7 +206,7 @@ impl StudioApp {
                                 }
                                 if content.kind == vapor_core::ContentKind::Packagepack.as_str()
                                     && ui
-                                        .add_enabled(!self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty, egui::Button::new("Use in active profile"))
+                                        .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Use in active profile"))
                                         .clicked()
                                 {
                                     self.assign_profile_root(
@@ -219,7 +219,7 @@ impl StudioApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty,
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Unregister"),
                                     )
                                     .on_hover_text("Remove this project from Vapor discovery without deleting its files or changing Cargo membership.")
@@ -242,7 +242,7 @@ impl StudioApp {
                     ));
                     ui.horizontal(|ui| {
                         if ui.add_enabled(
-                            !self.operation.running && !self.workspace.editor_dirty && !self.authoring.manifest_metadata_dirty,
+                            !self.operation.running && !self.has_unsaved_workspace_edits(),
                             egui::Button::new("Unregister from Vapor"),
                         ).clicked() {
                             self.unregister_content_project();
@@ -363,7 +363,7 @@ impl StudioApp {
                 ui.horizontal(|ui| {
                     ui.label("Existing unregistered content");
                     if ui
-                        .add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Find projects"))
+                        .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Find projects"))
                         .on_hover_text("Scans explicit role manifests and lists valid candidates. Nothing is registered until you choose Adopt.")
                         .clicked()
                     {
@@ -375,7 +375,7 @@ impl StudioApp {
                         ui.label(&candidate.id);
                         ui.weak(format!("{} · {}", candidate.kind, candidate.path.display()));
                         if ui
-                            .add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Adopt"))
+                            .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Adopt"))
                             .clicked()
                         {
                             self.adopt_content_project(candidate.path.clone());
@@ -387,8 +387,8 @@ impl StudioApp {
                 }
             }
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && !self.workspace.root.trim().is_empty(), egui::Button::new("Validate content"))
-                    .on_disabled_hover_text("Save or reload the open file first; validation reads workspace files from disk.")
+                if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && !self.workspace.root.trim().is_empty(), egui::Button::new("Validate content"))
+                    .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; validation reads workspace files from disk.")
                     .clicked()
                 {
                     self.validate_workspace_source();
@@ -402,11 +402,11 @@ impl StudioApp {
                 ] {
                     if ui
                         .add_enabled(
-                            !self.operation.running && !self.workspace.editor_dirty && has_workspace,
+                            !self.operation.running && !self.has_unsaved_workspace_edits() && has_workspace,
                             egui::Button::new(label),
                         )
                         .on_disabled_hover_text(if has_workspace {
-                            "Save or reload the open file first; workspace operations read files from disk."
+                            "Save or discard workspace file and structured metadata drafts first; workspace operations read files from disk."
                         } else {
                             "Open a Vapor Workspace before running workspace operations."
                         })

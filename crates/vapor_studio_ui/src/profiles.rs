@@ -98,7 +98,7 @@ impl StudioApp {
         if self.operation.running || index >= self.profile.items.len() {
             return;
         }
-        if self.workspace.editor_dirty || self.authoring.manifest_metadata_dirty {
+        if self.has_unsaved_workspace_edits() {
             self.status =
                 "Save or discard workspace file or manifest metadata edits before switching profiles.".to_owned();
             return;
@@ -188,6 +188,10 @@ impl StudioApp {
     }
 
     pub(super) fn add_profile(&mut self) {
+        if self.has_unsaved_workspace_edits() {
+            self.status = "Save or discard workspace file or manifest metadata edits before creating a profile.".to_owned();
+            return;
+        }
         let name = self.profile.new_name.trim();
         let workspace = (!self.workspace.root.trim().is_empty())
             .then(|| PathBuf::from(self.workspace.root.trim()));
@@ -227,7 +231,7 @@ impl StudioApp {
     }
 
     pub(super) fn remove_active_profile(&mut self) {
-        if self.operation.running || self.workspace.editor_dirty || self.authoring.manifest_metadata_dirty {
+        if self.operation.running || self.has_unsaved_workspace_edits() {
             self.status = "Finish or discard the current operation and edits before removing a profile.".to_owned();
             return;
         }
@@ -247,7 +251,8 @@ impl StudioApp {
     }
 
     pub(super) fn duplicate_active_profile(&mut self) {
-        if self.operation.running || self.workspace.editor_dirty {
+        if self.operation.running || self.has_unsaved_workspace_edits() {
+            self.status = "Save or discard workspace file or manifest metadata edits before duplicating a profile.".to_owned();
             return;
         }
         let source_name = self.profile.items[self.profile.active_index].name.clone();

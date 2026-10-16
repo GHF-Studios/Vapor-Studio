@@ -48,9 +48,9 @@ impl StudioApp {
                 }).collect::<Vec<_>>().join(" · ");
                 ui.small(location_summary);
                 if selected && kind == vapor_core::ContentKind::Packagepack.as_str()
-                    && ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && content.is_unambiguous(),
+                    && ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && content.is_unambiguous(),
                         egui::Button::new("Use this exact version as the profile root"))
-                        .on_disabled_hover_text(if content.is_unambiguous() { "Save or discard editor changes before switching the profile's workspace." } else { "Resolve conflicting local records before selecting this content." })
+                        .on_disabled_hover_text(if content.is_unambiguous() { "Save or discard workspace file and structured metadata drafts before switching the profile's workspace." } else { "Resolve conflicting local records before selecting this content." })
                         .clicked()
                 {
                     let root = ContentIdentity {
@@ -134,8 +134,8 @@ impl StudioApp {
                     .iter()
                     .any(|source| super::super::source_content_selector(source) == identity);
                 if is_authored_here {
-                    if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty && content.is_unambiguous(), egui::Button::new("Stage Workshop review package"))
-                        .on_disabled_hover_text(if content.is_unambiguous() { "Save or reload the open file first; staging reads the workspace source from disk." } else { "Resolve conflicting local records before staging this identity." })
+                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && content.is_unambiguous(), egui::Button::new("Stage Workshop review package"))
+                        .on_disabled_hover_text(if content.is_unambiguous() { "Save or discard workspace file and structured metadata drafts first; staging reads the workspace source from disk." } else { "Resolve conflicting local records before staging this identity." })
                         .clicked()
                     {
                         self.stage_workshop_content(identity.clone());

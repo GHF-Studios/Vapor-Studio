@@ -93,9 +93,6 @@ impl StudioApp {
     }
 
     pub(super) fn open_workspace_file(&mut self, path: PathBuf) {
-        if !self.require_open_workspace("open a workspace file") {
-            return;
-        }
         if self.authoring.manifest_metadata_dirty {
             self.status = "Save or discard structured manifest edits before opening another file.".to_owned();
             return;
@@ -103,6 +100,9 @@ impl StudioApp {
         if self.workspace.editor_dirty {
             self.status = "Save or discard the current editor changes before opening another file."
                 .to_owned();
+            return;
+        }
+        if !self.require_workspace_association("open a workspace file") {
             return;
         }
         let root = PathBuf::from(self.workspace.root.trim());
@@ -115,7 +115,7 @@ impl StudioApp {
     }
 
     pub(super) fn save_workspace_file(&mut self) {
-        if !self.require_open_workspace("save a workspace file") {
+        if !self.require_open_workspace_for_editor_save("save a workspace file") {
             return;
         }
         let Some(path) = self.workspace.selected_file.clone() else {
@@ -133,7 +133,7 @@ impl StudioApp {
     }
 
     pub(super) fn reload_workspace_file(&mut self) {
-        if !self.require_open_workspace("reload a workspace file") {
+        if !self.require_open_workspace_for_editor_save("reload a workspace file") {
             return;
         }
         let Some(path) = self.workspace.selected_file.clone() else {

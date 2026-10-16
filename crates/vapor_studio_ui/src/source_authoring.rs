@@ -146,11 +146,7 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_runtime_outputs(&mut self) {
-        if !self.require_open_workspace("save runtime output declarations") { return; }
-        if self.workspace.editor_dirty {
-            self.status = "Save or reload the open file before saving runtime outputs.".to_owned();
-            return;
-        }
+        if !self.require_open_workspace_for_authoring_save("save runtime output declarations") { return; }
         let Some(outputs) = self.authoring.runtime_outputs_edit.clone() else {
             self.status = "Load a source content project's runtime outputs first.".to_owned();
             return;
@@ -201,11 +197,7 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_workshop_metadata(&mut self) {
-        if !self.require_open_workspace("save Workshop metadata") { return; }
-        if self.workspace.editor_dirty {
-            self.status = "Save or reload the open file before saving Workshop metadata.".to_owned();
-            return;
-        }
+        if !self.require_open_workspace_for_authoring_save("save Workshop metadata") { return; }
         let Some(metadata) = self.authoring.workshop_metadata_edit.clone() else {
             self.status = "Load a source content project's Workshop metadata first.".to_owned();
             return;

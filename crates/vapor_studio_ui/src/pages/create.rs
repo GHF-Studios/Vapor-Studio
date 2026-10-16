@@ -20,8 +20,8 @@ impl StudioApp {
                     ui.label("Workspace name");
                     ui.text_edit_singleline(&mut self.workspace.starter_name);
                 });
-                if ui.add_enabled(!self.operation.running && !self.workspace.editor_dirty, egui::Button::new("Create and open starter workspace"))
-                    .on_disabled_hover_text("Save or reload the open file before creating and opening another workspace.")
+                if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create and open starter workspace"))
+                    .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts before creating and opening another workspace.")
                     .clicked()
                 {
                     self.create_starter_workspace();
@@ -151,10 +151,10 @@ impl StudioApp {
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
                     egui::Button::new("Refresh available content"),
                 )
-                .on_disabled_hover_text("Save or reload the open file first; discovery reads saved workspace manifests.")
+                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; discovery reads saved manifests.")
                 .clicked()
             {
                 self.discover();
@@ -162,7 +162,7 @@ impl StudioApp {
             if ui
                 .add_enabled(
                     !self.operation.running
-                        && !self.workspace.editor_dirty
+                        && !self.has_unsaved_workspace_edits()
                         && !self.workspace.root.trim().is_empty()
                         && required_role_selected,
                     egui::Button::new("Create content project"),
@@ -172,7 +172,7 @@ impl StudioApp {
                 } else if !required_role_selected {
                     "Select the required Engine, Enginepack, Game, or Gamepack role first."
                 } else {
-                    "Save or reload the open file before creating content; Studio opens the new manifest afterward."
+                    "Save or discard workspace file and structured metadata drafts before creating content; Studio opens the new manifest afterward."
                 })
                 .clicked()
             {

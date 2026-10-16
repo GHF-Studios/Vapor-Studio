@@ -54,7 +54,7 @@ impl StudioApp {
                 .on_hover_text("Search the current catalog");
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
                     egui::Button::new("+ Profile"),
                 )
                 .clicked()

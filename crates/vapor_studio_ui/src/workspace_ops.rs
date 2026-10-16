@@ -314,25 +314,41 @@ impl StudioApp {
     }
 
     pub(super) fn require_saved_workspace(&mut self, action: &str) -> bool {
-        if self.authoring.manifest_metadata_dirty {
-            self.status = format!(
-                "Save or discard structured manifest edits before you {action}.",
-            );
-            return false;
-        }
-        if !self.workspace.editor_dirty {
+        if !self.has_unsaved_workspace_edits() {
             return true;
         }
-        self.status = format!(
-            "Save or reload the open file before you {action}; Vapor operations read saved files from disk.",
-        );
+        self.status = if self.authoring.manifest_metadata_dirty {
+            format!("Save or discard structured manifest edits before you {action}.")
+        } else {
+            format!(
+                "Save or reload the open file before you {action}; Vapor operations read saved files from disk.",
+            )
+        };
         false
+    }
+
+    pub(super) fn has_unsaved_workspace_edits(&self) -> bool {
+        self.workspace.editor_dirty || self.authoring.manifest_metadata_dirty
     }
 
     pub(super) fn require_open_workspace(&mut self, action: &str) -> bool {
         if !self.require_saved_workspace(action) {
             return false;
         }
+        self.require_workspace_association(action)
+    }
+
+    pub(super) fn require_open_workspace_for_authoring_save(&mut self, action: &str) -> bool {
+        if self.workspace.editor_dirty {
+            self.status = format!(
+                "Save or reload the open file before you {action}; authoring saves must not overwrite unsaved file edits.",
+            );
+            return false;
+        }
+        self.require_workspace_association(action)
+    }
+
+    pub(super) fn require_workspace_association(&mut self, action: &str) -> bool {
         if self
             .profile
             .items
@@ -345,6 +361,16 @@ impl StudioApp {
         }
         self.status = format!("Open a Vapor Workspace before you {action}.");
         false
+    }
+
+    pub(super) fn require_open_workspace_for_editor_save(&mut self, action: &str) -> bool {
+        if self.authoring.manifest_metadata_dirty {
+            self.status = format!(
+                "Save or discard structured manifest edits before you {action}; they may target the same file.",
+            );
+            return false;
+        }
+        self.require_workspace_association(action)
     }
 
     pub(super) fn scan_unregistered_content_projects(&mut self) {

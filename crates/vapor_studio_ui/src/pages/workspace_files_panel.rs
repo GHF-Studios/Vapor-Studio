@@ -24,14 +24,14 @@ impl StudioApp {
             ui.horizontal(|ui| {
                 ui.label("New file");
                 ui.add_enabled(
-                    !self.operation.running && !self.workspace.editor_dirty,
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
                     egui::TextEdit::singleline(&mut self.workspace.new_file_path)
                         .desired_width(280.0)
                         .hint_text("scripts/example.rhai"),
                 );
                 if ui
                     .add_enabled(
-                        !self.operation.running && !self.workspace.editor_dirty,
+                        !self.operation.running && !self.has_unsaved_workspace_edits(),
                         egui::Button::new("Create file"),
                     )
                     .clicked()
@@ -43,7 +43,10 @@ impl StudioApp {
             ui.horizontal(|ui| {
                 ui.heading("Files");
                 if ui
-                    .add_enabled(!self.operation.running, egui::Button::new("Refresh"))
+                    .add_enabled(
+                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        egui::Button::new("Refresh"),
+                    )
                     .clicked()
                 {
                     self.refresh_workspace_files();
@@ -53,7 +56,9 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running && self.workspace.editor_dirty,
+                        !self.operation.running
+                            && self.workspace.editor_dirty
+                            && !self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save"),
                     )
                     .clicked()
@@ -62,7 +67,9 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running && self.workspace.selected_file.is_some(),
+                        !self.operation.running
+                            && !self.authoring.manifest_metadata_dirty
+                            && self.workspace.selected_file.is_some(),
                         egui::Button::new("Reload from disk"),
                     )
                     .on_hover_text("Discard the editor buffer and reopen the current on-disk file.")
@@ -86,7 +93,7 @@ impl StudioApp {
                             ui,
                             &tree,
                             self.workspace.selected_file.as_ref(),
-                            !self.operation.running,
+                            !self.operation.running && !self.has_unsaved_workspace_edits(),
                             &PathBuf::new(),
                             0,
                             &mut open_file,
@@ -98,7 +105,9 @@ impl StudioApp {
                 }
                 let changed = columns[1]
                     .add_enabled_ui(
-                        self.workspace.selected_file.is_some() && !self.operation.running,
+                        self.workspace.selected_file.is_some()
+                            && !self.operation.running
+                            && !self.authoring.manifest_metadata_dirty,
                         |ui| {
                             egui::TextEdit::multiline(&mut self.workspace.editor)
                                 .code_editor()
