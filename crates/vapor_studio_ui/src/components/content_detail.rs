@@ -1,4 +1,4 @@
-use super::super::{StudioApp, catalog_matches_filters};
+use super::super::{Section, StudioApp, catalog_matches_filters};
 use eframe::egui;
 use vapor_studio_core::ContentIdentity;
 
@@ -152,86 +152,13 @@ impl StudioApp {
                     .cloned();
                 if let Some(preview) = preview {
                     ui.group(|ui| {
-                        ui.heading("Staged artifact review");
+                        ui.heading("Workshop package staged");
                         ui.label(format!(
-                            "Title: {}",
-                            preview.title.as_deref().unwrap_or(&preview.id)
+                            "{} · {} files · {} bytes · {}",
+                            preview.id, preview.files, preview.bytes, preview.target
                         ));
-                        ui.label(format!(
-                            "Steam AppID: {} · visibility: {}",
-                            preview
-                                .app_id
-                                .map_or_else(|| "missing".to_owned(), |id| id.to_string()),
-                            preview.visibility.as_deref().unwrap_or("not set")
-                        ));
-                        ui.label(format!(
-                            "PublishedFileId: {}",
-                            preview.published_file_id.as_deref().unwrap_or("new item")
-                        ));
-                        ui.label(format!(
-                            "Target: {} · {} files · {} bytes",
-                            preview.target, preview.files, preview.bytes
-                        ));
-                        ui.label(format!("Payload: {}", preview.root.display()));
-                        ui.small(format!("Fingerprint: {}", preview.fingerprint));
-                        ui.collapsing("Staged files", |ui| {
-                            for path in preview.file_paths.iter().take(30) {
-                                ui.small(path);
-                            }
-                            if preview.file_paths.len() > 30 {
-                                ui.weak(format!("{} more files", preview.file_paths.len() - 30));
-                            }
-                        });
-                        if preview.dependencies.is_empty() {
-                            ui.weak("No declared dependencies.");
-                        } else {
-                            for dependency in &preview.dependencies {
-                                ui.small(format!("Requires {dependency}"));
-                            }
-                        }
-                        ui.separator();
-                        ui.strong(if preview.published_file_id.is_some() {
-                            "Publish update to Workshop"
-                        } else {
-                            "Create and publish Workshop item"
-                        });
-                        ui.add_enabled(
-                            !self.operation.running && content.is_unambiguous(),
-                            egui::TextEdit::singleline(&mut self.workshop.publisher_account)
-                                .hint_text("Steam publisher account"),
-                        );
-                        ui.add_enabled(
-                            !self.operation.running && content.is_unambiguous(),
-                            egui::TextEdit::singleline(&mut self.workshop.change_note)
-                                .hint_text("Change note (optional)"),
-                        );
-                        let confirmation = format!("PUBLISH {}", preview.id);
-                        ui.label(format!(
-                            "This uploads to Steam. Type {confirmation} to confirm."
-                        ));
-                        ui.add_enabled(
-                            !self.operation.running,
-                            egui::TextEdit::singleline(&mut self.workshop.confirmation)
-                                .hint_text(&confirmation),
-                        );
-                        if ui
-                            .add_enabled(
-                                !self.operation.running
-                                    && content.is_unambiguous()
-                                    && !self.workshop.publisher_account.trim().is_empty()
-                                    && self.workshop.confirmation.trim() == confirmation,
-                                egui::Button::new(if preview.published_file_id.is_some() {
-                                    "Publish update"
-                                } else {
-                                    "Create Workshop item"
-                                }),
-                            )
-                            .clicked()
-                        {
-                            self.publish_reviewed_workshop_content(
-                                identity.clone(),
-                                preview,
-                            );
+                        if ui.button("Review in Publish").clicked() {
+                            self.section = Section::Publish;
                         }
                     });
                 }

@@ -7,6 +7,7 @@ mod library_composition_panel;
 mod library_installation_panel;
 mod library_launch_panel;
 mod library_profile_panel;
+mod publish;
 mod workspace;
 mod workspace_files_panel;
 mod workspace_authoring_panel;

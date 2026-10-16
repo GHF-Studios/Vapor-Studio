@@ -6,6 +6,7 @@ pub(super) enum Section {
     Compose,
     Create,
     Workspace,
+    Publish,
     Diagnostics,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,13 +40,14 @@ impl CatalogSourceFilter {
 }
 
 impl Section {
-    pub(super) const ALL: [Self; 6] = [
+    pub(super) const ALL: [Self; 7] = [
         Self::Home,
         Self::Discover,
         Self::Library,
         Self::Compose,
         Self::Create,
         Self::Workspace,
+        Self::Publish,
     ];
     pub(super) fn label(self) -> &'static str {
         match self {
@@ -55,6 +57,7 @@ impl Section {
             Self::Compose => "Compose",
             Self::Create => "Create",
             Self::Workspace => "Workspace",
+            Self::Publish => "Publish",
             Self::Diagnostics => "Diagnostics",
         }
     }

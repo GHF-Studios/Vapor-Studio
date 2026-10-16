@@ -72,7 +72,7 @@ impl StudioApp {
         });
     }
 
-    fn preview_steam_package(&mut self) {
+    pub(super) fn preview_steam_package(&mut self) {
         self.spawn(OperationKind::StageRootDistribution, |_context| {
             let result = vapor_sdk_core::root::package::root_package(
                 &vapor_sdk_core::root::types::RootPackageRequest {
@@ -117,14 +117,9 @@ impl eframe::App for StudioApp {
                 Section::Compose => self.draw_composition(ui),
                 Section::Create => self.draw_create(ui),
                 Section::Workspace => self.draw_workspace(ui),
+                Section::Publish => self.draw_publish(ui),
                 Section::Diagnostics => {
                     self.diagnostics.show(ui);
-                    egui::CollapsingHeader::new("Steam root package tools").show(ui, |ui| {
-                        ui.label("Root app/depot publishing is separate from Workshop content publishing.");
-                        if ui.add_enabled(!self.operation.running, egui::Button::new("Preview root package")).clicked() {
-                            self.preview_steam_package();
-                        }
-                    });
                 }
             }
             self.draw_operation_center(ui);
