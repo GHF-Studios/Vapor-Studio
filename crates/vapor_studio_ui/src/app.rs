@@ -192,6 +192,7 @@ pub struct StudioApp {
     workspace_editor_original: String,
     workspace_editor_toml_diagnostic: Option<Result<(), String>>,
     workspace_editor_dirty: bool,
+    workspace_files_open: bool,
     status: String,
     running: bool,
     receiver: Option<Receiver<(OperationId, OperationResult)>>,
@@ -305,6 +306,7 @@ impl StudioApp {
             workspace_editor_original: String::new(),
             workspace_editor_toml_diagnostic: None,
             workspace_editor_dirty: false,
+            workspace_files_open: false,
             draft_content_id: String::new(),
             draft_content_version: "0.1.0".to_owned(),
             draft_content_kind: ContentKind::Packagepack,
@@ -636,6 +638,7 @@ impl StudioApp {
                         self.workspace_files.sort();
                     }
                     self.selected_workspace_file = Some(path.clone());
+                    self.workspace_files_open = true;
                     self.workspace_editor.clear();
                     self.workspace_editor_original.clear();
                     self.refresh_workspace_editor_toml_diagnostic();
@@ -645,6 +648,7 @@ impl StudioApp {
                 }
                 OperationResult::FileContents(Ok((path, contents))) => {
                     self.selected_workspace_file = Some(path);
+                    self.workspace_files_open = true;
                     self.workspace_editor = contents.clone();
                     self.workspace_editor_original = contents;
                     self.refresh_workspace_editor_toml_diagnostic();
@@ -663,6 +667,7 @@ impl StudioApp {
                 OperationResult::ContentWorkspace(Ok((manifest, contents, files))) => {
                     self.workspace_files = files;
                     self.selected_workspace_file = Some(manifest);
+                    self.workspace_files_open = true;
                     self.workspace_editor = contents.clone();
                     self.workspace_editor_original = contents;
                     self.refresh_workspace_editor_toml_diagnostic();
@@ -947,6 +952,7 @@ impl StudioApp {
         self.workspace_editor_original.clear();
         self.workspace_editor_toml_diagnostic = None;
         self.workspace_editor_dirty = false;
+        self.workspace_files_open = false;
         self.new_workspace_file_path.clear();
         self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.pending_content_unregistration = None;

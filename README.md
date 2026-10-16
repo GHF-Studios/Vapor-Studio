@@ -17,8 +17,10 @@ Any saved source project can also move straight from Compose to a staged
 Workshop review. Studio opens the existing review surface; publishing still
 requires the separate explicit review and confirmation.
 
-The Workspace screen also surfaces projects from the explicit Vapor project
-registry. It shows their role, version, dependencies, and declared runtime
+The Workspace screen separates workspace operations and content projects into
+an Overview, while source editing lives in a Files view. The Overview surfaces
+projects from the explicit Vapor project registry. It shows their role,
+version, dependencies, and declared runtime
 binaries/libraries, provides per-project validation, and links to each manifest
 and dependency editor. Packagepack dependency editing can also select that
 Packagepack as the active profile root. The composer exposes version
