@@ -60,8 +60,8 @@ impl StudioApp {
             | OperationResult::WorkshopSubscriptions(Err(error)) => {
                 self.apply_workshop_error(error)
             }
-            OperationResult::WorkshopAcquisition(Ok(acquisition)) => {
-                self.apply_workshop_acquisition(acquisition)
+            OperationResult::WorkshopAcquisition(Ok(acquisitions)) => {
+                self.apply_workshop_acquisition(acquisitions)
             }
             OperationResult::WorkshopPublish(Ok(publication)) => {
                 self.apply_workshop_publication(publication)

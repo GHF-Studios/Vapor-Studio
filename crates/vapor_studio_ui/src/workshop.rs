@@ -9,7 +9,8 @@ pub(super) struct WorkshopState {
     pub(super) publisher_account: String,
     pub(super) change_note: String,
     pub(super) confirmation: String,
-    pub(super) pending_acquisition: Option<vapor_studio_core::WorkshopAcquisition>,
+    pub(super) selected_items: std::collections::BTreeSet<String>,
+    pub(super) pending_acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
     pub(super) search_query: String,
     pub(super) results: Vec<vapor_studio_core::WorkshopItem>,
     pub(super) results_query: Option<String>,
@@ -28,7 +29,8 @@ impl Default for WorkshopState {
             publisher_account: String::new(),
             change_note: String::new(),
             confirmation: String::new(),
-            pending_acquisition: None,
+            selected_items: Default::default(),
+            pending_acquisitions: Vec::new(),
             search_query: String::new(),
             results: Vec::new(),
             results_query: None,
@@ -63,13 +65,14 @@ impl StudioApp {
 
     pub(super) fn apply_workshop_acquisition(
         &mut self,
-        acquisition: vapor_studio_core::WorkshopAcquisition,
+        acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
     ) {
         self.status = format!(
-            "Downloaded {} ({}) into Vapor's cache.",
-            acquisition.id, acquisition.kind
+            "Imported {} Workshop item(s) into Vapor's cache.",
+            acquisitions.len()
         );
-        self.workshop.pending_acquisition = Some(acquisition);
+        self.workshop.pending_acquisitions = acquisitions;
+        self.workshop.selected_items.clear();
     }
 
     pub(super) fn apply_workshop_publication(
@@ -249,6 +252,26 @@ impl StudioApp {
                 "Workshop downloads currently require a numeric PublishedFileId.".to_owned();
             return;
         }
+        self.download_workshop_items(vec![published_file_id]);
+    }
+
+    pub(super) fn download_selected_workshop_items(&mut self) {
+        let ids = self.workshop.selected_items.iter().cloned().collect::<Vec<_>>();
+        self.download_workshop_items(ids);
+    }
+
+    fn download_workshop_items(&mut self, published_file_ids: Vec<String>) {
+        if published_file_ids.is_empty() {
+            self.status = "Select at least one Workshop item to import.".to_owned();
+            return;
+        }
+        if !published_file_ids
+            .iter()
+            .all(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            self.status = "Workshop downloads require numeric PublishedFileIds.".to_owned();
+            return;
+        }
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -256,13 +279,16 @@ impl StudioApp {
                 return;
             }
         };
+        let count = published_file_ids.len();
         self.spawn(OperationKind::Acquire, move |_context| {
-            OperationResult::WorkshopAcquisition(vapor_studio_core::download_workshop_item(
+            OperationResult::WorkshopAcquisition(vapor_studio_core::download_workshop_items(
                 &executable,
-                &published_file_id,
+                &published_file_ids,
             ))
         });
-        self.status = "Downloading the public Workshop item into Vapor's cache…".to_owned();
+        self.status = format!(
+            "Importing {count} public Workshop item(s) into Vapor's cache…"
+        );
     }
 
     pub(in crate::app) fn search_workshop(&mut self) {

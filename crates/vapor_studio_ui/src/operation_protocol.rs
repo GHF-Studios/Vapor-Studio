@@ -41,7 +41,7 @@ pub(super) enum OperationResult {
     Verify(Result<vapor_studio_core::InstallationCheck, String>),
     Repair(Result<vapor_studio_core::InstalledComposition, String>),
     WorkshopStage(Result<vapor_studio_core::WorkshopPackagePreview, String>),
-    WorkshopAcquisition(Result<vapor_studio_core::WorkshopAcquisition, String>),
+    WorkshopAcquisition(Result<Vec<vapor_studio_core::WorkshopAcquisition>, String>),
     WorkshopPublish(Result<vapor_studio_core::WorkshopPublication, String>),
     WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>, String),
     WorkshopSubscriptions(Result<Vec<vapor_studio_core::WorkshopSubscription>, String>),

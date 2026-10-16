@@ -148,28 +148,65 @@ pub fn download_workshop_item(
     application_executable: &Path,
     published_file_id: &str,
 ) -> Result<WorkshopAcquisition, String> {
+    download_workshop_items(application_executable, &[published_file_id.to_owned()])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Workshop download returned no artifact".to_owned())
+}
+
+/// Download multiple public Workshop items in one Vapor Shell operation.
+///
+/// Keeping the acquisition batch intact lets SteamCMD authenticate once and
+/// gives the UI one coherent result set to review and compose from.
+pub fn download_workshop_items(
+    application_executable: &Path,
+    published_file_ids: &[String],
+) -> Result<Vec<WorkshopAcquisition>, String> {
+    if published_file_ids.is_empty() {
+        return Err("Select at least one Workshop item to import".to_owned());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut normalized_ids = Vec::new();
+    for id in published_file_ids {
+        let id = id.trim();
+        let parsed = if !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()) {
+            id.parse::<u64>().ok().filter(|id| *id != 0)
+        } else {
+            None
+        }
+        .ok_or_else(|| "Workshop imports require nonzero numeric PublishedFileIds".to_owned())?;
+        let id = parsed.to_string();
+        if seen.insert(id.clone()) {
+            normalized_ids.push(id);
+        }
+    }
     let installation = InstallationPaths::from_application_executable(application_executable)?;
-    let report = content::download_many(
+    let reports = content::download_many(
         &installation,
         None,
-        &[published_file_id.trim().to_owned()],
+        &normalized_ids,
         None,
-    )?
-    .into_iter()
-    .next()
-    .ok_or_else(|| "Workshop download returned no artifact".to_owned())?;
-    let cached = content::cached_artifact(&installation, report.artifact_id())?;
-    Ok(WorkshopAcquisition {
-        id: report.artifact_id().to_owned(),
-        version: cached.version().map(ToOwned::to_owned),
-        kind: cached.kind().to_owned(),
-        cache_root: report.cache_root().to_path_buf(),
-        fingerprint: format!(
-            "{}:{}",
-            report.fingerprint().algorithm(),
-            report.fingerprint().hash()
-        ),
-    })
+    )?;
+    if reports.is_empty() {
+        return Err("Workshop download returned no artifacts".to_owned());
+    }
+    reports
+        .into_iter()
+        .map(|report| {
+            let cached = content::cached_artifact(&installation, report.artifact_id())?;
+            Ok(WorkshopAcquisition {
+                id: report.artifact_id().to_owned(),
+                version: cached.version().map(ToOwned::to_owned),
+                kind: cached.kind().to_owned(),
+                cache_root: report.cache_root().to_path_buf(),
+                fingerprint: format!(
+                    "{}:{}",
+                    report.fingerprint().algorithm(),
+                    report.fingerprint().hash()
+                ),
+            })
+        })
+        .collect()
 }
 
 pub fn verify_installation(

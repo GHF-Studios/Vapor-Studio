@@ -31,6 +31,7 @@ pub use shell_content::{
     CompositionPreview, CompositionPreviewDependency, CompositionPreviewNode,
     CompositionPreviewSource, InstallationCheck, InstalledArtifact, InstalledComposition,
     WorkshopAcquisition, default_packagepack_selector, download_workshop_item,
+    download_workshop_items,
     install_profile_composition, preview_profile_composition, repair_profile_composition,
     run_installed_profile, run_source_profile, update_profile_composition, verify_installation,
 };

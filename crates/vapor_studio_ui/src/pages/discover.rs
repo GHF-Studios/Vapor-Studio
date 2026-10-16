@@ -170,6 +170,43 @@ impl StudioApp {
                         self.search_workshop();
                     }
                 });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::Button::new("Select this page"),
+                        )
+                        .clicked()
+                    {
+                        self.workshop.selected_items.extend(
+                            self.workshop.results.iter().map(|item| item.published_file_id.clone()),
+                        );
+                    }
+                });
+            }
+            if !self.workshop.selected_items.is_empty() {
+                let count = self.workshop.selected_items.len();
+                ui.horizontal(|ui| {
+                    ui.small(format!("Selected across pages and searches · {count} item(s)"));
+                    if ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::Button::new("Clear selection"),
+                        )
+                        .clicked()
+                    {
+                        self.workshop.selected_items.clear();
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::Button::new(format!("Import {count} to Vapor Library")),
+                        )
+                        .clicked()
+                    {
+                        self.download_selected_workshop_items();
+                    }
+                });
             }
             if let Some(query) = &self.workshop.results_query {
                 if self.workshop.results.is_empty() {
@@ -185,6 +222,20 @@ impl StudioApp {
             for item in self.workshop.results.clone() {
                 ui.separator();
                 ui.horizontal(|ui| {
+                    let mut selected = self.workshop.selected_items.contains(&item.published_file_id);
+                    if ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::Checkbox::new(&mut selected, ""),
+                        )
+                        .changed()
+                    {
+                        if selected {
+                            self.workshop.selected_items.insert(item.published_file_id.clone());
+                        } else {
+                            self.workshop.selected_items.remove(&item.published_file_id);
+                        }
+                    }
                     ui.strong(&item.title);
                     ui.weak(format!("PublishedFileId {}", item.published_file_id));
                 });
@@ -259,43 +310,59 @@ impl StudioApp {
                     self.download_workshop_item();
                 }
             });
-            if let Some(acquisition) = self.workshop.pending_acquisition.clone() {
+            if !self.workshop.pending_acquisitions.is_empty() {
                 ui.separator();
-                ui.label(format!("Cached: {}{} · {}", acquisition.id,
-                    acquisition.version.as_ref().map(|version| format!("@{version}")).unwrap_or_default(),
-                    acquisition.kind));
-                ui.label(format!("{} · {}", acquisition.cache_root.display(), acquisition.fingerprint));
-                if acquisition.kind == "packagepack" {
-                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(),
-                        egui::Button::new(format!(
-                            "Use as {} root",
-                            self.profile.items[self.profile.active_index].name
-                        )))
-                        .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts before changing the profile's workspace.")
-                        .clicked()
-                    {
-                        self.use_workshop_as_profile_root();
-                    }
-                    ui.weak("The selected Packagepack will appear in Compositions, where you can preview its dependency plan before installing.");
-                } else {
-                    ui.weak("Use this item as a dependency of a Packagepack to include it in a composition.");
-                    let has_root = self.profile.items[self.profile.active_index].root_package.is_some();
-                    if ui
-                        .add_enabled(
-                            !self.operation.running && !self.has_unsaved_workspace_edits() && has_root,
-                            egui::Button::new(format!(
-                                "Recheck {} composition",
-                                self.profile.items[self.profile.active_index].name
-                            )),
-                        )
-                        .on_disabled_hover_text(
-                            "Select a Packagepack profile and save or discard open editor changes first.",
-                        )
-                        .clicked()
-                    {
-                        self.section = super::super::Section::Library;
-                        self.preview_selected_composition();
-                    }
+                ui.heading("Imported into Vapor Library");
+                for acquisition in self.workshop.pending_acquisitions.clone() {
+                    ui.group(|ui| {
+                        ui.label(format!(
+                            "Cached: {}{} · {}",
+                            acquisition.id,
+                            acquisition
+                                .version
+                                .as_ref()
+                                .map(|version| format!("@{version}"))
+                                .unwrap_or_default(),
+                            acquisition.kind
+                        ));
+                        ui.small(format!(
+                            "{} · {}",
+                            acquisition.cache_root.display(),
+                            acquisition.fingerprint
+                        ));
+                        if acquisition.kind == "packagepack" {
+                            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(),
+                                egui::Button::new(format!(
+                                    "Use as {} root",
+                                    self.profile.items[self.profile.active_index].name
+                                )))
+                                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts before changing the profile's workspace.")
+                                .clicked()
+                            {
+                                self.use_workshop_as_profile_root(&acquisition.id);
+                            }
+                            ui.weak("Preview this Packagepack's dependency plan before installing it.");
+                        } else {
+                            ui.weak("Use this item as a dependency of a Packagepack to include it in a composition.");
+                            let has_root = self.profile.items[self.profile.active_index].root_package.is_some();
+                            if ui
+                                .add_enabled(
+                                    !self.operation.running && !self.has_unsaved_workspace_edits() && has_root,
+                                    egui::Button::new(format!(
+                                        "Recheck {} composition",
+                                        self.profile.items[self.profile.active_index].name
+                                    )),
+                                )
+                                .on_disabled_hover_text(
+                                    "Select a Packagepack profile and save or discard open editor changes first.",
+                                )
+                                .clicked()
+                            {
+                                self.section = super::super::Section::Library;
+                                self.preview_selected_composition();
+                            }
+                        }
+                    });
                 }
             }
         });

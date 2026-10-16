@@ -35,8 +35,10 @@ impl ProfileState {
 }
 
 impl StudioApp {
-    pub(super) fn use_workshop_as_profile_root(&mut self) {
-        let Some(acquisition) = self.workshop.pending_acquisition.as_ref() else {
+    pub(super) fn use_workshop_as_profile_root(&mut self, published_file_id: &str) {
+        let Some(acquisition) = self.workshop.pending_acquisitions.iter()
+            .find(|acquisition| acquisition.id == published_file_id)
+        else {
             return;
         };
         if acquisition.kind != "packagepack" {
