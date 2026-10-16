@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 /// Stable identity for the root content selected by a launchable profile.
 /// A missing version means the profile was migrated from an older ID-only selection.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ContentIdentity {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -22,6 +22,13 @@ pub struct ResolvedDependencyIdentity {
 pub struct ResolvedNodeIdentity {
     pub content: ContentIdentity,
     pub kind: String,
+    /// Fingerprint of the exact installed payload represented by this node.
+    /// Older saved graphs have no payload lock and deserialize as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    /// Source recorded by Vapor for the installed artifact, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub dependencies: Vec<ResolvedDependencyIdentity>,
 }
 
@@ -32,6 +39,72 @@ pub struct ResolvedCompositionGraph {
     #[serde(default)]
     pub effective_game: Option<ContentIdentity>,
     pub nodes: Vec<ResolvedNodeIdentity>,
+}
+
+/// Stable fingerprint for an installed graph with exact payload and source
+/// records for every node. Returns `None` for legacy or partial snapshots.
+pub fn fingerprint_resolved_graph(graph: &ResolvedCompositionGraph) -> Option<String> {
+    if graph.nodes.is_empty()
+        || graph.nodes.iter().any(|node| {
+            node.fingerprint.is_none() || node.source.as_deref().map_or(true, str::is_empty)
+        })
+    {
+        return None;
+    }
+    let identity = |content: &ContentIdentity| {
+        let version = content.version.as_deref().map_or_else(
+            || "0".to_owned(),
+            |version| format!("1{}:{}", version.len(), version),
+        );
+        format!("{}:{}{version}", content.id.len(), content.id)
+    };
+    let mut canonical = String::new();
+    canonical.push_str(&format!("root={}\n", identity(&graph.root)));
+    canonical.push_str(&format!("engine={}\n", identity(&graph.effective_engine)));
+    canonical.push_str(&format!(
+        "game={}\n",
+        graph.effective_game.as_ref().map(identity).unwrap_or_default()
+    ));
+    let nodes: BTreeMap<_, _> = graph
+        .nodes
+        .iter()
+        .map(|node| (identity(&node.content), node))
+        .collect();
+    if nodes.len() != graph.nodes.len() {
+        return None;
+    }
+    for (content, node) in nodes {
+        canonical.push_str(&format!("node={content}\n"));
+        canonical.push_str(&format!("kind={}:{}\n", node.kind.len(), node.kind));
+        let source = node.source.as_deref().unwrap_or_default();
+        canonical.push_str(&format!("source={}:{}\n", source.len(), source));
+        let fingerprint = node.fingerprint.as_deref().unwrap_or_default();
+        canonical.push_str(&format!("payload={}:{}\n", fingerprint.len(), fingerprint));
+        let mut dependencies = node
+            .dependencies
+            .iter()
+            .map(|dependency| {
+                let target = identity(&dependency.content);
+                format!(
+                    "{}:{}{}:{}",
+                    dependency.binding.len(),
+                    dependency.binding,
+                    target.len(),
+                    target
+                )
+            })
+            .collect::<Vec<_>>();
+        dependencies.sort();
+        for dependency in dependencies {
+            canonical.push_str(&format!("edge={content}{dependency}\n"));
+        }
+    }
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in canonical.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    Some(format!("vapor-graph-fnv1a-64-v1:{hash:016x}"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,18 +127,23 @@ pub struct InstalledArtifactRecord {
     pub fingerprint: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum InstallationState {
+    #[default]
     Unknown,
     NotInstalled,
-    Installed { artifacts: Vec<InstalledArtifactRecord>, graph_fingerprint: Option<String> },
-    Partial { detail: String },
-    NeedsRepair { detail: String, artifacts: Vec<InstalledArtifactRecord> },
-}
-
-impl Default for InstallationState {
-    fn default() -> Self { Self::Unknown }
+    Installed {
+        artifacts: Vec<InstalledArtifactRecord>,
+        graph_fingerprint: Option<String>,
+    },
+    Partial {
+        detail: String,
+    },
+    NeedsRepair {
+        detail: String,
+        artifacts: Vec<InstalledArtifactRecord>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,7 +170,10 @@ pub struct ProfileDocument {
 
 impl Default for ProfileDocument {
     fn default() -> Self {
-        Self { schema_version: CURRENT_SCHEMA_VERSION, profiles: vec![CompositionProfile::default_profile()] }
+        Self {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            profiles: vec![CompositionProfile::default_profile()],
+        }
     }
 }
 
@@ -120,7 +201,10 @@ pub fn add_profile(
     if name.is_empty() {
         return Err("Enter a non-empty profile name.".to_owned());
     }
-    if profiles.iter().any(|profile| profile.name.eq_ignore_ascii_case(name)) {
+    if profiles
+        .iter()
+        .any(|profile| profile.name.eq_ignore_ascii_case(name))
+    {
         return Err("A profile with that name already exists.".to_owned());
     }
     let id = next_profile_id(profiles);
@@ -142,7 +226,8 @@ pub fn duplicate_profile(
     profiles: &mut Vec<CompositionProfile>,
     index: usize,
 ) -> Result<usize, String> {
-    let source = profiles.get(index)
+    let source = profiles
+        .get(index)
         .cloned()
         .ok_or_else(|| "The selected profile no longer exists.".to_owned())?;
     let mut copy = source.clone();
@@ -154,17 +239,26 @@ pub fn duplicate_profile(
 }
 
 fn next_profile_id(profiles: &[CompositionProfile]) -> String {
-    (1_u64..).map(|index| format!("profile-{index}"))
+    (1_u64..)
+        .map(|index| format!("profile-{index}"))
         .find(|candidate| profiles.iter().all(|profile| profile.id != *candidate))
         .expect("profile ID space exhausted")
 }
 
 fn unique_profile_name(profiles: &[CompositionProfile], base: &str) -> String {
-    if profiles.iter().all(|profile| !profile.name.eq_ignore_ascii_case(base)) {
+    if profiles
+        .iter()
+        .all(|profile| !profile.name.eq_ignore_ascii_case(base))
+    {
         return base.to_owned();
     }
-    (2_u64..).map(|index| format!("{base} {index}"))
-        .find(|candidate| profiles.iter().all(|profile| !profile.name.eq_ignore_ascii_case(candidate)))
+    (2_u64..)
+        .map(|index| format!("{base} {index}"))
+        .find(|candidate| {
+            profiles
+                .iter()
+                .all(|profile| !profile.name.eq_ignore_ascii_case(candidate))
+        })
         .expect("profile name space exhausted")
 }
 
@@ -176,36 +270,52 @@ pub struct ProfileRecovery {
 /// Load the versioned document, or migrate the former eframe `Vec<Profile>`
 /// shape. A malformed value recovers to a usable default profile with a visible diagnostic.
 pub fn decode_profiles(value: Option<&str>) -> (ProfileDocument, Option<ProfileRecovery>) {
-    let Some(value) = value else { return (ProfileDocument::default(), None) };
+    let Some(value) = value else {
+        return (ProfileDocument::default(), None);
+    };
     if let Ok(document) = serde_json::from_str::<ProfileDocument>(value) {
         if document.schema_version == CURRENT_SCHEMA_VERSION && !document.profiles.is_empty() {
             return (document, None);
         }
-        return (ProfileDocument::default(), Some(ProfileRecovery {
-            message: format!("Saved Studio profile schema {} is unsupported or empty; a default profile was opened. The saved value was left untouched in eframe storage.", document.schema_version),
-        }));
+        return (
+            ProfileDocument::default(),
+            Some(ProfileRecovery {
+                message: format!(
+                    "Saved Studio profile schema {} is unsupported or empty; a default profile was opened. The saved value was left untouched in eframe storage.",
+                    document.schema_version
+                ),
+            }),
+        );
     }
     #[derive(Deserialize)]
     struct LegacyProfile {
         name: String,
-        #[serde(default)] selected_content: Option<String>,
-        #[serde(default)] workspace_root: Option<PathBuf>,
+        #[serde(default)]
+        selected_content: Option<String>,
+        #[serde(default)]
+        workspace_root: Option<PathBuf>,
     }
-    if let Ok(legacy) = serde_json::from_str::<Vec<LegacyProfile>>(value) {
-        if !legacy.is_empty() {
-            let profiles = legacy.into_iter().enumerate().map(|(index, old)| CompositionProfile {
+    if let Ok(legacy) = serde_json::from_str::<Vec<LegacyProfile>>(value)
+        && !legacy.is_empty()
+    {
+        let profiles = legacy
+            .into_iter()
+            .enumerate()
+            .map(|(index, old)| CompositionProfile {
                 id: format!("profile-{}", index + 1),
                 name: old.name,
-                root_package: old.selected_content.map(|id| ContentIdentity { id, version: None }),
+                root_package: old
+                    .selected_content
+                    .map(|id| ContentIdentity { id, version: None }),
                 resolved_graph: None,
                 workspace: old.workspace_root.map(|root| WorkspaceAssociation { root }),
                 launch: LaunchSettings::default(),
                 installation: InstallationState::Unknown,
-            }).collect();
-            return (ProfileDocument { schema_version: CURRENT_SCHEMA_VERSION, profiles }, Some(ProfileRecovery {
-                message: "Migrated existing Studio profiles. Their selected content IDs were retained; exact versions and installation state will be resolved from the content source.".to_owned(),
-            }));
-        }
+            })
+            .collect();
+        return (ProfileDocument { schema_version: CURRENT_SCHEMA_VERSION, profiles }, Some(ProfileRecovery {
+            message: "Migrated existing Studio profiles. Their selected content IDs were retained; exact versions and installation state will be resolved from the content source.".to_owned(),
+        }));
     }
     (ProfileDocument::default(), Some(ProfileRecovery {
         message: "Saved Studio profiles could not be read; a default profile was opened. The saved value was left untouched in eframe storage.".to_owned(),

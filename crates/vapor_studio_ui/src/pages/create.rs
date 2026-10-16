@@ -1,5 +1,5 @@
-use eframe::egui;
 use super::super::StudioApp;
+use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_create(&mut self, ui: &mut egui::Ui) {
@@ -94,7 +94,9 @@ impl StudioApp {
                         &mut included,
                         format!(
                             "{} · {} · {}",
-                            id, content.kind, content.version.as_deref().unwrap_or("unversioned")
+                            id,
+                            content.kind,
+                            content.version.as_deref().unwrap_or("unversioned")
                         ),
                     )
                     .changed()
@@ -109,5 +111,4 @@ impl StudioApp {
         });
         ui.weak("The role manifest is created exclusively. The workspace registration is updated only after the project is written.");
     }
-
 }

@@ -5,27 +5,32 @@ mod operation_center;
 #[path = "pages/mod.rs"]
 mod pages;
 
-use eframe::egui;
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::collections::VecDeque;
-use std::thread;
-use std::fs;
-use vapor_core::{
-    ContentKind, DevelopmentOperation, VaporWorkspace, run_workspace_operation_at,
-};
 use crate::navigation::{CatalogSourceFilter, Section};
+use eframe::egui;
+use std::collections::VecDeque;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use vapor_core::{
+    ContentKind, DevelopmentOperation, OperationEvent as CoreOperationEvent,
+    OperationRequest as CoreOperationRequest, OperationService, VaporWorkspace,
+};
 use vapor_studio_core::{
-    CompositionProfile, OperationEvent, OperationId, OperationKind, OperationPhase,
-    OperationRequest, OperationStatus, ProfileDocument,
-    InstalledArtifactRecord, ContentIdentity, WorkspaceAssociation,
-    CURRENT_SCHEMA_VERSION, decode_profiles,
+    CURRENT_SCHEMA_VERSION, CompositionProfile, ContentIdentity, InstalledArtifactRecord,
+    OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
+    ProfileDocument, WorkspaceAssociation, decode_profiles,
 };
 
 enum OperationResult {
     Workspace(Result<VaporWorkspace, String>),
-    WorkspaceSelection(Result<(PathBuf, Vec<vapor_studio_core::SourceContent>, Result<Vec<vapor_studio_core::CatalogContent>, String>, Vec<PathBuf>), String>),
-    Discovery(Result<Vec<vapor_studio_core::SourceContent>, String>, Result<Vec<vapor_studio_core::CatalogContent>, String>),
+    WorkspaceSelection(Result<WorkspaceSelectionData, String>),
+    RememberedSources(Result<Vec<PathBuf>, String>),
+    Discovery(
+        Result<Vec<vapor_studio_core::SourceContent>, String>,
+        Result<Vec<vapor_studio_core::CatalogContent>, String>,
+    ),
     Message(Result<String, String>),
     CompositionPreview(Result<vapor_studio_core::CompositionPreview, String>),
     WorkspaceFiles(Result<Vec<PathBuf>, String>),
@@ -33,6 +38,8 @@ enum OperationResult {
     FileContents(Result<(PathBuf, String), String>),
     FileSaved(Result<PathBuf, String>),
     ContentWorkspace(Result<(PathBuf, String, Vec<PathBuf>), String>),
+    SourceCompositionLoaded(Result<vapor_studio_core::SourceComposition, String>),
+    SourceCompositionSaved(Result<vapor_studio_core::SourceComposition, String>),
     Install(Result<vapor_studio_core::InstalledComposition, String>),
     Update(Result<vapor_studio_core::InstalledComposition, String>),
     RunProfile(Result<vapor_studio_core::InstalledComposition, String>),
@@ -44,6 +51,56 @@ enum OperationResult {
     WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>),
     WorkshopSubscriptions(Result<Vec<vapor_studio_core::WorkshopSubscription>, String>),
     WorkshopSubscriptionChange(Result<(), String>, String, bool),
+}
+
+type WorkspaceSelectionData = (
+    PathBuf,
+    Vec<vapor_studio_core::SourceContent>,
+    Result<Vec<vapor_studio_core::CatalogContent>, String>,
+    Vec<PathBuf>,
+);
+
+fn operation_failure(result: &OperationResult) -> Option<String> {
+    match result {
+        OperationResult::Workspace(Err(error))
+        | OperationResult::WorkspaceSelection(Err(error))
+        | OperationResult::RememberedSources(Err(error))
+        | OperationResult::CompositionPreview(Err(error))
+        | OperationResult::Message(Err(error))
+        | OperationResult::WorkspaceFiles(Err(error))
+        | OperationResult::WorkspaceFileCreated(Err(error))
+        | OperationResult::FileContents(Err(error))
+        | OperationResult::FileSaved(Err(error))
+        | OperationResult::ContentWorkspace(Err(error))
+        | OperationResult::SourceCompositionLoaded(Err(error))
+        | OperationResult::SourceCompositionSaved(Err(error))
+        | OperationResult::Install(Err(error))
+        | OperationResult::Update(Err(error))
+        | OperationResult::RunProfile(Err(error))
+        | OperationResult::Verify(Err(error))
+        | OperationResult::Repair(Err(error))
+        | OperationResult::WorkshopStage(Err(error))
+        | OperationResult::WorkshopAcquisition(Err(error))
+        | OperationResult::WorkshopPublish(Err(error))
+        | OperationResult::WorkshopSearch(Err(error))
+        | OperationResult::WorkshopSubscriptions(Err(error))
+        | OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => Some(error.clone()),
+        OperationResult::Discovery(_, Err(error)) => Some(error.clone()),
+        OperationResult::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
+        _ => None,
+    }
+}
+
+fn apply_core_operation_event(
+    event: &CoreOperationEvent,
+    current: &mut OperationEvent,
+) {
+    if event.id != current.id {
+        return;
+    }
+    current.phase = event.phase;
+    current.progress = event.progress.clone();
+    current.status = event.status.clone();
 }
 
 pub struct StudioApp {
@@ -61,6 +118,11 @@ pub struct StudioApp {
     draft_content_version: String,
     draft_content_kind: ContentKind,
     draft_dependencies: Vec<String>,
+    composition_edit_selector: String,
+    composition_edit: Option<vapor_studio_core::SourceComposition>,
+    composition_original_links: Option<Vec<vapor_studio_core::SourceCompositionLink>>,
+    composition_link_candidate: String,
+    repreview_after_catalog_refresh: bool,
     starter_workspace_path: String,
     starter_workspace_organization: String,
     starter_workspace_name: String,
@@ -81,7 +143,8 @@ pub struct StudioApp {
     workshop_search_text: String,
     workshop_results: Vec<vapor_studio_core::WorkshopItem>,
     workshop_subscriptions: std::collections::BTreeSet<String>,
-    workshop_subscription_details: std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
+    workshop_subscription_details:
+        std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
     workshop_result_total: u32,
     workshop_page: u32,
     composition_preview: Option<vapor_studio_core::CompositionPreview>,
@@ -94,6 +157,7 @@ pub struct StudioApp {
     status: String,
     running: bool,
     receiver: Option<Receiver<(OperationId, OperationResult)>>,
+    latest_operation_event: Arc<Mutex<Option<CoreOperationEvent>>>,
     active_operation: Option<OperationEvent>,
     operation_history: VecDeque<OperationEvent>,
     diagnostics: vapor_devtools::app::DevtoolsApp,
@@ -122,12 +186,18 @@ impl StudioApp {
             .and_then(|storage| storage.get_string("active_profile_id"));
         let active_profile = saved_profile_id
             .as_deref()
-            .and_then(|id| profiles.iter().position(|profile| profile.id.as_str() == id))
-            .or_else(|| creation
-                .storage
-                .and_then(|storage| storage.get_string("active_profile"))
-                .and_then(|value| value.parse::<usize>().ok())
-                .filter(|index| *index < profiles.len()))
+            .and_then(|id| {
+                profiles
+                    .iter()
+                    .position(|profile| profile.id.as_str() == id)
+            })
+            .or_else(|| {
+                creation
+                    .storage
+                    .and_then(|storage| storage.get_string("active_profile"))
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|index| *index < profiles.len())
+            })
             .unwrap_or(0);
         let workspace_root = profiles[active_profile]
             .workspace
@@ -136,13 +206,23 @@ impl StudioApp {
             .unwrap_or_else(|| root.display().to_string());
         let workspace_root_draft = workspace_root.clone();
         let mut app = Self {
-            section: if play_mode { Section::Library } else { Section::Home },
+            section: if play_mode {
+                Section::Library
+            } else {
+                Section::Home
+            },
             workspace_root,
             workspace_root_draft,
             fallback_workspace_root: root,
             profiles,
-            profile_recovery: profile_recovery.as_ref().map(|recovery| recovery.message.clone()),
-            profile_recovery_backup: if profile_recovery.is_some() { saved_profiles } else { None },
+            profile_recovery: profile_recovery
+                .as_ref()
+                .map(|recovery| recovery.message.clone()),
+            profile_recovery_backup: if profile_recovery.is_some() {
+                saved_profiles
+            } else {
+                None
+            },
             active_profile,
             new_profile_name: String::new(),
             search_query: String::new(),
@@ -164,6 +244,11 @@ impl StudioApp {
             workshop_result_total: 0,
             workshop_page: 1,
             composition_preview: None,
+            composition_edit_selector: String::new(),
+            composition_edit: None,
+            composition_original_links: None,
+            composition_link_candidate: String::new(),
+            repreview_after_catalog_refresh: false,
             workspace_files: Vec::new(),
             selected_workspace_file: None,
             workspace_editor: String::new(),
@@ -183,6 +268,7 @@ impl StudioApp {
             status: "Choose a workspace or discover content in this folder.".to_owned(),
             running: false,
             receiver: None,
+            latest_operation_event: Arc::new(Mutex::new(None)),
             active_operation: None,
             operation_history: VecDeque::new(),
             diagnostics: vapor_devtools::connect(None),
@@ -197,12 +283,29 @@ impl StudioApp {
     }
 
     fn poll_operation(&mut self) {
+        let latest_event = self
+            .latest_operation_event
+            .lock()
+            .ok()
+            .and_then(|mut event| event.take());
+        if let (Some(event), Some(active)) = (latest_event.as_ref(), self.active_operation.as_mut())
+        {
+            apply_core_operation_event(event, active);
+        }
         let received = self.receiver.as_ref().map(|receiver| receiver.try_recv());
         let result = match received {
             Some(Ok(result)) => Some(result),
-            Some(Err(TryRecvError::Disconnected)) => self.active_operation.as_ref().map(|operation| {
-                (operation.id, OperationResult::Message(Err("The background operation stopped before returning a result.".to_owned())))
-            }),
+            Some(Err(TryRecvError::Disconnected)) => {
+                self.active_operation.as_ref().map(|operation| {
+                    (
+                        operation.id,
+                        OperationResult::Message(Err(
+                            "The background operation stopped before returning a result."
+                                .to_owned(),
+                        )),
+                    )
+                })
+            }
             Some(Err(TryRecvError::Empty)) | None => None,
         };
         if let Some((operation_id, result)) = result {
@@ -213,6 +316,7 @@ impl StudioApp {
                 OperationResult::WorkshopPublish(Ok(_))
                     | OperationResult::WorkshopAcquisition(Ok(_))
                     | OperationResult::ContentWorkspace(Ok(_))
+                    | OperationResult::SourceCompositionSaved(Ok(_))
             );
             let refresh_after_manifest_save = matches!(
                 &result,
@@ -223,31 +327,7 @@ impl StudioApp {
                 &result,
                 OperationResult::WorkshopSubscriptionChange(Ok(()), _, _)
             );
-            let failure = match &result {
-                OperationResult::Workspace(Err(error))
-                | OperationResult::WorkspaceSelection(Err(error))
-                | OperationResult::CompositionPreview(Err(error))
-                | OperationResult::Message(Err(error))
-                | OperationResult::WorkspaceFiles(Err(error))
-                | OperationResult::WorkspaceFileCreated(Err(error))
-                | OperationResult::FileContents(Err(error))
-                | OperationResult::FileSaved(Err(error))
-                | OperationResult::ContentWorkspace(Err(error))
-                | OperationResult::Install(Err(error))
-                | OperationResult::Update(Err(error))
-                | OperationResult::RunProfile(Err(error))
-                | OperationResult::Verify(Err(error))
-                | OperationResult::Repair(Err(error))
-                | OperationResult::WorkshopStage(Err(error))
-                | OperationResult::WorkshopAcquisition(Err(error))
-                | OperationResult::WorkshopPublish(Err(error))
-                | OperationResult::WorkshopSearch(Err(error))
-                | OperationResult::WorkshopSubscriptions(Err(error))
-                | OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => Some(error.clone()),
-                OperationResult::Discovery(_, Err(error)) => Some(error.clone()),
-                OperationResult::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
-                _ => None,
-            };
+            let failure = operation_failure(&result);
             match result {
                 OperationResult::Workspace(Ok(workspace)) => {
                     self.status = format!(
@@ -259,21 +339,37 @@ impl StudioApp {
                 }
                 OperationResult::Workspace(Err(error)) => self.status = error,
                 OperationResult::WorkspaceSelection(Err(error)) => self.status = error,
-                OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => self.activate_workspace(root, contents, catalog, files),
+                OperationResult::RememberedSources(Err(error)) => self.status = error,
+                OperationResult::RememberedSources(Ok(known)) => {
+                    self.registered_sources = known;
+                    self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
+                }
+                OperationResult::WorkspaceSelection(Ok((root, contents, catalog, files))) => {
+                    self.activate_workspace(root, contents, catalog, files)
+                }
                 OperationResult::Discovery(source_result, catalog_result) => {
                     let source_error = match source_result {
-                        Ok(contents) => { self.contents = contents; None }
-                        Err(error) => { self.contents.clear(); Some(error) }
+                        Ok(contents) => {
+                            self.contents = contents;
+                            None
+                        }
+                        Err(error) => {
+                            self.contents.clear();
+                            Some(error)
+                        }
                     };
                     match catalog_result {
                         Ok(catalog) => {
                             let count = catalog.len();
                             self.catalog = catalog;
-                            self.status = if self.profiles[self.active_profile].workspace.is_some() {
+                            self.status = if self.profiles[self.active_profile].workspace.is_some()
+                            {
                                 source_error.map(|error| format!("Found {count} local items, but workspace sources could not load: {error}"))
                                     .unwrap_or_else(|| format!("Discovered {count} local content identities across workspace, cache, and installation."))
                             } else {
-                                format!("Discovered {count} cached and installed content identities.")
+                                format!(
+                                    "Discovered {count} cached and installed content identities."
+                                )
                             };
                         }
                         Err(error) => {
@@ -285,7 +381,20 @@ impl StudioApp {
                             );
                         }
                     }
-                    if self.selected_catalog_content.as_ref().is_some_and(|identity| !self.catalog.iter().any(|content| catalog_content_selector(content) == *identity)) {
+                    if self.repreview_after_catalog_refresh {
+                        self.repreview_after_catalog_refresh = false;
+                        self.preview_selected_composition();
+                    }
+                    if self
+                        .selected_catalog_content
+                        .as_ref()
+                        .is_some_and(|identity| {
+                            !self
+                                .catalog
+                                .iter()
+                                .any(|content| catalog_content_selector(content) == *identity)
+                        })
+                    {
                         self.selected_catalog_content = None;
                     }
                 }
@@ -295,31 +404,47 @@ impl StudioApp {
                 | OperationResult::WorkspaceFileCreated(Err(error))
                 | OperationResult::FileContents(Err(error))
                 | OperationResult::FileSaved(Err(error))
-                | OperationResult::ContentWorkspace(Err(error)) => self.status = error,
+                | OperationResult::ContentWorkspace(Err(error))
+                | OperationResult::SourceCompositionLoaded(Err(error))
+                | OperationResult::SourceCompositionSaved(Err(error)) => self.status = error,
                 OperationResult::Verify(Err(error)) => {
                     let artifacts = match self.profiles[self.active_profile].installation.clone() {
                         vapor_studio_core::InstallationState::Installed { artifacts, .. }
-                        | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. } => artifacts,
+                        | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. } => {
+                            artifacts
+                        }
                         _ => Vec::new(),
                     };
-                    self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::NeedsRepair {
-                        detail: error.clone(), artifacts,
-                    };
+                    self.profiles[self.active_profile].installation =
+                        vapor_studio_core::InstallationState::NeedsRepair {
+                            detail: error.clone(),
+                            artifacts,
+                        };
                     self.status = format!("Could not verify the full composition: {error}");
                 }
                 OperationResult::Install(Err(error))
                 | OperationResult::Update(Err(error))
                 | OperationResult::RunProfile(Err(error))
                 | OperationResult::Repair(Err(error)) => {
-                    self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::Partial { detail: error.clone() };
+                    self.profiles[self.active_profile].installation =
+                        vapor_studio_core::InstallationState::Partial {
+                            detail: error.clone(),
+                        };
                     self.status = error;
                 }
                 OperationResult::Message(Ok(message)) => self.status = message,
                 OperationResult::CompositionPreview(Ok(preview)) => {
                     self.status = if preview.ready() {
-                        format!("Resolved {} content nodes. This composition is ready to install.", preview.nodes.len())
+                        format!(
+                            "Resolved {} content nodes. This composition is ready to install.",
+                            preview.nodes.len()
+                        )
                     } else {
-                        format!("Resolved {} available nodes with {} blocker(s). Review the plan before installing.", preview.nodes.len(), preview.blockers.len())
+                        format!(
+                            "Resolved {} available nodes with {} blocker(s). Review the plan before installing.",
+                            preview.nodes.len(),
+                            preview.blockers.len()
+                        )
                     };
                     self.composition_preview = Some(preview);
                 }
@@ -329,34 +454,62 @@ impl StudioApp {
                 | OperationResult::WorkshopSearch(Err(error))
                 | OperationResult::WorkshopSubscriptions(Err(error)) => self.status = error,
                 OperationResult::WorkshopAcquisition(Ok(acquisition)) => {
-                    self.status = format!("Downloaded {} ({}) into Vapor's cache.", acquisition.id, acquisition.kind);
+                    self.status = format!(
+                        "Downloaded {} ({}) into Vapor's cache.",
+                        acquisition.id, acquisition.kind
+                    );
                     self.pending_workshop = Some(acquisition);
                 }
                 OperationResult::WorkshopPublish(Ok(publication)) => {
                     self.status = format!(
                         "{} Workshop item {}{}; receipt saved at {}.",
-                        if publication.created { "Created" } else { "Updated" },
+                        if publication.created {
+                            "Created"
+                        } else {
+                            "Updated"
+                        },
                         publication.id,
-                        publication.published_file_id.as_ref().map(|id| format!(" · PublishedFileId {id}")).unwrap_or_default(),
+                        publication
+                            .published_file_id
+                            .as_ref()
+                            .map(|id| format!(" · PublishedFileId {id}"))
+                            .unwrap_or_default(),
                         publication.receipt.display(),
                     );
                     self.workshop_preview = None;
                     self.workshop_confirmation.clear();
                 }
                 OperationResult::WorkshopStage(Ok(preview)) => {
-                    self.status = format!("Staged {} · {} files · {} bytes.", preview.id, preview.files, preview.bytes);
+                    self.status = format!(
+                        "Staged {} · {} files · {} bytes.",
+                        preview.id, preview.files, preview.bytes
+                    );
                     self.workshop_preview = Some(preview);
                 }
                 OperationResult::WorkshopSearch(Ok(page)) => {
                     self.workshop_page = page.page;
                     self.workshop_result_total = page.total_results;
                     self.workshop_results = page.items;
-                    self.status = format!("Steam Workshop returned {} items on page {} of {}.", self.workshop_results.len(), self.workshop_page, self.workshop_result_total);
+                    self.status = format!(
+                        "Steam Workshop returned {} items on page {} of {}.",
+                        self.workshop_results.len(),
+                        self.workshop_page,
+                        self.workshop_result_total
+                    );
                 }
                 OperationResult::WorkshopSubscriptions(Ok(subscriptions)) => {
-                    self.workshop_subscriptions = subscriptions.iter().map(|item| item.published_file_id.clone()).collect();
-                    self.workshop_subscription_details = subscriptions.into_iter().map(|item| (item.published_file_id.clone(), item)).collect();
-                    self.status = format!("Loaded {} Steam Workshop subscriptions.", self.workshop_subscriptions.len());
+                    self.workshop_subscriptions = subscriptions
+                        .iter()
+                        .map(|item| item.published_file_id.clone())
+                        .collect();
+                    self.workshop_subscription_details = subscriptions
+                        .into_iter()
+                        .map(|item| (item.published_file_id.clone(), item))
+                        .collect();
+                    self.status = format!(
+                        "Loaded {} Steam Workshop subscriptions.",
+                        self.workshop_subscriptions.len()
+                    );
                 }
                 OperationResult::WorkshopSubscriptionChange(Ok(()), id, subscribed) => {
                     if subscribed {
@@ -365,9 +518,18 @@ impl StudioApp {
                         self.workshop_subscriptions.remove(&id);
                         self.workshop_subscription_details.remove(&id);
                     }
-                    self.status = format!("{} Steam Workshop item {id}.", if subscribed { "Subscribed to" } else { "Unsubscribed from" });
+                    self.status = format!(
+                        "{} Steam Workshop item {id}.",
+                        if subscribed {
+                            "Subscribed to"
+                        } else {
+                            "Unsubscribed from"
+                        }
+                    );
                 }
-                OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => self.status = error,
+                OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => {
+                    self.status = error
+                }
                 OperationResult::WorkspaceFiles(Ok(files)) => {
                     self.workspace_files = files;
                     self.status = format!("Found {} workspace files.", self.workspace_files.len());
@@ -395,7 +557,8 @@ impl StudioApp {
                 }
                 OperationResult::FileSaved(Ok(path)) => {
                     if self.selected_workspace_file.as_ref() == Some(&path) {
-                        self.workspace_editor_original.clone_from(&self.workspace_editor);
+                        self.workspace_editor_original
+                            .clone_from(&self.workspace_editor);
                         self.refresh_workspace_editor_toml_diagnostic();
                         self.workspace_editor_dirty = false;
                     }
@@ -411,43 +574,80 @@ impl StudioApp {
                     self.section = Section::Workspace;
                     self.status = "Created content and opened its manifest.".to_owned();
                 }
+                OperationResult::SourceCompositionLoaded(Ok(composition)) => {
+                    self.composition_edit_selector = composition.id.clone();
+                    self.composition_original_links = Some(composition.links.clone());
+                    self.composition_edit = Some(composition);
+                    self.status = "Loaded the source Packagepack graph. Review its edges before saving.".to_owned();
+                }
+                OperationResult::SourceCompositionSaved(Ok(composition)) => {
+                    let selected_root = self.profiles[self.active_profile].root_package.as_ref()
+                        .is_some_and(|root| root.id == composition.id);
+                    self.composition_original_links = Some(composition.links.clone());
+                    self.composition_edit = Some(composition);
+                    if selected_root {
+                        self.profiles[self.active_profile].resolved_graph = None;
+                        self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::NotInstalled;
+                        self.repreview_after_catalog_refresh = true;
+                    }
+                    self.status = "Saved the Packagepack graph. Studio is refreshing its catalog and composition plan.".to_owned();
+                }
                 OperationResult::Install(Ok(composition)) => {
                     self.composition_preview = None;
+                    let graph_fingerprint =
+                        vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                     self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                    self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint: None,
-                    };
-                    self.status = "Installed the complete resolved composition through Vapor Shell.".to_owned();
+                    self.profiles[self.active_profile].installation =
+                        vapor_studio_core::InstallationState::Installed {
+                            artifacts: installed_records(composition.artifacts),
+                            graph_fingerprint,
+                        };
+                    self.status =
+                        "Installed the complete resolved composition through Vapor Shell."
+                            .to_owned();
                 }
                 OperationResult::Update(Ok(composition)) => {
                     self.composition_preview = None;
+                    let graph_fingerprint =
+                        vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                     self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                    self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint: None,
-                    };
+                    self.profiles[self.active_profile].installation =
+                        vapor_studio_core::InstallationState::Installed {
+                            artifacts: installed_records(composition.artifacts),
+                            graph_fingerprint,
+                        };
                     self.status = "Updated the selected composition from its current workspace or cache sources.".to_owned();
                 }
                 OperationResult::RunProfile(Ok(composition)) => {
                     self.composition_preview = None;
+                    let graph_fingerprint =
+                        vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                     self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                    self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint: None,
-                    };
+                    self.profiles[self.active_profile].installation =
+                        vapor_studio_core::InstallationState::Installed {
+                            artifacts: installed_records(composition.artifacts),
+                            graph_fingerprint,
+                        };
                     self.status = "Finished playing the selected source composition.".to_owned();
                 }
                 OperationResult::Repair(Ok(composition)) => {
                     self.composition_preview = None;
+                    let graph_fingerprint =
+                        vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
                     self.profiles[self.active_profile].resolved_graph = Some(composition.graph);
-                    self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::Installed {
-                        artifacts: installed_records(composition.artifacts),
-                        graph_fingerprint: None,
-                    };
-                    self.status = "Repaired the selected composition through Vapor Shell.".to_owned();
+                    self.profiles[self.active_profile].installation =
+                        vapor_studio_core::InstallationState::Installed {
+                            artifacts: installed_records(composition.artifacts),
+                            graph_fingerprint,
+                        };
+                    self.status =
+                        "Repaired the selected composition through Vapor Shell.".to_owned();
                 }
                 OperationResult::Verify(Ok(check)) => {
+                    let graph_fingerprint = check
+                        .graph
+                        .as_ref()
+                        .and_then(vapor_studio_core::fingerprint_resolved_graph);
                     if let Some(graph) = check.graph {
                         self.profiles[self.active_profile].resolved_graph = Some(graph);
                     }
@@ -455,24 +655,35 @@ impl StudioApp {
                     let detail = check.detail.join("; ");
                     let artifacts = installed_records(check.artifacts);
                     if check.ok {
-                        self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::Installed {
-                            artifacts,
-                            graph_fingerprint: None,
-                        };
-                        self.status = format!("Installed composition verified. {checked} graph nodes checked.");
+                        self.profiles[self.active_profile].installation =
+                            vapor_studio_core::InstallationState::Installed {
+                                artifacts,
+                                graph_fingerprint,
+                            };
+                        self.status = format!(
+                            "Installed composition verified. {checked} graph nodes checked."
+                        );
                     } else {
-                        self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::NeedsRepair {
-                            detail: detail.clone(), artifacts,
-                        };
+                        self.profiles[self.active_profile].installation =
+                            vapor_studio_core::InstallationState::NeedsRepair {
+                                detail: detail.clone(),
+                                artifacts,
+                            };
                         self.status = format!("Installed composition needs repair: {detail}");
                     }
                 }
             }
-            if let Some(event) = self.active_operation.as_mut().filter(|event| event.id == operation_id) {
-                event.phase = OperationPhase::Finished;
+            if let Some(event) = self
+                .active_operation
+                .as_mut()
+                .filter(|event| event.id == operation_id)
+            {
+                event.phase = OperationPhase::Finalizing;
                 event.status = match failure {
                     Some(message) => OperationStatus::Failed { message },
-                    None => OperationStatus::Succeeded { summary: self.status.clone() },
+                    None => OperationStatus::Succeeded {
+                        summary: self.status.clone(),
+                    },
                 };
                 self.operation_history.push_front(event.clone());
                 self.operation_history.truncate(20);
@@ -489,21 +700,28 @@ impl StudioApp {
 
     fn refresh_content_catalog(&mut self) {
         self.composition_preview = None;
-        let root = self.profiles.get(self.active_profile)
+        let root = self
+            .profiles
+            .get(self.active_profile)
             .and_then(|profile| profile.workspace.as_ref())
             .map(|workspace| workspace.root.clone());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Content action succeeded; catalog refresh failed: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Content action succeeded; catalog refresh failed: {error}");
+                return;
+            }
         };
-        self.spawn(OperationKind::Discover, move || {
+        self.spawn(OperationKind::Discover, move |_context| {
             let (source, catalog) = discover_workspace_and_catalog(&executable, root.as_deref());
             OperationResult::Discovery(source, catalog)
         });
     }
 
     fn run_operation(&mut self, operation: DevelopmentOperation) {
-        if !self.require_saved_workspace("run a workspace operation") { return; }
+        if !self.require_saved_workspace("run a workspace operation") {
+            return;
+        }
         let root = PathBuf::from(self.workspace_root.trim());
         let kind = match operation {
             DevelopmentOperation::Fmt => OperationKind::Fmt,
@@ -512,25 +730,33 @@ impl StudioApp {
             DevelopmentOperation::Build => OperationKind::Build,
             DevelopmentOperation::Clean => OperationKind::Clean,
         };
-        self.spawn(kind, move || {
+        self.spawn(kind, move |context| {
             OperationResult::Workspace(
-                run_workspace_operation_at(&root, operation).map_err(|error| error.to_string()),
+                vapor_core::run_workspace_operation_at_with_context(&root, operation, &context)
+                    .map_err(|error| error.to_string()),
             )
         });
         self.status = format!("Running Vapor-managed {operation}…");
     }
 
     fn discover(&mut self) {
-        if !self.require_saved_workspace("refresh workspace content") { return; }
+        if !self.require_saved_workspace("refresh workspace content") {
+            return;
+        }
         self.workshop_preview = None;
-        let root = self.profiles.get(self.active_profile)
+        let root = self
+            .profiles
+            .get(self.active_profile)
             .and_then(|profile| profile.workspace.as_ref())
             .map(|workspace| workspace.root.clone());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
-        self.spawn(OperationKind::Discover, move || {
+        self.spawn(OperationKind::Discover, move |_context| {
             let (source, catalog) = discover_workspace_and_catalog(&executable, root.as_deref());
             OperationResult::Discovery(source, catalog)
         });
@@ -550,11 +776,17 @@ impl StudioApp {
         self.profiles[self.active_profile].workspace = Some(WorkspaceAssociation { root });
         self.profiles[self.active_profile].root_package = None;
         self.profiles[self.active_profile].resolved_graph = None;
-        self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::Unknown;
+        self.profiles[self.active_profile].installation =
+            vapor_studio_core::InstallationState::Unknown;
         self.contents = contents;
         self.catalog = catalog.unwrap_or_default();
         self.selected_catalog_content = None;
         self.composition_preview = None;
+        self.composition_edit = None;
+        self.composition_original_links = None;
+        self.composition_edit_selector.clear();
+        self.composition_link_candidate.clear();
+        self.repreview_after_catalog_refresh = false;
         self.workshop_preview = None;
         self.workspace_files = files;
         self.selected_workspace_file = None;
@@ -573,28 +805,35 @@ impl StudioApp {
     pub(super) fn open_workspace_path(&mut self, path: PathBuf) {
         if self.workspace_editor_dirty {
             self.workspace_root_draft = self.workspace_root.clone();
-            self.status = "Save or discard the current editor changes before changing workspaces.".to_owned();
+            self.status =
+                "Save or discard the current editor changes before changing workspaces.".to_owned();
             return;
         }
         if path.as_os_str().is_empty() {
             self.status = "Enter a workspace folder path.".to_owned();
             return;
         }
-        if path == PathBuf::from(self.workspace_root.trim()) {
+        if path == Path::new(self.workspace_root.trim()) {
             self.status = "That workspace is already open for this profile.".to_owned();
             return;
         }
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         let selected = path.clone();
-        self.spawn(OperationKind::OpenWorkspace, move || {
+        self.spawn(OperationKind::OpenWorkspace, move |_context| {
             let result = fs::canonicalize(&selected)
                 .map_err(|error| format!("{}: {error}", selected.display()))
                 .and_then(|root| {
+                    VaporWorkspace::load(&root)
+                        .map_err(|error| format!("{} is not a valid Vapor Workspace: {error}", root.display()))?;
                     let contents = vapor_studio_core::discover_source_content(&executable, &root)?;
-                    let catalog = vapor_studio_core::discover_content_catalog(&executable, Some(&root));
+                    let catalog =
+                        vapor_studio_core::discover_content_catalog(&executable, Some(&root));
                     discover_workspace_files(&root).map(|files| (root, contents, catalog, files))
                 });
             OperationResult::WorkspaceSelection(result)
@@ -603,127 +842,228 @@ impl StudioApp {
     }
 
     fn validate_selected_source(&mut self) {
-        if !self.require_saved_workspace("validate source content") { return; }
-        let Some(root_package) = self.profiles.get(self.active_profile).and_then(|profile| profile.root_package.clone()) else {
+        if !self.require_saved_workspace("validate source content") {
+            return;
+        }
+        let Some(root_package) = self
+            .profiles
+            .get(self.active_profile)
+            .and_then(|profile| profile.root_package.clone())
+        else {
             return;
         };
         let root = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         let selector = content_selector(&root_package);
-        self.spawn(OperationKind::Validate, move || {
-            OperationResult::Message(vapor_studio_core::validate_profile_source(&executable, &root, &selector))
+        self.spawn(OperationKind::Validate, move |_context| {
+            OperationResult::Message(vapor_studio_core::validate_profile_source(
+                &executable,
+                &root,
+                &selector,
+            ))
         });
         self.status = "Validating the selected source through Vapor Shell…".to_owned();
     }
 
     pub(super) fn validate_workspace_source(&mut self) {
-        if !self.require_saved_workspace("validate workspace content") { return; }
+        if !self.require_saved_workspace("validate workspace content") {
+            return;
+        }
         let root = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
-        self.spawn(OperationKind::Validate, move || {
-            OperationResult::Message(vapor_studio_core::validate_workspace_source(&executable, &root))
+        self.spawn(OperationKind::Validate, move |_context| {
+            OperationResult::Message(vapor_studio_core::validate_workspace_source(
+                &executable,
+                &root,
+            ))
         });
         self.status = "Validating authored content through Vapor…".to_owned();
     }
 
     fn install_selected(&mut self) {
-        if !self.require_saved_workspace("install this workspace composition") { return; }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else { return; };
-        let Some(root_package) = profile.root_package else { return; };
+        if !self.require_saved_workspace("install this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
         let workspace = profile.workspace.map(|workspace| workspace.root);
         let executable = match std::env::current_exe() {
             Ok(executable) => executable,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
-        let selector = root_package.version.as_deref()
+        let selector = root_package
+            .version
+            .as_deref()
             .map(|version| format!("{}@{}", root_package.id, version))
             .unwrap_or_else(|| root_package.id.clone());
-        self.spawn(OperationKind::Install, move || {
+        self.spawn(OperationKind::Install, move |_context| {
             OperationResult::Install(vapor_studio_core::install_profile_composition(
-                &executable, workspace.as_deref(), &selector,
+                &executable,
+                workspace.as_deref(),
+                &selector,
             ))
         });
         self.status = "Installing the selected composition and dependencies…".to_owned();
     }
 
     fn update_selected(&mut self) {
-        if !self.require_saved_workspace("update this workspace composition") { return; }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else { return; };
-        let Some(root_package) = profile.root_package else { return; };
+        if !self.require_saved_workspace("update this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
         let workspace = profile.workspace.map(|workspace| workspace.root);
         let executable = match std::env::current_exe() {
             Ok(executable) => executable,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         let selector = content_selector(&root_package);
-        self.spawn(OperationKind::Update, move || OperationResult::Update(
-            vapor_studio_core::update_profile_composition(&executable, workspace.as_deref(), &selector)
-        ));
+        self.spawn(OperationKind::Update, move |_context| {
+            OperationResult::Update(vapor_studio_core::update_profile_composition(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+            ))
+        });
         self.status = "Updating the selected composition through Vapor Shell…".to_owned();
     }
 
     pub(super) fn preview_selected_composition(&mut self) {
-        if !self.require_saved_workspace("resolve this workspace composition") { return; }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else { return; };
-        let Some(root_package) = profile.root_package else { return; };
+        if !self.require_saved_workspace("resolve this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
         let selector = content_selector(&root_package);
         let workspace = profile.workspace.map(|workspace| workspace.root);
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         self.composition_preview = None;
-        self.spawn(OperationKind::Resolve, move || OperationResult::CompositionPreview(
-            vapor_studio_core::preview_profile_composition(&executable, workspace.as_deref(), &selector)
-        ));
-        self.status = "Resolving this profile against workspace, cache, and installed content…".to_owned();
+        self.spawn(OperationKind::Resolve, move |_context| {
+            OperationResult::CompositionPreview(vapor_studio_core::preview_profile_composition(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+            ))
+        });
+        self.status =
+            "Resolving this profile against workspace, cache, and installed content…".to_owned();
+    }
+
+    fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
+        self.catalog.iter().any(|content| {
+            catalog_content_selector(content) == selector && !content.is_unambiguous()
+        })
     }
 
     pub(super) fn stage_workshop_content(&mut self, selector: String) {
-        if !self.require_saved_workspace("stage this Workshop item") { return; }
+        if self.catalog_identity_is_conflicted(&selector) {
+            self.status = format!(
+                "Cannot stage {selector}: local records for this exact version disagree. Review the catalog conflict first."
+            );
+            return;
+        }
+        if !self.require_saved_workspace("stage this Workshop item") {
+            return;
+        }
         let workspace = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = error.to_string(); return; }
+            Err(error) => {
+                self.status = error.to_string();
+                return;
+            }
         };
-        self.spawn(OperationKind::StageWorkshop, move || OperationResult::WorkshopStage(
-            vapor_studio_core::stage_workshop_preview(&executable, &workspace, &selector)
-        ));
+        self.spawn(OperationKind::StageWorkshop, move |_context| {
+            OperationResult::WorkshopStage(vapor_studio_core::stage_workshop_preview(
+                &executable,
+                &workspace,
+                &selector,
+            ))
+        });
         self.status = "Building and staging a Workshop review package…".to_owned();
     }
 
     pub(super) fn publish_reviewed_workshop_content(
-        &mut self, selector: String, expected_fingerprint: String,
+        &mut self,
+        selector: String,
+        expected_fingerprint: String,
     ) {
-        if !self.require_saved_workspace("publish this Workshop item") { return; }
+        if self.catalog_identity_is_conflicted(&selector) {
+            self.status = format!(
+                "Cannot publish {selector}: local records for this exact version disagree. Review the catalog conflict first."
+            );
+            return;
+        }
+        if !self.require_saved_workspace("publish this Workshop item") {
+            return;
+        }
         let account = self.workshop_account.trim().to_owned();
         if account.is_empty() {
-            self.status = "Enter the Steam publisher account used by the local SteamCMD provider.".to_owned();
+            self.status =
+                "Enter the Steam publisher account used by the local SteamCMD provider.".to_owned();
             return;
         }
         let expected_confirmation = format!("PUBLISH {selector}");
         if self.workshop_confirmation.trim() != expected_confirmation {
-            self.status = format!("Type {expected_confirmation} exactly to authorize this Workshop upload.");
+            self.status =
+                format!("Type {expected_confirmation} exactly to authorize this Workshop upload.");
             return;
         }
         let workspace = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = error.to_string(); return; }
+            Err(error) => {
+                self.status = error.to_string();
+                return;
+            }
         };
         let change_note = self.workshop_change_note.trim().to_owned();
-        self.spawn(OperationKind::PublishWorkshop, move || OperationResult::WorkshopPublish(
-            vapor_studio_core::publish_reviewed_workshop_content(
-                &executable, &workspace, &selector, &expected_fingerprint, &account,
+        self.spawn(OperationKind::PublishWorkshop, move |_context| {
+            OperationResult::WorkshopPublish(vapor_studio_core::publish_reviewed_workshop_content(
+                &executable,
+                &workspace,
+                &selector,
+                &expected_fingerprint,
+                &account,
                 (!change_note.is_empty()).then_some(change_note.as_str()),
-            )
-        ));
+            ))
+        });
         self.status = "Uploading the reviewed Workshop artifact through Vapor Shell…".to_owned();
     }
 
@@ -734,23 +1074,35 @@ impl StudioApp {
             return;
         }
         if !published_file_id.bytes().all(|byte| byte.is_ascii_digit()) {
-            self.status = "Workshop downloads currently require a numeric PublishedFileId.".to_owned();
+            self.status =
+                "Workshop downloads currently require a numeric PublishedFileId.".to_owned();
             return;
         }
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
-        self.spawn(OperationKind::Acquire, move || OperationResult::WorkshopAcquisition(
-            vapor_studio_core::download_workshop_item(&executable, &published_file_id)
-        ));
+        self.spawn(OperationKind::Acquire, move |_context| {
+            OperationResult::WorkshopAcquisition(vapor_studio_core::download_workshop_item(
+                &executable,
+                &published_file_id,
+            ))
+        });
         self.status = "Downloading the public Workshop item into Vapor's cache…".to_owned();
     }
 
     pub(super) fn use_workshop_as_profile_root(&mut self) {
-        let Some(acquisition) = self.pending_workshop.as_ref() else { return; };
+        let Some(acquisition) = self.pending_workshop.as_ref() else {
+            return;
+        };
         if acquisition.kind != "packagepack" {
-            self.status = format!("{} is a {}, so it cannot be a composition root.", acquisition.id, acquisition.kind);
+            self.status = format!(
+                "{} is a {}, so it cannot be a composition root.",
+                acquisition.id, acquisition.kind
+            );
             return;
         }
         let identity = ContentIdentity {
@@ -761,46 +1113,151 @@ impl StudioApp {
         self.section = Section::Library;
     }
 
+    pub(super) fn use_available_workshop_package_as_profile_root(&mut self, published_file_id: &str) {
+        let matches = self
+            .catalog
+            .iter()
+            .filter(|content| {
+                content.published_file_id.as_deref() == Some(published_file_id)
+                    && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                    && content.is_unambiguous()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let Some(content) = matches.first().cloned() else {
+            self.status = format!(
+                "Workshop item {published_file_id} is available locally, but no Packagepack was found."
+            );
+            return;
+        };
+        if matches.len() > 1 {
+            self.selected_catalog_content = Some(catalog_content_selector(&content));
+            self.catalog_source_filter = CatalogSourceFilter::Workshop;
+            self.catalog_kind_filter = Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
+            self.search_query = published_file_id.to_owned();
+            self.section = Section::Discover;
+            self.status = format!(
+                "Workshop item {published_file_id} has multiple local Packagepack versions. Choose the exact version in the catalog before assigning it."
+            );
+            return;
+        }
+        let workspace = content.locations.iter()
+            .find(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
+            .map(|location| location.root.clone());
+        let identity = ContentIdentity {
+            id: content.id,
+            version: content.version,
+        };
+        self.assign_profile_root(identity, workspace);
+        self.section = Section::Library;
+    }
+
     fn verify_selected_installation(&mut self) {
-        let Some(root_package) = self.profiles.get(self.active_profile).and_then(|profile| profile.root_package.clone()) else { return; };
-        let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = error.to_string(); return; } };
-        let selectors = self.profiles[self.active_profile].resolved_graph.as_ref()
-            .map(|graph| graph.nodes.iter().map(|node| content_selector(&node.content)).collect())
+        let Some(root_package) = self
+            .profiles
+            .get(self.active_profile)
+            .and_then(|profile| profile.root_package.clone())
+        else {
+            return;
+        };
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = error.to_string();
+                return;
+            }
+        };
+        let selectors = self.profiles[self.active_profile]
+            .resolved_graph
+            .as_ref()
+            .map(|graph| {
+                graph
+                    .nodes
+                    .iter()
+                    .map(|node| content_selector(&node.content))
+                    .collect()
+            })
             .unwrap_or_else(|| vec![content_selector(&root_package)]);
-        self.spawn(OperationKind::Verify, move || OperationResult::Verify(
-            vapor_studio_core::verify_installation(&executable, &content_selector(&root_package), &selectors)
-        ));
+        self.spawn(OperationKind::Verify, move |_context| {
+            OperationResult::Verify(vapor_studio_core::verify_installation(
+                &executable,
+                &content_selector(&root_package),
+                &selectors,
+            ))
+        });
         self.status = "Verifying installed composition…".to_owned();
     }
 
     fn repair_selected_installation(&mut self) {
-        if !self.require_saved_workspace("repair this workspace composition") { return; }
-        let Some(root_package) = self.profiles.get(self.active_profile).and_then(|profile| profile.root_package.clone()) else { return; };
-        let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = error.to_string(); return; } };
-        let workspace = self.profiles[self.active_profile].workspace.as_ref().map(|workspace| workspace.root.clone());
+        if !self.require_saved_workspace("repair this workspace composition") {
+            return;
+        }
+        let Some(root_package) = self
+            .profiles
+            .get(self.active_profile)
+            .and_then(|profile| profile.root_package.clone())
+        else {
+            return;
+        };
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = error.to_string();
+                return;
+            }
+        };
+        let workspace = self.profiles[self.active_profile]
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root.clone());
         let selector = content_selector(&root_package);
-        let graph_selectors = self.profiles[self.active_profile].resolved_graph.as_ref()
-            .map(|graph| graph.nodes.iter().map(|node| content_selector(&node.content)).collect::<Vec<_>>())
+        let graph_selectors = self.profiles[self.active_profile]
+            .resolved_graph
+            .as_ref()
+            .map(|graph| {
+                graph
+                    .nodes
+                    .iter()
+                    .map(|node| content_selector(&node.content))
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
-        self.spawn(OperationKind::Repair, move || OperationResult::Repair(
-            vapor_studio_core::repair_profile_composition(&executable, workspace.as_deref(), &selector, &graph_selectors)
-        ));
+        self.spawn(OperationKind::Repair, move |_context| {
+            OperationResult::Repair(vapor_studio_core::repair_profile_composition(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+                &graph_selectors,
+            ))
+        });
         self.status = "Repairing installed composition…".to_owned();
     }
 
     fn run_installed_selected(&mut self) {
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else { return; };
-        let Some(root_package) = profile.root_package else { return; };
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         let selector = content_selector(&root_package);
         let workspace = profile.workspace.map(|workspace| workspace.root);
         let arguments = profile.launch.arguments;
-        self.spawn(OperationKind::RunInstalled, move || OperationResult::Message(
-            vapor_studio_core::run_installed_profile(&executable, workspace.as_deref(), &selector, &arguments)
-        ));
+        self.spawn(OperationKind::RunInstalled, move |_context| {
+            OperationResult::Message(vapor_studio_core::run_installed_profile(
+                &executable,
+                workspace.as_deref(),
+                &selector,
+                &arguments,
+            ))
+        });
         self.status = "Launching the installed composition for this profile…".to_owned();
     }
 
@@ -808,37 +1265,63 @@ impl StudioApp {
         if self.profiles[self.active_profile].root_package.is_none() {
             let executable = match std::env::current_exe() {
                 Ok(value) => value,
-                Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+                Err(error) => {
+                    self.status = format!("Could not locate the Studio executable: {error}");
+                    return;
+                }
             };
             match vapor_studio_core::default_packagepack_selector(&executable, "default") {
-                Ok(id) => self.profiles[self.active_profile].root_package = Some(ContentIdentity { id, version: None }),
-                Err(error) => { self.status = format!("This app has no default playable composition: {error}"); return; }
+                Ok(id) => {
+                    self.profiles[self.active_profile].root_package =
+                        Some(ContentIdentity { id, version: None })
+                }
+                Err(error) => {
+                    self.status = format!("This app has no default playable composition: {error}");
+                    return;
+                }
             }
         }
         self.run_installed_selected();
     }
 
     fn run_selected(&mut self) {
-        if !self.require_saved_workspace("build and play this workspace composition") { return; }
-        let Some(profile) = self.profiles.get(self.active_profile).cloned() else { return; };
-        let Some(root_package) = profile.root_package else { return; };
-        let Some(workspace) = profile.workspace.map(|workspace| workspace.root) else { return; };
+        if !self.require_saved_workspace("build and play this workspace composition") {
+            return;
+        }
+        let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
+            return;
+        };
+        let Some(root_package) = profile.root_package else {
+            return;
+        };
+        let Some(workspace) = profile.workspace.map(|workspace| workspace.root) else {
+            return;
+        };
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         let selector = content_selector(&root_package);
         let arguments = profile.launch.arguments;
-        self.spawn(OperationKind::Run, move || {
+        self.spawn(OperationKind::Run, move |_context| {
             OperationResult::RunProfile(vapor_studio_core::run_source_profile(
-                &executable, &workspace, &selector, &arguments,
+                &executable,
+                &workspace,
+                &selector,
+                &arguments,
             ))
         });
-        self.status = "Installing source changes and launching this profile through Vapor Shell…".to_owned();
+        self.status =
+            "Installing source changes and launching this profile through Vapor Shell…".to_owned();
     }
 
     fn require_saved_workspace(&mut self, action: &str) -> bool {
-        if !self.workspace_editor_dirty { return true; }
+        if !self.workspace_editor_dirty {
+            return true;
+        }
         self.status = format!(
             "Save or reload the open file before you {action}; Vapor operations read saved files from disk.",
         );
@@ -847,51 +1330,70 @@ impl StudioApp {
 
     fn refresh_workspace_files(&mut self) {
         let root = PathBuf::from(self.workspace_root.trim());
-        self.spawn(OperationKind::DiscoverWorkspace, move || {
+        self.spawn(OperationKind::DiscoverWorkspace, move |_context| {
             OperationResult::WorkspaceFiles(discover_workspace_files(&root))
         });
         self.status = "Reading workspace files…".to_owned();
     }
 
     fn refresh_workspace_editor_toml_diagnostic(&mut self) {
-        self.workspace_editor_toml_diagnostic = self.selected_workspace_file.as_deref()
+        self.workspace_editor_toml_diagnostic = self
+            .selected_workspace_file
+            .as_deref()
             .filter(|path| {
-                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
                 name == "Vapor.toml" || name.ends_with(".vapor.toml") || name == "Cargo.toml"
             })
-            .map(|_| self.workspace_editor.parse::<toml::Value>()
-                .map(|_| ())
-                .map_err(|error| error.to_string()));
+            .map(|_| {
+                self.workspace_editor
+                    .parse::<toml::Value>()
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            });
     }
 
     fn open_workspace_file(&mut self, path: PathBuf) {
         if self.workspace_editor_dirty {
-            self.status = "Save or discard the current editor changes before opening another file.".to_owned();
+            self.status = "Save or discard the current editor changes before opening another file."
+                .to_owned();
             return;
         }
         let root = PathBuf::from(self.workspace_root.trim());
-        self.spawn(OperationKind::OpenWorkspaceFile, move || {
-            OperationResult::FileContents(read_workspace_file(&root, &path).map(|contents| (path, contents)))
+        self.spawn(OperationKind::OpenWorkspaceFile, move |_context| {
+            OperationResult::FileContents(
+                read_workspace_file(&root, &path).map(|contents| (path, contents)),
+            )
         });
         self.status = "Opening workspace file…".to_owned();
     }
 
     fn save_workspace_file(&mut self) {
-        let Some(path) = self.selected_workspace_file.clone() else { return; };
+        let Some(path) = self.selected_workspace_file.clone() else {
+            return;
+        };
         let root = PathBuf::from(self.workspace_root.trim());
         let expected_contents = self.workspace_editor_original.clone();
         let contents = self.workspace_editor.clone();
-        self.spawn(OperationKind::SaveWorkspaceFile, move || {
-            OperationResult::FileSaved(write_workspace_file(&root, &path, &expected_contents, &contents).map(|()| path))
+        self.spawn(OperationKind::SaveWorkspaceFile, move |_context| {
+            OperationResult::FileSaved(
+                write_workspace_file(&root, &path, &expected_contents, &contents).map(|()| path),
+            )
         });
         self.status = "Saving workspace file…".to_owned();
     }
 
     pub(super) fn reload_workspace_file(&mut self) {
-        let Some(path) = self.selected_workspace_file.clone() else { return; };
+        let Some(path) = self.selected_workspace_file.clone() else {
+            return;
+        };
         let root = PathBuf::from(self.workspace_root.trim());
-        self.spawn(OperationKind::OpenWorkspaceFile, move || {
-            OperationResult::FileContents(read_workspace_file(&root, &path).map(|contents| (path, contents)))
+        self.spawn(OperationKind::OpenWorkspaceFile, move |_context| {
+            OperationResult::FileContents(
+                read_workspace_file(&root, &path).map(|contents| (path, contents)),
+            )
         });
         self.status = "Reloading workspace file from disk…".to_owned();
     }
@@ -903,7 +1405,7 @@ impl StudioApp {
             self.status = "Enter a file path relative to the workspace root.".to_owned();
             return;
         }
-        self.spawn(OperationKind::CreateWorkspaceFile, move || {
+        self.spawn(OperationKind::CreateWorkspaceFile, move |_context| {
             OperationResult::WorkspaceFileCreated(create_new_workspace_file(&root, &relative))
         });
         self.status = "Creating a new workspace file…".to_owned();
@@ -912,56 +1414,94 @@ impl StudioApp {
     pub(in crate::app) fn search_workshop(&mut self) {
         let query = self.workshop_search_text.trim().to_owned();
         let page = self.workshop_page;
-        self.spawn(OperationKind::Discover, move || OperationResult::WorkshopSearch(
-            vapor_studio_core::search_workshop(
+        self.spawn(OperationKind::Discover, move |_context| {
+            OperationResult::WorkshopSearch(vapor_studio_core::search_workshop(
                 vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
                 &query,
                 page,
-            ),
-        ));
+            ))
+        });
         self.status = "Searching Steam Workshop…".to_owned();
     }
 
     pub(in crate::app) fn refresh_workshop_subscriptions(&mut self) {
-        self.spawn(OperationKind::Discover, move || OperationResult::WorkshopSubscriptions(
-            vapor_studio_core::workshop_subscriptions(vapor_sdk_core::root::types::ROOT_STEAM_APP_ID),
-        ));
+        self.spawn(OperationKind::Discover, move |_context| {
+            OperationResult::WorkshopSubscriptions(vapor_studio_core::workshop_subscriptions(
+                vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
+            ))
+        });
         self.status = "Loading Steam Workshop subscriptions…".to_owned();
     }
 
     pub(in crate::app) fn set_workshop_subscription(&mut self, id: String, subscribed: bool) {
         let parsed_id = match id.parse::<u64>() {
             Ok(id) if id != 0 => id,
-            _ => { self.status = "Steam returned an invalid PublishedFileId.".to_owned(); return; }
+            _ => {
+                self.status = "Steam returned an invalid PublishedFileId.".to_owned();
+                return;
+            }
         };
-        self.spawn(OperationKind::Discover, move || OperationResult::WorkshopSubscriptionChange(
-            if subscribed {
-                vapor_studio_core::subscribe_workshop_item(vapor_sdk_core::root::types::ROOT_STEAM_APP_ID, parsed_id)
-            } else {
-                vapor_studio_core::unsubscribe_workshop_item(vapor_sdk_core::root::types::ROOT_STEAM_APP_ID, parsed_id)
-            },
-            id,
-            subscribed,
-        ));
-        self.status = if subscribed { "Subscribing to Steam Workshop item…" } else { "Unsubscribing from Steam Workshop item…" }.to_owned();
+        self.spawn(OperationKind::Discover, move |_context| {
+            OperationResult::WorkshopSubscriptionChange(
+                if subscribed {
+                    vapor_studio_core::subscribe_workshop_item(
+                        vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
+                        parsed_id,
+                    )
+                } else {
+                    vapor_studio_core::unsubscribe_workshop_item(
+                        vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
+                        parsed_id,
+                    )
+                },
+                id,
+                subscribed,
+            )
+        });
+        self.status = if subscribed {
+            "Subscribing to Steam Workshop item…"
+        } else {
+            "Unsubscribing from Steam Workshop item…"
+        }
+        .to_owned();
     }
 
-    fn spawn(&mut self, kind: OperationKind, operation: impl FnOnce() -> OperationResult + Send + 'static) {
+    fn spawn(
+        &mut self,
+        kind: OperationKind,
+        operation: impl FnOnce(vapor_core::OperationContext) -> OperationResult + Send + 'static,
+    ) {
         let request = OperationRequest {
             id: OperationId::fresh(),
-            profile_id: self.profiles.get(self.active_profile).map(|profile| profile.id.clone()),
+            profile_id: self
+                .profiles
+                .get(self.active_profile)
+                .map(|profile| profile.id.clone()),
             kind,
         };
         let phase = match &request.kind {
-            OperationKind::Resolve | OperationKind::Discover | OperationKind::OpenWorkspace | OperationKind::DiscoverWorkspace => OperationPhase::Resolving,
+            OperationKind::Resolve
+            | OperationKind::LoadComposition
+            | OperationKind::Discover
+            | OperationKind::OpenWorkspace
+            | OperationKind::RememberWorkspace
+            | OperationKind::DiscoverWorkspace => OperationPhase::Resolving,
             OperationKind::CreateWorkspace => OperationPhase::Building,
-            OperationKind::CreateWorkspaceFile => OperationPhase::Building,
+            OperationKind::CreateWorkspaceFile | OperationKind::SaveComposition => OperationPhase::Building,
             OperationKind::Acquire => OperationPhase::Acquiring,
-            OperationKind::Install | OperationKind::Update | OperationKind::Repair => OperationPhase::Installing,
+            OperationKind::Install | OperationKind::Update | OperationKind::Repair => {
+                OperationPhase::Installing
+            }
             OperationKind::Verify | OperationKind::Validate => OperationPhase::Verifying,
-            OperationKind::Build | OperationKind::Check | OperationKind::Test | OperationKind::Fmt | OperationKind::Clean => OperationPhase::Building,
+            OperationKind::Build
+            | OperationKind::Check
+            | OperationKind::Test
+            | OperationKind::Fmt
+            | OperationKind::Clean => OperationPhase::Building,
             OperationKind::Run | OperationKind::RunInstalled => OperationPhase::Running,
-            OperationKind::StageWorkshop | OperationKind::StageRootDistribution => OperationPhase::Staging,
+            OperationKind::StageWorkshop | OperationKind::StageRootDistribution => {
+                OperationPhase::Staging
+            }
             OperationKind::PublishWorkshop => OperationPhase::Publishing,
             _ => OperationPhase::Queued,
         };
@@ -974,9 +1514,36 @@ impl StudioApp {
             status: OperationStatus::Running,
         });
         let operation_id = request.id;
+        let initial_phase = phase.clone();
+        let core_request = CoreOperationRequest {
+            id: request.id,
+            domain: "studio".to_owned(),
+            action: request.kind.action().to_owned(),
+        };
+        if let Ok(mut latest) = self.latest_operation_event.lock() {
+            *latest = None;
+        }
+        let latest_event = Arc::clone(&self.latest_operation_event);
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
-            let _ = sender.send((operation_id, operation()));
+            let sink: vapor_core::OperationEventSink = Arc::new(move |event| {
+                if let Ok(mut latest) = latest_event.lock() {
+                    *latest = Some(event);
+                }
+            });
+            let result = OperationService::run_observed(
+                core_request,
+                sink,
+                |context| {
+                    context.set_phase(initial_phase);
+                    operation(context)
+                },
+                |result| match operation_failure(result) {
+                    Some(message) => Err(message),
+                    None => Ok("Completed".to_owned()),
+                },
+            );
+            let _ = sender.send((operation_id, result));
         });
         self.receiver = Some(receiver);
         self.running = true;
@@ -992,13 +1559,17 @@ impl StudioApp {
                 .clicked()
             {
                 self.section = section;
-                if section == Section::Workspace && self.workspace_files.is_empty() && !self.running {
+                if section == Section::Workspace && self.workspace_files.is_empty() && !self.running
+                {
                     self.refresh_workspace_files();
                 }
             }
         }
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            if ui.selectable_label(self.section == Section::Diagnostics, "Diagnostics").clicked() {
+            if ui
+                .selectable_label(self.section == Section::Diagnostics, "Diagnostics")
+                .clicked()
+            {
                 self.section = Section::Diagnostics;
             }
             ui.separator();
@@ -1026,7 +1597,13 @@ impl StudioApp {
             }
             ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text("Search content"))
                 .on_hover_text("Search the current catalog");
-            if ui.add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("+ Profile")).clicked() {
+            if ui
+                .add_enabled(
+                    !self.running && !self.workspace_editor_dirty,
+                    egui::Button::new("+ Profile"),
+                )
+                .clicked()
+            {
                 self.new_profile_name = format!("Composition {}", self.profiles.len() + 1);
                 self.add_profile();
             }
@@ -1039,13 +1616,18 @@ impl StudioApp {
     }
 
     pub(super) fn select_profile(&mut self, index: usize) {
-        if self.running || index >= self.profiles.len() { return; }
+        if self.running || index >= self.profiles.len() {
+            return;
+        }
         if self.workspace_editor_dirty {
-            self.status = "Save or discard the current editor changes before switching profiles.".to_owned();
+            self.status =
+                "Save or discard the current editor changes before switching profiles.".to_owned();
             return;
         }
         self.active_profile = index;
-        self.workspace_root = self.profiles[index].workspace.as_ref()
+        self.workspace_root = self.profiles[index]
+            .workspace
+            .as_ref()
             .map(|workspace| workspace.root.display().to_string())
             .unwrap_or_else(|| self.fallback_workspace_root.display().to_string());
         self.workspace_root_draft = self.workspace_root.clone();
@@ -1069,14 +1651,26 @@ impl StudioApp {
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
     ) {
-        let next_workspace = workspace.clone().unwrap_or_else(|| self.fallback_workspace_root.clone());
-        if self.workspace_editor_dirty
-            && PathBuf::from(self.workspace_root.trim()) != next_workspace
-        {
-            self.status = "Save or discard editor changes before assigning content from another workspace.".to_owned();
+        let next_workspace = workspace
+            .clone()
+            .unwrap_or_else(|| self.fallback_workspace_root.clone());
+        if self.catalog.iter().any(|content| {
+            content.identity() == identity
+                && !content.is_unambiguous()
+        }) {
+            self.status = format!(
+                "Cannot select {}: its local workspace, cache, or installed records disagree. Review the catalog conflicts first.",
+                content_selector(&identity)
+            );
             return;
         }
-        let workspace_changed = PathBuf::from(self.workspace_root.trim()) != next_workspace;
+        if self.workspace_editor_dirty && Path::new(self.workspace_root.trim()) != next_workspace {
+            self.status =
+                "Save or discard editor changes before assigning content from another workspace."
+                    .to_owned();
+            return;
+        }
+        let workspace_changed = Path::new(self.workspace_root.trim()) != next_workspace;
         let profile = &mut self.profiles[self.active_profile];
         profile.root_package = Some(identity.clone());
         profile.workspace = workspace.map(|root| WorkspaceAssociation { root });
@@ -1084,6 +1678,11 @@ impl StudioApp {
         profile.installation = vapor_studio_core::InstallationState::NotInstalled;
         self.composition_preview = None;
         if workspace_changed {
+            self.composition_edit = None;
+            self.composition_original_links = None;
+            self.composition_edit_selector.clear();
+            self.composition_link_candidate.clear();
+            self.repreview_after_catalog_refresh = false;
             self.workspace_root = next_workspace.display().to_string();
             self.workspace_root_draft = self.workspace_root.clone();
             self.contents.clear();
@@ -1100,18 +1699,22 @@ impl StudioApp {
         }
         self.status = format!(
             "Selected {} for profile {}. Preview its dependency plan before installing.",
-            content_selector(&identity), self.profiles[self.active_profile].name,
+            content_selector(&identity),
+            self.profiles[self.active_profile].name,
         );
+        self.section = Section::Library;
     }
 
     fn add_profile(&mut self) {
         let name = self.new_profile_name.trim();
         let workspace = PathBuf::from(self.workspace_root.trim());
-        let index = match vapor_studio_core::add_profile(
-            &mut self.profiles, name, Some(workspace),
-        ) {
+        let index = match vapor_studio_core::add_profile(&mut self.profiles, name, Some(workspace))
+        {
             Ok(index) => index,
-            Err(error) => { self.status = error; return; }
+            Err(error) => {
+                self.status = error;
+                return;
+            }
         };
         self.active_profile = index;
         self.new_profile_name.clear();
@@ -1122,18 +1725,24 @@ impl StudioApp {
     }
 
     pub(super) fn duplicate_active_profile(&mut self) {
-        if self.running || self.workspace_editor_dirty { return; }
+        if self.running || self.workspace_editor_dirty {
+            return;
+        }
         let source_name = self.profiles[self.active_profile].name.clone();
-        let index = match vapor_studio_core::duplicate_profile(&mut self.profiles, self.active_profile) {
-            Ok(index) => index,
-            Err(error) => { self.status = error; return; }
-        };
+        let index =
+            match vapor_studio_core::duplicate_profile(&mut self.profiles, self.active_profile) {
+                Ok(index) => index,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            };
         self.select_profile(index);
         self.status = format!("Duplicated {source_name} as {}.", self.profiles[index].name);
     }
 
     fn preview_steam_package(&mut self) {
-        self.spawn(OperationKind::StageRootDistribution, || {
+        self.spawn(OperationKind::StageRootDistribution, |_context| {
             let result = vapor_sdk_core::root::package::root_package(
                 &vapor_sdk_core::root::types::RootPackageRequest {
                     plan: true,
@@ -1159,27 +1768,73 @@ impl StudioApp {
         self.status = "Preparing a read-only Steam root package plan…".to_owned();
     }
 
+    pub(super) fn load_source_composition(&mut self) {
+        if !self.require_saved_workspace("edit a Packagepack composition") { return; }
+        let selector = self.composition_edit_selector.trim().to_owned();
+        if selector.is_empty() { self.status = "Select a source Packagepack first.".to_owned(); return; }
+        let root = PathBuf::from(self.workspace_root.trim());
+        let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; } };
+        self.spawn(OperationKind::LoadComposition, move |_context| {
+            OperationResult::SourceCompositionLoaded(vapor_studio_core::load_source_composition(&executable, &root, &selector))
+        });
+        self.status = format!("Loading {selector} through Vapor Shell…");
+    }
+
+    pub(super) fn save_source_composition(&mut self) {
+        if !self.require_saved_workspace("save a Packagepack composition") { return; }
+        let Some(composition) = self.composition_edit.clone() else { self.status = "Load a source Packagepack before saving.".to_owned(); return; };
+        let root = PathBuf::from(self.workspace_root.trim());
+        let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; } };
+        self.spawn(OperationKind::SaveComposition, move |_context| {
+            OperationResult::SourceCompositionSaved(vapor_studio_core::save_source_composition(
+                &executable, &root, &composition.id, &composition.source, &composition.links,
+            ))
+        });
+        self.status = "Validating and saving the Packagepack graph through Vapor Shell…".to_owned();
+    }
+
+    pub(super) fn use_edited_composition_for_profile(&mut self) {
+        let Some(composition) = self.composition_edit.as_ref() else { self.status = "Load a source Packagepack first.".to_owned(); return; };
+        let root = ContentIdentity { id: composition.id.clone(), version: composition.version.clone() };
+        self.assign_profile_root(root, Some(PathBuf::from(self.workspace_root.trim())));
+        self.preview_selected_composition();
+    }
+
     fn create_content_workspace(&mut self) {
-        if !self.require_saved_workspace("create content in this workspace") { return; }
+        if !self.require_saved_workspace("create content in this workspace") {
+            return;
+        }
         let root = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         let id = self.draft_content_id.trim().to_owned();
         let version = self.draft_content_version.trim().to_owned();
         let selected = self.draft_dependencies.clone();
         let kind = self.draft_content_kind;
-        self.spawn(OperationKind::CreateContent, move || {
+        self.spawn(OperationKind::CreateContent, move |_context| {
             let result = vapor_studio_core::create_content_workspace(
-                &executable, &root, &id, &version, kind, &selected,
-            ).and_then(|output| {
+                &executable,
+                &root,
+                &id,
+                &version,
+                kind,
+                &selected,
+            )
+            .and_then(|output| {
                 let workspace = fs::canonicalize(&root)
                     .map_err(|error| format!("{}: {error}", root.display()))?;
                 let manifest = output;
-                let relative = manifest.strip_prefix(&workspace)
+                let relative = manifest
+                    .strip_prefix(&workspace)
                     .map(PathBuf::from)
-                    .map_err(|error| format!("created manifest is outside the workspace: {error}"))?;
+                    .map_err(|error| {
+                        format!("created manifest is outside the workspace: {error}")
+                    })?;
                 let contents = fs::read_to_string(&manifest)
                     .map_err(|error| format!("{}: {error}", manifest.display()))?;
                 let files = discover_workspace_files(&workspace)?;
@@ -1191,7 +1846,9 @@ impl StudioApp {
     }
 
     pub(super) fn create_starter_workspace(&mut self) {
-        if !self.require_saved_workspace("create and open a starter workspace") { return; }
+        if !self.require_saved_workspace("create and open a starter workspace") {
+            return;
+        }
         let destination = PathBuf::from(self.starter_workspace_path.trim());
         if destination.as_os_str().is_empty() {
             self.status = "Choose an empty folder for the new starter workspace.".to_owned();
@@ -1201,24 +1858,56 @@ impl StudioApp {
         let name = self.starter_workspace_name.trim().to_owned();
         let executable = match std::env::current_exe() {
             Ok(value) => value,
-            Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; }
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return;
+            }
         };
         let open_executable = executable.clone();
-        self.spawn(OperationKind::CreateWorkspace, move || {
+        self.spawn(OperationKind::CreateWorkspace, move |_context| {
             let result = vapor_studio_core::create_basic_content_workspace(
-                &executable, &destination, &organization, &name,
-            ).and_then(|root| {
+                &executable,
+                &destination,
+                &organization,
+                &name,
+            )
+            .and_then(|root| {
                 vapor_studio_core::discover_source_content(&open_executable, &root)
                     .and_then(|contents| {
-                        let catalog = vapor_studio_core::discover_content_catalog(&open_executable, Some(&root));
+                        let catalog = vapor_studio_core::discover_content_catalog(
+                            &open_executable,
+                            Some(&root),
+                        );
                         discover_workspace_files(&root)
                             .map(|files| (root.clone(), contents, catalog, files))
                     })
-                    .map_err(|error| format!("Created workspace at {}, but Studio could not open it: {error}", root.display()))
+                    .map_err(|error| {
+                        format!(
+                            "Created workspace at {}, but Studio could not open it: {error}",
+                            root.display()
+                        )
+                    })
             });
             OperationResult::WorkspaceSelection(result)
         });
-        self.status = "Creating the maintained Engine, Game, and Packagepack starter workspace…".to_owned();
+        self.status =
+            "Creating the maintained Engine, Game, and Packagepack starter workspace…".to_owned();
+    }
+
+    pub(super) fn remember_open_workspace(&mut self) {
+        let root = PathBuf::from(self.workspace_root.trim());
+        if root.as_os_str().is_empty() {
+            self.status = "Open a workspace before adding it to Vapor sources.".to_owned();
+            return;
+        }
+        if self.registered_sources.iter().any(|source| source == &root) {
+            self.status = "This workspace is already registered with Vapor.".to_owned();
+            return;
+        }
+        self.spawn(OperationKind::RememberWorkspace, move |_context| {
+            OperationResult::RememberedSources(vapor_studio_core::remember_workspace(&root))
+        });
+        self.status = "Adding the open workspace to this Vapor installation…".to_owned();
     }
 
     fn refresh_registered_sources(&mut self) {
@@ -1248,15 +1937,18 @@ impl StudioApp {
     }
 }
 
-
-
-fn installed_records(artifacts: Vec<vapor_studio_core::InstalledArtifact>) -> Vec<InstalledArtifactRecord> {
-    artifacts.into_iter().map(|artifact| InstalledArtifactRecord {
-        id: artifact.id,
-        version: artifact.version,
-        root: artifact.root,
-        fingerprint: artifact.fingerprint,
-    }).collect()
+fn installed_records(
+    artifacts: Vec<vapor_studio_core::InstalledArtifact>,
+) -> Vec<InstalledArtifactRecord> {
+    artifacts
+        .into_iter()
+        .map(|artifact| InstalledArtifactRecord {
+            id: artifact.id,
+            version: artifact.version,
+            root: artifact.root,
+            fingerprint: artifact.fingerprint,
+        })
+        .collect()
 }
 
 fn discover_workspace_and_catalog(
@@ -1274,21 +1966,23 @@ fn discover_workspace_and_catalog(
 }
 
 fn content_selector(identity: &ContentIdentity) -> String {
-    identity.version.as_deref()
+    identity
+        .version
+        .as_deref()
         .map(|version| format!("{}@{}", identity.id, version))
         .unwrap_or_else(|| identity.id.clone())
 }
 
 pub(crate) fn source_content_selector(content: &vapor_studio_core::SourceContent) -> String {
-    content.version.as_deref()
+    content
+        .version
+        .as_deref()
         .map(|version| format!("{}@{version}", content.id))
         .unwrap_or_else(|| content.id.clone())
 }
 
 pub(crate) fn catalog_content_selector(content: &vapor_studio_core::CatalogContent) -> String {
-    content.version.as_deref()
-        .map(|version| format!("{}@{version}", content.id))
-        .unwrap_or_else(|| content.id.clone())
+    content_selector(&content.identity())
 }
 
 pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {
@@ -1307,23 +2001,41 @@ pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {
 }
 
 fn discover_workspace_files(root: &std::path::Path) -> Result<Vec<PathBuf>, String> {
-    let root = std::fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
+    let root =
+        std::fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
     let mut pending = vec![root.clone()];
     let mut files = Vec::new();
     while let Some(directory) = pending.pop() {
-        let entries = fs::read_dir(&directory).map_err(|error| format!("{}: {error}", directory.display()))?;
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| format!("{}: {error}", directory.display()))?;
         for entry in entries {
             let entry = entry.map_err(|error| error.to_string())?;
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with('.') || matches!(name.as_ref(), "target" | "node_modules" | "vendor" | "output") { continue; }
+            if name.starts_with('.')
+                || matches!(
+                    name.as_ref(),
+                    "target" | "node_modules" | "vendor" | "output"
+                )
+            {
+                continue;
+            }
             let file_type = entry.file_type().map_err(|error| error.to_string())?;
             if file_type.is_dir() {
                 pending.push(entry.path());
             } else if file_type.is_file() {
-                let relative = entry.path().strip_prefix(&root).map_err(|error| error.to_string())?.to_path_buf();
+                let relative = entry
+                    .path()
+                    .strip_prefix(&root)
+                    .map_err(|error| error.to_string())?
+                    .to_path_buf();
                 files.push(relative);
-                if files.len() > 10_000 { return Err("workspace contains more than 10,000 visible files; narrow the source root".to_owned()); }
+                if files.len() > 10_000 {
+                    return Err(
+                        "workspace contains more than 10,000 visible files; narrow the source root"
+                            .to_owned(),
+                    );
+                }
             }
         }
     }
@@ -1331,18 +2043,36 @@ fn discover_workspace_files(root: &std::path::Path) -> Result<Vec<PathBuf>, Stri
     Ok(files)
 }
 
-fn safe_workspace_file(root: &std::path::Path, relative: &std::path::Path) -> Result<PathBuf, String> {
+fn safe_workspace_file(
+    root: &std::path::Path,
+    relative: &std::path::Path,
+) -> Result<PathBuf, String> {
     let root = fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
-    let path = fs::canonicalize(root.join(relative)).map_err(|error| format!("{}: {error}", relative.display()))?;
-    if !path.starts_with(&root) || !path.is_file() { return Err("selected path is not a regular file inside the workspace".to_owned()); }
+    let path = fs::canonicalize(root.join(relative))
+        .map_err(|error| format!("{}: {error}", relative.display()))?;
+    if !path.starts_with(&root) || !path.is_file() {
+        return Err("selected path is not a regular file inside the workspace".to_owned());
+    }
     Ok(path)
 }
 
-fn read_workspace_file(root: &std::path::Path, relative: &std::path::Path) -> Result<String, String> {
+fn read_workspace_file(
+    root: &std::path::Path,
+    relative: &std::path::Path,
+) -> Result<String, String> {
     let path = safe_workspace_file(root, relative)?;
     let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
-    if metadata.len() > 4 * 1024 * 1024 { return Err("files larger than 4 MiB open as preview-only in a future Studio editor".to_owned()); }
-    fs::read_to_string(&path).map_err(|error| format!("{} is not a readable UTF-8 text file: {error}", relative.display()))
+    if metadata.len() > 4 * 1024 * 1024 {
+        return Err(
+            "files larger than 4 MiB open as preview-only in a future Studio editor".to_owned(),
+        );
+    }
+    fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "{} is not a readable UTF-8 text file: {error}",
+            relative.display()
+        )
+    })
 }
 
 fn write_workspace_file(
@@ -1352,8 +2082,8 @@ fn write_workspace_file(
     contents: &str,
 ) -> Result<(), String> {
     let path = safe_workspace_file(root, relative)?;
-    let current = fs::read_to_string(&path)
-        .map_err(|error| format!("{}: {error}", relative.display()))?;
+    let current =
+        fs::read_to_string(&path).map_err(|error| format!("{}: {error}", relative.display()))?;
     if current != expected_contents {
         return Err(format!(
             "{} changed on disk after it was opened; reload it before saving to avoid overwriting those edits",
@@ -1363,28 +2093,46 @@ fn write_workspace_file(
     fs::write(&path, contents).map_err(|error| format!("{}: {error}", relative.display()))
 }
 
-fn create_new_workspace_file(root: &std::path::Path, relative: &std::path::Path) -> Result<PathBuf, String> {
+fn create_new_workspace_file(
+    root: &std::path::Path,
+    relative: &std::path::Path,
+) -> Result<PathBuf, String> {
     use std::path::Component;
 
     if relative.as_os_str().is_empty()
-        || relative.components().any(|component| !matches!(component, Component::Normal(_)))
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
     {
-        return Err("file path must be relative and cannot contain '.', '..', or root components".to_owned());
+        return Err(
+            "file path must be relative and cannot contain '.', '..', or root components"
+                .to_owned(),
+        );
     }
     let root = fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
     let requested = root.join(relative);
-    let parent = requested.parent().ok_or_else(|| "file path has no parent directory".to_owned())?;
-    let parent = fs::canonicalize(parent).map_err(|error| format!("{}: {error}", parent.display()))?;
+    let parent = requested
+        .parent()
+        .ok_or_else(|| "file path has no parent directory".to_owned())?;
+    let parent =
+        fs::canonicalize(parent).map_err(|error| format!("{}: {error}", parent.display()))?;
     if !parent.starts_with(&root) || !parent.is_dir() {
         return Err("file path must stay inside an existing workspace directory".to_owned());
     }
-    let name = requested.file_name().ok_or_else(|| "file path must include a filename".to_owned())?;
+    let name = requested
+        .file_name()
+        .ok_or_else(|| "file path must include a filename".to_owned())?;
     let target = parent.join(name);
     let _file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&target)
-        .map_err(|error| format!("could not create {} without overwriting: {error}", relative.display()))?;
+        .map_err(|error| {
+            format!(
+                "could not create {} without overwriting: {error}",
+                relative.display()
+            )
+        })?;
     Ok(relative.to_path_buf())
 }
 
@@ -1396,15 +2144,18 @@ pub(super) fn catalog_matches_filters(
 ) -> bool {
     let source_matches = match source_filter {
         CatalogSourceFilter::All => true,
-        CatalogSourceFilter::Workspace => content.locations.iter().any(|location| {
-            location.kind == vapor_studio_core::CatalogLocationKind::Workspace
-        }),
-        CatalogSourceFilter::Cache => content.locations.iter().any(|location| {
-            location.kind == vapor_studio_core::CatalogLocationKind::Cache
-        }),
-        CatalogSourceFilter::Installed => content.locations.iter().any(|location| {
-            location.kind == vapor_studio_core::CatalogLocationKind::Installed
-        }),
+        CatalogSourceFilter::Workspace => content
+            .locations
+            .iter()
+            .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace),
+        CatalogSourceFilter::Cache => content
+            .locations
+            .iter()
+            .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Cache),
+        CatalogSourceFilter::Installed => content
+            .locations
+            .iter()
+            .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Installed),
         CatalogSourceFilter::Workshop => content.published_file_id.is_some(),
     };
     if !source_matches || kind_filter.is_some_and(|kind| content.kind != kind) {
@@ -1414,8 +2165,17 @@ pub(super) fn catalog_matches_filters(
     query.is_empty()
         || content.id.to_lowercase().contains(&query)
         || content.kind.to_lowercase().contains(&query)
-        || content.version.as_deref().unwrap_or_default().to_lowercase().contains(&query)
-        || content.published_file_id.as_deref().unwrap_or_default().contains(&query)
+        || content
+            .version
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains(&query)
+        || content
+            .published_file_id
+            .as_deref()
+            .unwrap_or_default()
+            .contains(&query)
 }
 
 impl eframe::App for StudioApp {
@@ -1431,6 +2191,7 @@ impl eframe::App for StudioApp {
                 Section::Home => self.draw_home(ui),
                 Section::Discover => self.draw_discover(ui),
                 Section::Library => self.draw_library(ui),
+                Section::Compose => self.draw_composition(ui),
                 Section::Create => self.draw_create(ui),
                 Section::Workspace => self.draw_workspace(ui),
                 Section::Diagnostics => {

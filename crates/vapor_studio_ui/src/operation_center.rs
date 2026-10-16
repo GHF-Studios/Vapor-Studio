@@ -1,44 +1,53 @@
-use eframe::egui;
 use super::StudioApp;
+use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("studio-operation-center").show(ui, |ui| {
-            egui::CollapsingHeader::new(if self.running { "Operation running" } else { "Operations and activity" })
-                .default_open(self.running)
-                .show(ui, |ui| {
-                    if let Some(operation) = &self.active_operation {
-                        ui.horizontal(|ui| {
-                            if self.running { ui.spinner(); }
-                            ui.strong(operation_kind_label(&operation.kind));
-                            ui.label(operation_phase_label(&operation.phase));
-                            ui.label(&self.status);
-                        });
-                        if let Some(progress) = &operation.progress {
-                            if let Some(total) = progress.total {
-                                let fraction = if total == 0 { 0.0 } else {
-                                    (progress.completed as f32 / total as f32).clamp(0.0, 1.0)
-                                };
-                                ui.add(egui::ProgressBar::new(fraction).text(format!(
-                                    "{} / {} {}", progress.completed, total, progress.unit
-                                )));
-                            } else {
-                                ui.label(format!("{} {}", progress.completed, progress.unit));
-                            }
+            egui::CollapsingHeader::new(if self.running {
+                "Operation running"
+            } else {
+                "Operations and activity"
+            })
+            .default_open(self.running)
+            .show(ui, |ui| {
+                if let Some(operation) = &self.active_operation {
+                    ui.horizontal(|ui| {
+                        if self.running {
+                            ui.spinner();
                         }
-                        if let Some(profile_id) = &operation.profile_id {
-                            ui.small(format!("Profile {profile_id}"));
-                        }
-                    } else {
+                        ui.strong(operation_kind_label(&operation.kind));
+                        ui.label(operation_phase_label(&operation.phase));
                         ui.label(&self.status);
+                    });
+                    if let Some(progress) = &operation.progress {
+                        if let Some(total) = progress.total {
+                            let fraction = if total == 0 {
+                                0.0
+                            } else {
+                                (progress.completed as f32 / total as f32).clamp(0.0, 1.0)
+                            };
+                            ui.add(egui::ProgressBar::new(fraction).text(format!(
+                                "{} / {} {}",
+                                progress.completed, total, progress.unit
+                            )));
+                        } else {
+                            ui.label(format!("{} {}", progress.completed, progress.unit));
+                        }
                     }
-                    for operation in self.operation_history.iter().take(5) {
-                        ui.horizontal(|ui| {
-                            ui.small(operation_kind_label(&operation.kind));
-                            ui.small(operation_status_label(&operation.status));
-                        });
+                    if let Some(profile_id) = &operation.profile_id {
+                        ui.small(format!("Profile {profile_id}"));
                     }
-                });
+                } else {
+                    ui.label(&self.status);
+                }
+                for operation in self.operation_history.iter().take(5) {
+                    ui.horizontal(|ui| {
+                        ui.small(operation_kind_label(&operation.kind));
+                        ui.small(operation_status_label(&operation.status));
+                    });
+                }
+            });
         });
     }
 }
@@ -55,8 +64,11 @@ fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str
         Repair => "Repair installation",
         CreateWorkspace => "Create starter workspace",
         CreateContent => "Create content project",
+        LoadComposition => "Load Packagepack graph",
+        SaveComposition => "Save Packagepack graph",
         CreateWorkspaceFile => "Create workspace file",
         OpenWorkspace => "Open workspace",
+        RememberWorkspace => "Add workspace to Vapor sources",
         DiscoverWorkspace => "Read workspace files",
         OpenWorkspaceFile => "Open file",
         SaveWorkspaceFile => "Save file",
@@ -86,7 +98,7 @@ fn operation_phase_label(phase: &vapor_studio_core::OperationPhase) -> &'static 
         Running => "Launching",
         Staging => "Preparing review",
         Publishing => "Publishing",
-        Finished => "Finished",
+        Finalizing => "Finishing",
     }
 }
 

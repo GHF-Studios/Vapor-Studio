@@ -3,6 +3,7 @@ pub(super) enum Section {
     Home,
     Discover,
     Library,
+    Compose,
     Create,
     Workspace,
     Diagnostics,
@@ -19,7 +20,11 @@ pub(super) enum CatalogSourceFilter {
 
 impl CatalogSourceFilter {
     pub(super) const ALL: [Self; 5] = [
-        Self::All, Self::Workspace, Self::Cache, Self::Installed, Self::Workshop,
+        Self::All,
+        Self::Workspace,
+        Self::Cache,
+        Self::Installed,
+        Self::Workshop,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -34,10 +39,11 @@ impl CatalogSourceFilter {
 }
 
 impl Section {
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 6] = [
         Self::Home,
         Self::Discover,
         Self::Library,
+        Self::Compose,
         Self::Create,
         Self::Workspace,
     ];
@@ -46,6 +52,7 @@ impl Section {
             Self::Home => "Home",
             Self::Discover => "Discover",
             Self::Library => "Library",
+            Self::Compose => "Compose",
             Self::Create => "Create",
             Self::Workspace => "Workspace",
             Self::Diagnostics => "Diagnostics",

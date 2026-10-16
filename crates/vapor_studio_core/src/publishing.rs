@@ -39,7 +39,8 @@ pub fn stage_workshop_preview(
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
     let catalog = content::discover(&paths)?;
-    let artifact = catalog.find(selector)
+    let artifact = catalog
+        .find(selector)
         .ok_or_else(|| format!("unknown content artifact '{selector}'"))?;
     let package = content::package(&paths, selector, false)?;
     let fingerprint = package.fingerprint();
@@ -48,11 +49,22 @@ pub fn stage_workshop_preview(
         id: artifact.id().to_owned(),
         version: artifact.version().map(ToOwned::to_owned),
         app_id: artifact.workshop().app_id(),
-        published_file_id: artifact.workshop().published_file_id().map(ToOwned::to_owned),
+        published_file_id: artifact
+            .workshop()
+            .published_file_id()
+            .map(ToOwned::to_owned),
         title: artifact.workshop().title().map(ToOwned::to_owned),
         visibility: artifact.workshop().visibility().map(ToOwned::to_owned),
-        dependencies: artifact.dependencies().iter()
-            .map(|dependency| format!("{} {}", dependency.id(), dependency.version().unwrap_or("any version")))
+        dependencies: artifact
+            .dependencies()
+            .iter()
+            .map(|dependency| {
+                format!(
+                    "{} {}",
+                    dependency.id(),
+                    dependency.version().unwrap_or("any version")
+                )
+            })
             .collect(),
         root: package.root().to_path_buf(),
         target: package.runtime_target().to_owned(),
@@ -83,12 +95,28 @@ pub fn publish_reviewed_workshop_content(
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
     let report = if current.published_file_id.is_some() {
-        content::publish_workshop_item(&paths, selector, Some(account), change_note, false, true)?
+        content::publish_workshop_item_reviewed(
+            &paths,
+            selector,
+            expected_fingerprint,
+            account,
+            change_note,
+            true,
+        )?
     } else {
-        content::create_workshop_item(&paths, selector, Some(account), false, true)?
+        content::create_workshop_item_reviewed(
+            &paths,
+            selector,
+            expected_fingerprint,
+            account,
+            true,
+        )?
     };
     if !report.uploaded() {
-        return Err(format!("Workshop upload for {} did not complete", current.id));
+        return Err(format!(
+            "Workshop upload for {} did not complete",
+            current.id
+        ));
     }
     Ok(WorkshopPublication {
         id: report.artifact_id().to_owned(),
@@ -110,8 +138,12 @@ fn staged_files(root: &Path) -> Result<Vec<String>, String> {
             if kind.is_dir() {
                 pending.push(entry.path());
             } else if kind.is_file() {
-                let relative = entry.path().strip_prefix(root)
-                    .map_err(|error| error.to_string())?.display().to_string();
+                let relative = entry
+                    .path()
+                    .strip_prefix(root)
+                    .map_err(|error| error.to_string())?
+                    .display()
+                    .to_string();
                 files.push(relative);
                 if files.len() > 10_000 {
                     return Err("staged package contains more than 10,000 files".to_owned());

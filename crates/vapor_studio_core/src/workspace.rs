@@ -14,13 +14,41 @@ pub struct SourceContent {
     pub dependencies: Vec<String>,
 }
 
+pub use vapor_shell::content::{CompositionLink as SourceCompositionLink, SourceComposition};
+
+pub fn load_source_composition(
+    application_executable: &Path,
+    workspace_root: &Path,
+    selector: &str,
+) -> Result<SourceComposition, String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    content::load_source_composition(&paths, selector)
+}
+
+pub fn save_source_composition(
+    application_executable: &Path,
+    workspace_root: &Path,
+    selector: &str,
+    expected_source: &str,
+    links: &[SourceCompositionLink],
+) -> Result<SourceComposition, String> {
+    let installation = InstallationPaths::from_application_executable(application_executable)?;
+    let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
+    content::save_source_composition(&paths, selector, expected_source, links)
+}
+
 /// Ask Vapor Shell whether one source role can directly depend on another.
 pub fn source_dependency_allowed(
     parent: vapor_core::ContentKind,
     child: vapor_core::ContentKind,
 ) -> bool {
-    let Some(parent) = shell_content_kind(parent) else { return false; };
-    let Some(child) = shell_content_kind(child) else { return false; };
+    let Some(parent) = shell_content_kind(parent) else {
+        return false;
+    };
+    let Some(child) = shell_content_kind(child) else {
+        return false;
+    };
     content::source_dependency_allowed(parent, child)
 }
 
@@ -30,15 +58,21 @@ pub fn discover_source_content(
 ) -> Result<Vec<SourceContent>, String> {
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
-    Ok(content::discover(&paths)?.artifacts().iter().map(|artifact| SourceContent {
-        id: artifact.id().to_owned(),
-        version: artifact.version().map(ToOwned::to_owned),
-        kind: artifact.kind().to_string(),
-        root: artifact.root().to_path_buf(),
-        dependencies: artifact.dependencies().iter().map(|dependency| {
-            format!("{} · {}", dependency.relationship(), dependency.id())
-        }).collect(),
-    }).collect())
+    Ok(content::discover(&paths)?
+        .artifacts()
+        .iter()
+        .map(|artifact| SourceContent {
+            id: artifact.id().to_owned(),
+            version: artifact.version().map(ToOwned::to_owned),
+            kind: artifact.kind().to_string(),
+            root: artifact.root().to_path_buf(),
+            dependencies: artifact
+                .dependencies()
+                .iter()
+                .map(|dependency| format!("{} · {}", dependency.relationship(), dependency.id()))
+                .collect(),
+        })
+        .collect())
 }
 
 pub fn validate_profile_source(
@@ -49,11 +83,16 @@ pub fn validate_profile_source(
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
     let report = content::validate(&paths, Some(selector))?;
-    Ok(format!("Validated {} source artifact{}; {} diagnostic{}.",
+    Ok(format!(
+        "Validated {} source artifact{}; {} diagnostic{}.",
         report.checked().len(),
         if report.checked().len() == 1 { "" } else { "s" },
         report.diagnostics().len(),
-        if report.diagnostics().len() == 1 { "" } else { "s" },
+        if report.diagnostics().len() == 1 {
+            ""
+        } else {
+            "s"
+        },
     ))
 }
 
@@ -87,7 +126,9 @@ pub fn create_content_workspace(
 ) -> Result<PathBuf, String> {
     let kind = match shell_content_kind(kind) {
         Some(kind) => kind,
-        None => return Err("Library content does not yet have a Vapor Shell manifest role".to_owned()),
+        None => {
+            return Err("Library content does not yet have a Vapor Shell manifest role".to_owned());
+        }
     };
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
@@ -102,7 +143,12 @@ pub fn create_basic_content_workspace(
     name: &str,
 ) -> Result<PathBuf, String> {
     let installation = InstallationPaths::from_application_executable(application_executable)?;
-    content::create_basic_content_workspace(&installation, destination.to_path_buf(), organization, name)
+    content::create_basic_content_workspace(
+        &installation,
+        destination.to_path_buf(),
+        organization,
+        name,
+    )
 }
 
 fn shell_content_kind(kind: vapor_core::ContentKind) -> Option<ShellContentKind> {
@@ -118,4 +164,13 @@ fn shell_content_kind(kind: vapor_core::ContentKind) -> Option<ShellContentKind>
         vapor_core::ContentKind::ExtensionMod => ShellContentKind::ExtensionMod,
         vapor_core::ContentKind::Library => return None,
     })
+}
+
+/// Add a validated authored Workspace to this Vapor Installation's known sources.
+pub fn remember_workspace(workspace_root: &Path) -> Result<Vec<PathBuf>, String> {
+    let installation = vapor_core::VaporInstallation::discover()
+        .map_err(|error| error.to_string())?;
+    let state = vapor_core::remember_source(&installation, workspace_root)
+        .map_err(|error| error.to_string())?;
+    Ok(state.known)
 }

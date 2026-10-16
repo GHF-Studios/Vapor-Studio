@@ -1,5 +1,5 @@
-use eframe::egui;
 use super::super::{Section, StudioApp};
+use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_home(&mut self, ui: &mut egui::Ui) {
@@ -14,13 +14,16 @@ impl StudioApp {
                 self.discover();
             }
             if ui.button("Open library").clicked() { self.section = Section::Library; }
+            if ui.button("Compose a Packagepack").clicked() { self.section = Section::Compose; }
             if ui.button("Create content").clicked() { self.section = Section::Create; }
             if ui.button("Open workspace").clicked() { self.section = Section::Workspace; }
         });
         ui.separator();
         ui.heading(&self.profiles[self.active_profile].name);
         if let Some(root) = self.profiles[self.active_profile].root_package.as_ref() {
-            let content_id = root.version.as_deref()
+            let content_id = root
+                .version
+                .as_deref()
                 .map(|version| format!("{}@{version}", root.id))
                 .unwrap_or_else(|| root.id.clone());
             ui.label(format!("Selected root: {content_id}"));
@@ -28,13 +31,14 @@ impl StudioApp {
                 &self.profiles[self.active_profile].installation,
                 vapor_studio_core::InstallationState::Installed { .. },
             );
-            let source_ready = !self.workspace_editor_dirty && self.composition_preview.as_ref().is_some_and(|preview| {
-                preview.selector == content_id
-                    && preview.ready()
-                    && preview.nodes.last().is_some_and(|root| {
-                        root.source == vapor_studio_core::CompositionPreviewSource::Workspace
-                    })
-            });
+            let source_ready = !self.workspace_editor_dirty
+                && self.composition_preview.as_ref().is_some_and(|preview| {
+                    preview.selector == content_id
+                        && preview.ready()
+                        && preview.nodes.last().is_some_and(|root| {
+                            root.source == vapor_studio_core::CompositionPreviewSource::Workspace
+                        })
+                });
             let action = if installed {
                 "Play installed composition"
             } else if self.workspace_editor_dirty {
@@ -44,8 +48,14 @@ impl StudioApp {
             } else {
                 "Review composition in Library"
             };
-            if ui.add_enabled(!self.running && (installed || !self.workspace_editor_dirty), egui::Button::new(action))
-                .on_disabled_hover_text("Save or reload the open file before resolving and playing source content.")
+            if ui
+                .add_enabled(
+                    !self.running && (installed || !self.workspace_editor_dirty),
+                    egui::Button::new(action),
+                )
+                .on_disabled_hover_text(
+                    "Save or reload the open file before resolving and playing source content.",
+                )
                 .clicked()
             {
                 if installed {
@@ -71,5 +81,4 @@ impl StudioApp {
         ui.label("Recent activity");
         ui.label(&self.status);
     }
-
 }

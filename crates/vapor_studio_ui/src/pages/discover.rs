@@ -1,6 +1,6 @@
-use eframe::egui;
-use crate::navigation::CatalogSourceFilter;
 use super::super::{StudioApp, catalog_matches_filters};
+use crate::navigation::CatalogSourceFilter;
+use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_discover(&mut self, ui: &mut egui::Ui) {
@@ -32,9 +32,20 @@ impl StudioApp {
             }
         });
         ui.horizontal(|ui| {
-            ui.weak(format!("{} matching content versions", self.catalog.iter().filter(|content| {
-                catalog_matches_filters(content, self.catalog_source_filter, self.catalog_kind_filter.as_deref(), &self.search_query)
-            }).count()));
+            ui.weak(format!(
+                "{} matching content versions",
+                self.catalog
+                    .iter()
+                    .filter(|content| {
+                        catalog_matches_filters(
+                            content,
+                            self.catalog_source_filter,
+                            self.catalog_kind_filter.as_deref(),
+                            &self.search_query,
+                        )
+                    })
+                    .count()
+            ));
         });
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -43,7 +54,11 @@ impl StudioApp {
                     self.refresh_workshop_subscriptions();
                 }
             });
-            ui.label("Browse public items and manage this Steam account's subscriptions. Local discovery remains available when Steam is offline.");
+            ui.label("Steam subscriptions are separate from Vapor Library imports. Import an item first, then choose whether it belongs in a profile.");
+            ui.weak(format!(
+                "Target profile: {} · local catalog remains available when Steam is offline",
+                self.profiles[self.active_profile].name
+            ));
             if !self.workshop_subscriptions.is_empty() {
                 ui.collapsing(format!("My subscriptions ({})", self.workshop_subscriptions.len()), |ui| {
                     for id in self.workshop_subscriptions.iter().cloned().collect::<Vec<_>>() {
@@ -81,7 +96,41 @@ impl StudioApp {
                             }
                             if locally_available {
                                 ui.weak("Available in Vapor Library");
-                            } else if ui.add_enabled(!self.running, egui::Button::new("Import to Library")).clicked() {
+                                let available_packagepack = self.catalog.iter().any(|content| {
+                                    content.published_file_id.as_deref() == Some(id.as_str())
+                                        && content.kind
+                                            == vapor_core::ContentKind::Packagepack.as_str()
+                                        && content.is_unambiguous()
+                                });
+                                if available_packagepack
+                                    && ui.add_enabled(
+                                        !self.running && !self.workspace_editor_dirty,
+                                        egui::Button::new(format!(
+                                            "Set {} root",
+                                            self.profiles[self.active_profile].name
+                                        )),
+                                    )
+                                    .clicked()
+                                {
+                                    self.use_available_workshop_package_as_profile_root(&id);
+                                }
+                                if self.profiles[self.active_profile].root_package.is_some()
+                                    && ui.add_enabled(
+                                        !self.running && !self.workspace_editor_dirty,
+                                        egui::Button::new(format!(
+                                            "Recheck {} plan",
+                                            self.profiles[self.active_profile].name
+                                        )),
+                                    )
+                                    .on_hover_text(
+                                        "Resolve the selected Packagepack again using the current local cache.",
+                                    )
+                                    .clicked()
+                                {
+                                    self.section = super::super::Section::Library;
+                                    self.preview_selected_composition();
+                                }
+                            } else if ui.add_enabled(!self.running, egui::Button::new("Import to Vapor Library")).clicked() {
                                 self.workshop_id = id.clone();
                                 self.download_workshop_item();
                             }
@@ -137,7 +186,50 @@ impl StudioApp {
                     if ui.add_enabled(!self.running, egui::Button::new(label)).clicked() {
                         self.set_workshop_subscription(item.published_file_id.clone(), !subscribed);
                     }
-                    if ui.add_enabled(!self.running, egui::Button::new("Import to Vapor Library")).clicked() {
+                    let locally_available = self.catalog.iter().any(|content| {
+                        content.published_file_id.as_deref()
+                            == Some(item.published_file_id.as_str())
+                    });
+                    let available_packagepack = self.catalog.iter().any(|content| {
+                        content.published_file_id.as_deref()
+                            == Some(item.published_file_id.as_str())
+                            && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                            && content.is_unambiguous()
+                    });
+                    if locally_available {
+                        ui.weak("In Vapor Library");
+                        if available_packagepack
+                            && ui.add_enabled(
+                                !self.running && !self.workspace_editor_dirty,
+                                egui::Button::new(format!(
+                                    "Set {} root",
+                                    self.profiles[self.active_profile].name
+                                )),
+                            ).clicked()
+                        {
+                            self.use_available_workshop_package_as_profile_root(
+                                &item.published_file_id,
+                            );
+                        } else if !available_packagepack
+                            && self.profiles[self.active_profile].root_package.is_some()
+                            && ui.add_enabled(
+                                !self.running && !self.workspace_editor_dirty,
+                                egui::Button::new(format!(
+                                    "Recheck {} plan",
+                                    self.profiles[self.active_profile].name
+                                )),
+                            ).clicked()
+                        {
+                            self.section = super::super::Section::Library;
+                            self.preview_selected_composition();
+                        }
+                    }
+                    let import_label = if locally_available {
+                        "Update Vapor Library copy"
+                    } else {
+                        "Import to Vapor Library"
+                    };
+                    if ui.add_enabled(!self.running, egui::Button::new(import_label)).clicked() {
                         self.workshop_id = item.published_file_id.clone();
                         self.download_workshop_item();
                     }
@@ -164,19 +256,39 @@ impl StudioApp {
                 ui.label(format!("{} · {}", acquisition.cache_root.display(), acquisition.fingerprint));
                 if acquisition.kind == "packagepack" {
                     if ui.add_enabled(!self.running && !self.workspace_editor_dirty,
-                        egui::Button::new("Use as active profile root"))
+                        egui::Button::new(format!(
+                            "Use as {} root",
+                            self.profiles[self.active_profile].name
+                        )))
                         .on_disabled_hover_text("Save or discard editor changes before switching the profile's workspace.")
                         .clicked()
                     {
                         self.use_workshop_as_profile_root();
                     }
+                    ui.weak("The selected Packagepack will appear in Compositions, where you can preview its dependency plan before installing.");
                 } else {
                     ui.weak("Use this item as a dependency of a Packagepack to include it in a composition.");
+                    let has_root = self.profiles[self.active_profile].root_package.is_some();
+                    if ui
+                        .add_enabled(
+                            !self.running && !self.workspace_editor_dirty && has_root,
+                            egui::Button::new(format!(
+                                "Recheck {} composition",
+                                self.profiles[self.active_profile].name
+                            )),
+                        )
+                        .on_disabled_hover_text(
+                            "Select a Packagepack profile and save or discard open editor changes first.",
+                        )
+                        .clicked()
+                    {
+                        self.section = super::super::Section::Library;
+                        self.preview_selected_composition();
+                    }
                 }
             }
         });
         ui.separator();
         self.draw_content_list(ui);
     }
-
 }
