@@ -20,6 +20,7 @@ pub(super) struct WorkspaceState {
     pub(super) registered_sources: Vec<PathBuf>,
     pub(super) active_source: Option<PathBuf>,
     pub(super) files: Vec<PathBuf>,
+    pub(super) file_filter: String,
     pub(super) selected_file: Option<PathBuf>,
     pub(super) editor_documents: BTreeMap<PathBuf, WorkspaceDocument>,
     pub(super) editor_draft_recovery: Option<String>,
@@ -53,6 +54,7 @@ impl WorkspaceState {
             registered_sources: Vec::new(),
             active_source: None,
             files: Vec::new(),
+            file_filter: String::new(),
             selected_file: None,
             editor_documents: BTreeMap::new(),
             editor_draft_recovery: None,
@@ -144,6 +146,7 @@ impl WorkspaceState {
 
     pub(super) fn clear_file_context(&mut self) {
         self.files.clear();
+        self.file_filter.clear();
         self.selected_file = None;
         self.editor_documents.clear();
         self.files_open = false;

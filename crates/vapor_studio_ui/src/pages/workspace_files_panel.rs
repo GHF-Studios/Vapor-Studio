@@ -143,11 +143,38 @@ impl StudioApp {
             }
             ui.columns(3, |columns| {
                 columns[0].heading("Project");
-                let tree = workspace_tree(&self.workspace.files);
+                let filter_response = columns[0].add(
+                    egui::TextEdit::singleline(&mut self.workspace.file_filter)
+                        .hint_text("Find file by name or path"),
+                );
+                let filter = self.workspace.file_filter.trim().to_lowercase();
+                let filtered_files = self
+                    .workspace
+                    .files
+                    .iter()
+                    .filter(|path| {
+                        filter.is_empty()
+                            || path.to_string_lossy().to_lowercase().contains(&filter)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                columns[0].small(format!(
+                    "{} of {} files",
+                    filtered_files.len(),
+                    self.workspace.files.len()
+                ));
+                let enter_opens_match = filter_response.lost_focus()
+                    && columns[0].input(|input| input.key_pressed(egui::Key::Enter))
+                    && filtered_files.len() == 1;
+                let tree = workspace_tree(&filtered_files);
                 let mut open_file = None;
                 egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
                     if tree.entries.is_empty() {
-                        ui.weak("No visible files in this workspace.");
+                        ui.weak(if filter.is_empty() {
+                            "No visible files in this workspace."
+                        } else {
+                            "No files match this path."
+                        });
                     } else {
                         draw_workspace_tree(
                             ui,
@@ -160,6 +187,9 @@ impl StudioApp {
                         );
                     }
                 });
+                if enter_opens_match {
+                    open_file = filtered_files.first().cloned();
+                }
                 if let Some(path) = open_file {
                     self.open_workspace_file(path);
                 }
