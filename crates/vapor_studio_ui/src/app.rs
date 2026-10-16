@@ -581,8 +581,7 @@ impl StudioApp {
                             .unwrap_or_default(),
                         publication.receipt.display(),
                     );
-                    self.workshop_preview = None;
-                    self.workshop_confirmation.clear();
+                    self.invalidate_workshop_review();
                 }
                 OperationResult::WorkshopStage(Ok(preview)) => {
                     self.status = format!(
@@ -914,7 +913,7 @@ impl StudioApp {
         if !self.require_saved_workspace("refresh workspace content") {
             return;
         }
-        self.workshop_preview = None;
+        self.invalidate_workshop_review();
         let root = self
             .profiles
             .get(self.active_profile)
@@ -959,7 +958,7 @@ impl StudioApp {
         self.composition_edit_selector.clear();
         self.composition_link_candidate.clear();
         self.repreview_after_catalog_refresh = false;
-        self.workshop_preview = None;
+        self.invalidate_workshop_review();
         self.workspace_files = files;
         self.selected_workspace_file = None;
         self.workspace_editor.clear();
@@ -1877,7 +1876,7 @@ impl StudioApp {
         self.catalog.clear();
         self.selected_catalog_content = None;
         self.composition_preview = None;
-        self.workshop_preview = None;
+        self.invalidate_workshop_review();
         self.pending_content_unregistration = None;
         self.workshop_metadata_edit = None;
         self.runtime_outputs_edit = None;
@@ -2118,7 +2117,7 @@ impl StudioApp {
     }
 
     fn invalidate_profiles_for_source_content(&mut self, identity: &ContentIdentity) {
-        self.workshop_preview = None;
+        self.invalidate_workshop_review();
         for (index, profile) in self.profiles.iter_mut().enumerate() {
             let affected = profile.root_package.as_ref().is_some_and(|root| root == identity)
                 || profile.resolved_graph.as_ref()
