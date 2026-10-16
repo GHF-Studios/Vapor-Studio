@@ -143,24 +143,27 @@ impl StudioApp {
         );
     }
 
-    pub(super) fn apply_workshop_subscription_change(
+    pub(super) fn apply_workshop_subscription_batch_change(
         &mut self,
-        id: String,
+        ids: Vec<String>,
         subscribed: bool,
     ) {
-        if subscribed {
-            self.workshop.subscriptions.insert(id.clone());
-        } else {
-            self.workshop.subscriptions.remove(&id);
-            self.workshop.subscription_details.remove(&id);
+        for id in &ids {
+            if subscribed {
+                self.workshop.subscriptions.insert(id.clone());
+            } else {
+                self.workshop.subscriptions.remove(id);
+                self.workshop.subscription_details.remove(id);
+            }
         }
         self.status = format!(
-            "{} Steam Workshop item {id}.",
+            "{} {} Steam Workshop item(s).",
             if subscribed {
                 "Subscribed to"
             } else {
                 "Unsubscribed from"
-            }
+            },
+            ids.len()
         );
     }
 
@@ -320,34 +323,65 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn set_workshop_subscription(&mut self, id: String, subscribed: bool) {
-        let parsed_id = match id.parse::<u64>() {
-            Ok(id) if id != 0 => id,
-            _ => {
-                self.status = "Steam returned an invalid PublishedFileId.".to_owned();
+        self.set_workshop_subscriptions(vec![id], subscribed);
+    }
+
+    pub(in crate::app) fn set_workshop_subscriptions(
+        &mut self,
+        ids: Vec<String>,
+        subscribed: bool,
+    ) {
+        if ids.is_empty() {
+            self.status = "Select at least one Workshop item.".to_owned();
+            return;
+        }
+        if ids.len() > vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH {
+            self.status = format!(
+                "Select no more than {} Workshop items for one subscription change.",
+                vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH
+            );
+            return;
+        }
+        let mut unique = std::collections::BTreeSet::new();
+        let mut parsed_ids = Vec::new();
+        let mut normalized_ids = Vec::new();
+        for id in ids {
+            let Some(parsed) = id.parse::<u64>().ok().filter(|id| *id != 0) else {
+                self.status = format!("Invalid Steam PublishedFileId: {id}");
                 return;
+            };
+            if unique.insert(parsed) {
+                parsed_ids.push(parsed);
+                normalized_ids.push(parsed.to_string());
             }
-        };
+        }
+        if parsed_ids.is_empty() {
+            self.status = "Select at least one valid Workshop item.".to_owned();
+            return;
+        }
+        let ids = normalized_ids;
+        let operation_ids = ids.clone();
         self.spawn(OperationKind::ChangeWorkshopSubscription, move |_context| {
-            OperationResult::WorkshopSubscriptionChange(
+            OperationResult::WorkshopSubscriptionBatchChange(
                 if subscribed {
-                    vapor_studio_core::subscribe_workshop_item(
+                    vapor_studio_core::subscribe_workshop_items(
                         vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
-                        parsed_id,
+                        &parsed_ids,
                     )
                 } else {
-                    vapor_studio_core::unsubscribe_workshop_item(
+                    vapor_studio_core::unsubscribe_workshop_items(
                         vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
-                        parsed_id,
+                        &parsed_ids,
                     )
                 },
-                id,
+                operation_ids,
                 subscribed,
             )
         });
         self.status = if subscribed {
-            "Subscribing to Steam Workshop item…"
+            "Subscribing to Steam Workshop items…"
         } else {
-            "Unsubscribing from Steam Workshop item…"
+            "Unsubscribing from Steam Workshop items…"
         }
         .to_owned();
     }

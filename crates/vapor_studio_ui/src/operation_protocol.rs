@@ -45,7 +45,7 @@ pub(super) enum OperationResult {
     WorkshopPublish(Result<vapor_studio_core::WorkshopPublication, String>),
     WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>, String),
     WorkshopSubscriptions(Result<Vec<vapor_studio_core::WorkshopSubscription>, String>),
-    WorkshopSubscriptionChange(Result<(), String>, String, bool),
+    WorkshopSubscriptionBatchChange(Result<(), String>, Vec<String>, bool),
 }
 
 impl OperationResult {
@@ -80,7 +80,7 @@ impl OperationResult {
             | Self::WorkshopPublish(Err(error))
             | Self::WorkshopSearch(Err(error), _)
             | Self::WorkshopSubscriptions(Err(error))
-            | Self::WorkshopSubscriptionChange(Err(error), _, _) => Some(error.clone()),
+            | Self::WorkshopSubscriptionBatchChange(Err(error), _, _) => Some(error.clone()),
             Self::Discovery(_, Err(error)) => Some(error.clone()),
             Self::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
             _ => None,
@@ -107,6 +107,9 @@ impl OperationResult {
     }
 
     pub(super) fn refreshes_workshop_subscriptions(&self) -> bool {
-        matches!(self, Self::WorkshopSubscriptionChange(Ok(()), _, _))
+        matches!(
+            self,
+            Self::WorkshopSubscriptionBatchChange(_, _, _)
+        )
     }
 }

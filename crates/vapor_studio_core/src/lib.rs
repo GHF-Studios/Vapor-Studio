@@ -37,8 +37,11 @@ pub use shell_content::{
 };
 pub use vapor_steam::{WorkshopItem, WorkshopPage, WorkshopSubscription};
 pub use vapor_steam::{
+    MAX_SUBSCRIPTION_BATCH_SIZE as MAX_WORKSHOP_SUBSCRIPTION_BATCH,
     search_workshop, subscribe_item as subscribe_workshop_item,
+    subscribe_items as subscribe_workshop_items,
     subscribed_items as workshop_subscriptions, unsubscribe_item as unsubscribe_workshop_item,
+    unsubscribe_items as unsubscribe_workshop_items,
 };
 
 pub use workspace::{

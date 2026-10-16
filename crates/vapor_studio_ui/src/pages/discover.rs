@@ -186,6 +186,9 @@ impl StudioApp {
             }
             if !self.workshop.selected_items.is_empty() {
                 let count = self.workshop.selected_items.len();
+                let subscription_batch_supported =
+                    count <= vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH;
+                let selected_ids = self.workshop.selected_items.iter().cloned().collect::<Vec<_>>();
                 ui.horizontal(|ui| {
                     ui.small(format!("Selected across pages and searches · {count} item(s)"));
                     if ui
@@ -206,7 +209,31 @@ impl StudioApp {
                     {
                         self.download_selected_workshop_items();
                     }
+                    if ui
+                        .add_enabled(
+                            !self.operation.running && subscription_batch_supported,
+                            egui::Button::new("Subscribe selected"),
+                        )
+                        .clicked()
+                    {
+                        self.set_workshop_subscriptions(selected_ids.clone(), true);
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.operation.running && subscription_batch_supported,
+                            egui::Button::new("Unsubscribe selected"),
+                        )
+                        .clicked()
+                    {
+                        self.set_workshop_subscriptions(selected_ids, false);
+                    }
                 });
+                if !subscription_batch_supported {
+                    ui.small(format!(
+                        "Steam subscription changes handle up to {} items at once. Import selection remains available.",
+                        vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH
+                    ));
+                }
             }
             if let Some(query) = &self.workshop.results_query {
                 if self.workshop.results.is_empty() {

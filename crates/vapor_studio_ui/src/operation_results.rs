@@ -75,10 +75,10 @@ impl StudioApp {
             OperationResult::WorkshopSubscriptions(Ok(subscriptions)) => {
                 self.apply_workshop_subscriptions(subscriptions)
             }
-            OperationResult::WorkshopSubscriptionChange(Ok(()), id, subscribed) => {
-                self.apply_workshop_subscription_change(id, subscribed)
+            OperationResult::WorkshopSubscriptionBatchChange(Ok(()), ids, subscribed) => {
+                self.apply_workshop_subscription_batch_change(ids, subscribed)
             }
-            OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => {
+            OperationResult::WorkshopSubscriptionBatchChange(Err(error), _, _) => {
                 self.apply_workshop_error(error)
             }
             OperationResult::WorkspaceFiles(Ok(files)) => {
