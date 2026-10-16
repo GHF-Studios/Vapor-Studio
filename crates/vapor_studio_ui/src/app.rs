@@ -1701,7 +1701,7 @@ impl StudioApp {
         self.workshop_results.clear();
         self.workshop_results_query = None;
         self.workshop_result_total = 0;
-        self.spawn(OperationKind::Discover, move |_context| {
+        self.spawn(OperationKind::SearchWorkshop, move |_context| {
             OperationResult::WorkshopSearch(
                 vapor_studio_core::search_workshop(
                     vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
@@ -1715,7 +1715,7 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn refresh_workshop_subscriptions(&mut self) {
-        self.spawn(OperationKind::Discover, move |_context| {
+        self.spawn(OperationKind::LoadWorkshopSubscriptions, move |_context| {
             OperationResult::WorkshopSubscriptions(vapor_studio_core::workshop_subscriptions(
                 vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
             ))
@@ -1731,7 +1731,7 @@ impl StudioApp {
                 return;
             }
         };
-        self.spawn(OperationKind::Discover, move |_context| {
+        self.spawn(OperationKind::ChangeWorkshopSubscription, move |_context| {
             OperationResult::WorkshopSubscriptionChange(
                 if subscribed {
                     vapor_studio_core::subscribe_workshop_item(
@@ -1775,6 +1775,9 @@ impl StudioApp {
             | OperationKind::LoadWorkshopMetadata
             | OperationKind::LoadRuntimeOutputs
             | OperationKind::Discover
+            | OperationKind::SearchWorkshop
+            | OperationKind::LoadWorkshopSubscriptions
+            | OperationKind::ChangeWorkshopSubscription
             | OperationKind::OpenWorkspace
             | OperationKind::RememberWorkspace
             | OperationKind::AdoptContentProject

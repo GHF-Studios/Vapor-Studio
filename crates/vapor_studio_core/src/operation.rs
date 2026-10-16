@@ -5,6 +5,9 @@ pub use vapor_core::{OperationId, OperationPhase, OperationStatus, Progress};
 #[serde(rename_all = "kebab-case")]
 pub enum OperationKind {
     Discover,
+    SearchWorkshop,
+    LoadWorkshopSubscriptions,
+    ChangeWorkshopSubscription,
     Resolve,
     Acquire,
     Install,
@@ -46,6 +49,9 @@ impl OperationKind {
     pub fn action(&self) -> &'static str {
         match self {
             Self::Discover => "discover",
+            Self::SearchWorkshop => "search-workshop",
+            Self::LoadWorkshopSubscriptions => "load-workshop-subscriptions",
+            Self::ChangeWorkshopSubscription => "change-workshop-subscription",
             Self::Resolve => "resolve",
             Self::Acquire => "acquire",
             Self::Install => "install",
