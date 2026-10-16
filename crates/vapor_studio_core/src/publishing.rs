@@ -81,12 +81,12 @@ pub fn publish_reviewed_workshop_content(
     application_executable: &Path,
     workspace_root: &Path,
     selector: &str,
-    expected_fingerprint: &str,
+    expected_review: &WorkshopPackagePreview,
     account: &str,
     change_note: Option<&str>,
 ) -> Result<WorkshopPublication, String> {
     let current = stage_workshop_preview(application_executable, workspace_root, selector)?;
-    if current.fingerprint != expected_fingerprint {
+    if !same_review(&current, expected_review) {
         return Err(format!(
             "{} changed after review; stage a fresh Workshop review before uploading",
             current.id
@@ -98,7 +98,7 @@ pub fn publish_reviewed_workshop_content(
         content::publish_workshop_item_reviewed(
             &paths,
             selector,
-            expected_fingerprint,
+            &current.fingerprint,
             account,
             change_note,
             true,
@@ -107,7 +107,7 @@ pub fn publish_reviewed_workshop_content(
         content::create_workshop_item_reviewed(
             &paths,
             selector,
-            expected_fingerprint,
+            &current.fingerprint,
             account,
             true,
         )?
@@ -124,6 +124,21 @@ pub fn publish_reviewed_workshop_content(
         receipt: report.receipt().to_path_buf(),
         created: current.published_file_id.is_none(),
     })
+}
+
+fn same_review(current: &WorkshopPackagePreview, reviewed: &WorkshopPackagePreview) -> bool {
+    current.id == reviewed.id
+        && current.version == reviewed.version
+        && current.app_id == reviewed.app_id
+        && current.published_file_id == reviewed.published_file_id
+        && current.title == reviewed.title
+        && current.visibility == reviewed.visibility
+        && current.dependencies == reviewed.dependencies
+        && current.target == reviewed.target
+        && current.fingerprint == reviewed.fingerprint
+        && current.files == reviewed.files
+        && current.bytes == reviewed.bytes
+        && current.file_paths == reviewed.file_paths
 }
 
 fn staged_files(root: &Path) -> Result<Vec<String>, String> {

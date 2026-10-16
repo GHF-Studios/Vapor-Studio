@@ -1229,7 +1229,7 @@ impl StudioApp {
     pub(super) fn publish_reviewed_workshop_content(
         &mut self,
         selector: String,
-        expected_fingerprint: String,
+        expected_review: vapor_studio_core::WorkshopPackagePreview,
     ) {
         if self.catalog_identity_is_conflicted(&selector) {
             self.status = format!(
@@ -1266,7 +1266,7 @@ impl StudioApp {
                 &executable,
                 &workspace,
                 &selector,
-                &expected_fingerprint,
+                &expected_review,
                 &account,
                 (!change_note.is_empty()).then_some(change_note.as_str()),
             ))

@@ -228,7 +228,7 @@ impl StudioApp {
                         {
                             self.publish_reviewed_workshop_content(
                                 identity.clone(),
-                                preview.fingerprint.clone(),
+                                preview,
                             );
                         }
                     });
