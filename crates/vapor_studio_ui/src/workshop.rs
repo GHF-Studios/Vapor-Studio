@@ -3,6 +3,43 @@ use super::operations::OperationResult;
 use std::path::PathBuf;
 use vapor_studio_core::OperationKind;
 
+pub(super) struct WorkshopState {
+    pub(super) preview: Option<vapor_studio_core::WorkshopPackagePreview>,
+    pub(super) published_file_id: String,
+    pub(super) publisher_account: String,
+    pub(super) change_note: String,
+    pub(super) confirmation: String,
+    pub(super) pending_acquisition: Option<vapor_studio_core::WorkshopAcquisition>,
+    pub(super) search_query: String,
+    pub(super) results: Vec<vapor_studio_core::WorkshopItem>,
+    pub(super) results_query: Option<String>,
+    pub(super) subscriptions: std::collections::BTreeSet<String>,
+    pub(super) subscription_details:
+        std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
+    pub(super) total_results: u32,
+    pub(super) page: u32,
+}
+
+impl Default for WorkshopState {
+    fn default() -> Self {
+        Self {
+            preview: None,
+            published_file_id: String::new(),
+            publisher_account: String::new(),
+            change_note: String::new(),
+            confirmation: String::new(),
+            pending_acquisition: None,
+            search_query: String::new(),
+            results: Vec::new(),
+            results_query: None,
+            subscriptions: Default::default(),
+            subscription_details: Default::default(),
+            total_results: 0,
+            page: 1,
+        }
+    }
+}
+
 impl StudioApp {
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
         self.catalog.iter().any(|content| {
@@ -11,8 +48,8 @@ impl StudioApp {
     }
 
     pub(super) fn invalidate_workshop_review(&mut self) {
-        self.workshop_preview = None;
-        self.workshop_confirmation.clear();
+        self.workshop.preview = None;
+        self.workshop.confirmation.clear();
     }
 
     pub(super) fn stage_workshop_content(&mut self, selector: String) {
@@ -58,14 +95,14 @@ impl StudioApp {
         if !self.require_open_workspace("publish this Workshop item") {
             return;
         }
-        let account = self.workshop_account.trim().to_owned();
+        let account = self.workshop.publisher_account.trim().to_owned();
         if account.is_empty() {
             self.status =
                 "Enter the Steam publisher account used by the local SteamCMD provider.".to_owned();
             return;
         }
         let expected_confirmation = format!("PUBLISH {selector}");
-        if self.workshop_confirmation.trim() != expected_confirmation {
+        if self.workshop.confirmation.trim() != expected_confirmation {
             self.status =
                 format!("Type {expected_confirmation} exactly to authorize this Workshop upload.");
             return;
@@ -78,7 +115,7 @@ impl StudioApp {
                 return;
             }
         };
-        let change_note = self.workshop_change_note.trim().to_owned();
+        let change_note = self.workshop.change_note.trim().to_owned();
         self.spawn(OperationKind::PublishWorkshop, move |_context| {
             OperationResult::WorkshopPublish(vapor_studio_core::publish_reviewed_workshop_content(
                 &executable,
@@ -93,7 +130,7 @@ impl StudioApp {
     }
 
     pub(super) fn download_workshop_item(&mut self) {
-        let published_file_id = self.workshop_id.trim().to_owned();
+        let published_file_id = self.workshop.published_file_id.trim().to_owned();
         if published_file_id.is_empty() {
             self.status = "Enter a numeric Steam Workshop item ID.".to_owned();
             return;
@@ -120,11 +157,11 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn search_workshop(&mut self) {
-        let query = self.workshop_search_text.trim().to_owned();
-        let page = self.workshop_page;
-        self.workshop_results.clear();
-        self.workshop_results_query = None;
-        self.workshop_result_total = 0;
+        let query = self.workshop.search_query.trim().to_owned();
+        let page = self.workshop.page;
+        self.workshop.results.clear();
+        self.workshop.results_query = None;
+        self.workshop.total_results = 0;
         self.spawn(OperationKind::SearchWorkshop, move |_context| {
             OperationResult::WorkshopSearch(
                 vapor_studio_core::search_workshop(

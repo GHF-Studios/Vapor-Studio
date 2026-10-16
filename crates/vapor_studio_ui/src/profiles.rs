@@ -5,7 +5,7 @@ use vapor_studio_core::ContentIdentity;
 
 impl StudioApp {
     pub(super) fn use_workshop_as_profile_root(&mut self) {
-        let Some(acquisition) = self.pending_workshop.as_ref() else {
+        let Some(acquisition) = self.workshop.pending_acquisition.as_ref() else {
             return;
         };
         if acquisition.kind != "packagepack" {

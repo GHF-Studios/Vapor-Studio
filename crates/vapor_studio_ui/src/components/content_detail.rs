@@ -24,7 +24,7 @@ impl StudioApp {
                 let selected = self.selected_catalog_content.as_deref() == Some(identity.as_str());
                 if ui.selectable_label(selected, format!("{id} · {kind} · {version}")).clicked() {
                     self.selected_catalog_content = Some(identity.clone());
-                    self.workshop_preview = None;
+                    self.workshop.preview = None;
                 }
                 if !content.is_unambiguous() {
                     ui.colored_label(egui::Color32::YELLOW, "Identity conflict");
@@ -140,7 +140,7 @@ impl StudioApp {
                     }
                 }
                 let preview = self
-                    .workshop_preview
+                    .workshop.preview
                     .as_ref()
                     .filter(|preview| {
                         is_authored_here
@@ -195,12 +195,12 @@ impl StudioApp {
                         });
                         ui.add_enabled(
                             !self.running && content.is_unambiguous(),
-                            egui::TextEdit::singleline(&mut self.workshop_account)
+                            egui::TextEdit::singleline(&mut self.workshop.publisher_account)
                                 .hint_text("Steam publisher account"),
                         );
                         ui.add_enabled(
                             !self.running && content.is_unambiguous(),
-                            egui::TextEdit::singleline(&mut self.workshop_change_note)
+                            egui::TextEdit::singleline(&mut self.workshop.change_note)
                                 .hint_text("Change note (optional)"),
                         );
                         let confirmation = format!("PUBLISH {}", preview.id);
@@ -209,15 +209,15 @@ impl StudioApp {
                         ));
                         ui.add_enabled(
                             !self.running,
-                            egui::TextEdit::singleline(&mut self.workshop_confirmation)
+                            egui::TextEdit::singleline(&mut self.workshop.confirmation)
                                 .hint_text(&confirmation),
                         );
                         if ui
                             .add_enabled(
                                 !self.running
                                     && content.is_unambiguous()
-                                    && !self.workshop_account.trim().is_empty()
-                                    && self.workshop_confirmation.trim() == confirmation,
+                                    && !self.workshop.publisher_account.trim().is_empty()
+                                    && self.workshop.confirmation.trim() == confirmation,
                                 egui::Button::new(if preview.published_file_id.is_some() {
                                     "Publish update"
                                 } else {

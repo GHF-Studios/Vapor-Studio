@@ -28,6 +28,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc::Receiver};
 use operations::OperationResult;
+use workshop::WorkshopState;
 use vapor_core::{ContentKind, OperationEvent as CoreOperationEvent};
 use vapor_studio_core::{
     CompositionProfile, ContentIdentity, OperationEvent, OperationId, OperationKind,
@@ -88,20 +89,7 @@ pub struct StudioApp {
     catalog_source_filter: CatalogSourceFilter,
     catalog_kind_filter: Option<String>,
     selected_catalog_content: Option<String>,
-    workshop_preview: Option<vapor_studio_core::WorkshopPackagePreview>,
-    workshop_id: String,
-    workshop_account: String,
-    workshop_change_note: String,
-    workshop_confirmation: String,
-    pending_workshop: Option<vapor_studio_core::WorkshopAcquisition>,
-    workshop_search_text: String,
-    workshop_results: Vec<vapor_studio_core::WorkshopItem>,
-    workshop_results_query: Option<String>,
-    workshop_subscriptions: std::collections::BTreeSet<String>,
-    workshop_subscription_details:
-        std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
-    workshop_result_total: u32,
-    workshop_page: u32,
+    workshop: WorkshopState,
     composition_preview: Option<vapor_studio_core::CompositionPreview>,
     workspace_files: Vec<PathBuf>,
     selected_workspace_file: Option<PathBuf>,
@@ -203,19 +191,7 @@ impl StudioApp {
             catalog_source_filter: CatalogSourceFilter::All,
             catalog_kind_filter: None,
             selected_catalog_content: None,
-            workshop_preview: None,
-            workshop_id: String::new(),
-            workshop_account: String::new(),
-            workshop_change_note: String::new(),
-            workshop_confirmation: String::new(),
-            pending_workshop: None,
-            workshop_search_text: String::new(),
-            workshop_results: Vec::new(),
-            workshop_results_query: None,
-            workshop_subscriptions: std::collections::BTreeSet::new(),
-            workshop_subscription_details: std::collections::BTreeMap::new(),
-            workshop_result_total: 0,
-            workshop_page: 1,
+            workshop: WorkshopState::default(),
             composition_preview: None,
             composition_edit_selector: String::new(),
             composition_edit: None,

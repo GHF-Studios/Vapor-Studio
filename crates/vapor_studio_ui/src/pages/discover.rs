@@ -59,15 +59,15 @@ impl StudioApp {
                 "Target profile: {} · local catalog remains available when Steam is offline",
                 self.profiles[self.active_profile].name
             ));
-            if !self.workshop_subscriptions.is_empty() {
-                ui.collapsing(format!("My subscriptions ({})", self.workshop_subscriptions.len()), |ui| {
-                    for id in self.workshop_subscriptions.iter().cloned().collect::<Vec<_>>() {
-                        let details = self.workshop_subscription_details.get(&id).cloned();
+            if !self.workshop.subscriptions.is_empty() {
+                ui.collapsing(format!("My subscriptions ({})", self.workshop.subscriptions.len()), |ui| {
+                    for id in self.workshop.subscriptions.iter().cloned().collect::<Vec<_>>() {
+                        let details = self.workshop.subscription_details.get(&id).cloned();
                         let title = details
                             .as_ref()
                             .map(|item| item.title.clone())
                             .or_else(|| {
-                                self.workshop_results
+                                self.workshop.results
                                     .iter()
                                     .find(|item| item.published_file_id == id)
                                     .map(|item| item.title.clone())
@@ -131,7 +131,7 @@ impl StudioApp {
                                     self.preview_selected_composition();
                                 }
                             } else if ui.add_enabled(!self.running, egui::Button::new("Import to Vapor Library")).clicked() {
-                                self.workshop_id = id.clone();
+                                self.workshop.published_file_id = id.clone();
                                 self.download_workshop_item();
                             }
                             if ui.add_enabled(!self.running, egui::Button::new("Unsubscribe")).clicked() {
@@ -148,31 +148,31 @@ impl StudioApp {
                 });
             }
             ui.horizontal(|ui| {
-                ui.add_enabled(!self.running, egui::TextEdit::singleline(&mut self.workshop_search_text)
+                ui.add_enabled(!self.running, egui::TextEdit::singleline(&mut self.workshop.search_query)
                     .hint_text("Search Workshop items")
                     .desired_width(300.0));
                 if ui.add_enabled(!self.running, egui::Button::new("Search Workshop")).clicked() {
-                    self.workshop_page = 1;
+                    self.workshop.page = 1;
                     self.search_workshop();
                 }
             });
-            if !self.workshop_results.is_empty() {
-                let page_count = self.workshop_result_total.div_ceil(50).max(1);
+            if !self.workshop.results.is_empty() {
+                let page_count = self.workshop.total_results.div_ceil(50).max(1);
                 ui.horizontal(|ui| {
-                    ui.weak(format!("Showing {} of {} results · page {} of {}", self.workshop_results.len(), self.workshop_result_total, self.workshop_page, page_count));
-                    let previous = ui.add_enabled(!self.running && self.workshop_page > 1, egui::Button::new("Previous")).clicked();
-                    let next = ui.add_enabled(!self.running && self.workshop_page < page_count, egui::Button::new("Next")).clicked();
+                    ui.weak(format!("Showing {} of {} results · page {} of {}", self.workshop.results.len(), self.workshop.total_results, self.workshop.page, page_count));
+                    let previous = ui.add_enabled(!self.running && self.workshop.page > 1, egui::Button::new("Previous")).clicked();
+                    let next = ui.add_enabled(!self.running && self.workshop.page < page_count, egui::Button::new("Next")).clicked();
                     if previous {
-                        self.workshop_page -= 1;
+                        self.workshop.page -= 1;
                         self.search_workshop();
                     } else if next {
-                        self.workshop_page += 1;
+                        self.workshop.page += 1;
                         self.search_workshop();
                     }
                 });
             }
-            if let Some(query) = &self.workshop_results_query {
-                if self.workshop_results.is_empty() {
+            if let Some(query) = &self.workshop.results_query {
+                if self.workshop.results.is_empty() {
                     if query.is_empty() {
                         ui.weak("Workshop search returned no items.");
                     } else {
@@ -182,7 +182,7 @@ impl StudioApp {
                     ui.small(format!("Results for ‘{query}’"));
                 }
             }
-            for item in self.workshop_results.clone() {
+            for item in self.workshop.results.clone() {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.strong(&item.title);
@@ -192,7 +192,7 @@ impl StudioApp {
                     ui.collapsing("Description", |ui| { ui.label(&item.description); });
                 }
                 ui.horizontal(|ui| {
-                    let subscribed = self.workshop_subscriptions.contains(&item.published_file_id);
+                    let subscribed = self.workshop.subscriptions.contains(&item.published_file_id);
                     let label = if subscribed { "Unsubscribe" } else { "Subscribe" };
                     if ui.add_enabled(!self.running, egui::Button::new(label)).clicked() {
                         self.set_workshop_subscription(item.published_file_id.clone(), !subscribed);
@@ -241,7 +241,7 @@ impl StudioApp {
                         "Import to Vapor Library"
                     };
                     if ui.add_enabled(!self.running, egui::Button::new(import_label)).clicked() {
-                        self.workshop_id = item.published_file_id.clone();
+                        self.workshop.published_file_id = item.published_file_id.clone();
                         self.download_workshop_item();
                     }
                     if let Some(url) = &item.preview_url {
@@ -252,14 +252,14 @@ impl StudioApp {
             ui.separator();
             ui.label("Download a known public item");
             ui.horizontal(|ui| {
-                ui.add_enabled(!self.running, egui::TextEdit::singleline(&mut self.workshop_id)
+                ui.add_enabled(!self.running, egui::TextEdit::singleline(&mut self.workshop.published_file_id)
                     .hint_text("PublishedFileId")
                     .desired_width(220.0));
                 if ui.add_enabled(!self.running, egui::Button::new("Download item")).clicked() {
                     self.download_workshop_item();
                 }
             });
-            if let Some(acquisition) = self.pending_workshop.clone() {
+            if let Some(acquisition) = self.workshop.pending_acquisition.clone() {
                 ui.separator();
                 ui.label(format!("Cached: {}{} · {}", acquisition.id,
                     acquisition.version.as_ref().map(|version| format!("@{version}")).unwrap_or_default(),

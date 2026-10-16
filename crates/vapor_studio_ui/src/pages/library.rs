@@ -160,7 +160,7 @@ impl StudioApp {
                         ui, &preview,
                     )
                 {
-                    self.workshop_id = published_file_id;
+                    self.workshop.published_file_id = published_file_id;
                     self.section = super::super::Section::Discover;
                     self.download_workshop_item();
                 }

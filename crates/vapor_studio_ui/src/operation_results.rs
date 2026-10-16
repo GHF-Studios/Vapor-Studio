@@ -172,7 +172,7 @@ impl StudioApp {
                     "Downloaded {} ({}) into Vapor's cache.",
                     acquisition.id, acquisition.kind
                 );
-                self.pending_workshop = Some(acquisition);
+                self.workshop.pending_acquisition = Some(acquisition);
             }
             OperationResult::WorkshopPublish(Ok(publication)) => {
                 self.status = format!(
@@ -197,40 +197,40 @@ impl StudioApp {
                     "Staged {} · {} files · {} bytes.",
                     preview.id, preview.files, preview.bytes
                 );
-                self.workshop_preview = Some(preview);
+                self.workshop.preview = Some(preview);
             }
             OperationResult::WorkshopSearch(Ok(page), query) => {
-                self.workshop_page = page.page;
-                self.workshop_result_total = page.total_results;
-                self.workshop_results = page.items;
-                self.workshop_results_query = Some(query);
+                self.workshop.page = page.page;
+                self.workshop.total_results = page.total_results;
+                self.workshop.results = page.items;
+                self.workshop.results_query = Some(query);
                 self.status = format!(
                     "Steam Workshop returned {} items on page {} of {}.",
-                    self.workshop_results.len(),
-                    self.workshop_page,
-                    self.workshop_result_total
+                    self.workshop.results.len(),
+                    self.workshop.page,
+                    self.workshop.total_results
                 );
             }
             OperationResult::WorkshopSubscriptions(Ok(subscriptions)) => {
-                self.workshop_subscriptions = subscriptions
+                self.workshop.subscriptions = subscriptions
                     .iter()
                     .map(|item| item.published_file_id.clone())
                     .collect();
-                self.workshop_subscription_details = subscriptions
+                self.workshop.subscription_details = subscriptions
                     .into_iter()
                     .map(|item| (item.published_file_id.clone(), item))
                     .collect();
                 self.status = format!(
                     "Loaded {} Steam Workshop subscriptions.",
-                    self.workshop_subscriptions.len()
+                    self.workshop.subscriptions.len()
                 );
             }
             OperationResult::WorkshopSubscriptionChange(Ok(()), id, subscribed) => {
                 if subscribed {
-                    self.workshop_subscriptions.insert(id.clone());
+                    self.workshop.subscriptions.insert(id.clone());
                 } else {
-                    self.workshop_subscriptions.remove(&id);
-                    self.workshop_subscription_details.remove(&id);
+                    self.workshop.subscriptions.remove(&id);
+                    self.workshop.subscription_details.remove(&id);
                 }
                 self.status = format!(
                     "{} Steam Workshop item {id}.",
