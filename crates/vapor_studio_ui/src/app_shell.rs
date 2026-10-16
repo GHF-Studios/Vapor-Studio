@@ -131,6 +131,14 @@ impl eframe::App for StudioApp {
         if self.operation.running {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
+        } else if self
+            .workshop
+            .subscription_details
+            .values()
+            .any(|item| item.downloading)
+        {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(1));
         }
     }
 

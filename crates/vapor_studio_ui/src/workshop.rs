@@ -1,7 +1,10 @@
 use super::{StudioApp, catalog_content_selector};
 use super::operation_protocol::OperationResult;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::{Duration, Instant}};
 use vapor_studio_core::OperationKind;
+
+const WORKSHOP_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const WORKSHOP_PROGRESS_POLL_MAX_INTERVAL: Duration = Duration::from_secs(30);
 
 pub(super) struct WorkshopState {
     pub(super) preview: Option<vapor_studio_core::WorkshopPackagePreview>,
@@ -18,6 +21,8 @@ pub(super) struct WorkshopState {
     pub(super) subscriptions_loaded: bool,
     pub(super) subscription_details:
         std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
+    pub(super) subscription_poll_interval: Duration,
+    pub(super) next_subscription_poll: Option<Instant>,
     pub(super) total_results: u32,
     pub(super) page: u32,
 }
@@ -38,6 +43,8 @@ impl Default for WorkshopState {
             subscriptions: Default::default(),
             subscriptions_loaded: false,
             subscription_details: Default::default(),
+            subscription_poll_interval: WORKSHOP_PROGRESS_POLL_INTERVAL,
+            next_subscription_poll: None,
             total_results: 0,
             page: 1,
         }
@@ -68,6 +75,22 @@ impl StudioApp {
 
     pub(super) fn apply_workshop_error(&mut self, error: String) {
         self.status = error;
+    }
+
+    pub(super) fn apply_workshop_subscriptions_error(&mut self, error: String) {
+        self.status = error;
+        let downloading = self.workshop.subscription_details.values().any(|item| item.downloading);
+        if downloading {
+            let interval = self
+                .workshop
+                .subscription_poll_interval
+                .saturating_mul(2)
+                .min(WORKSHOP_PROGRESS_POLL_MAX_INTERVAL);
+            self.workshop.subscription_poll_interval = interval;
+            self.workshop.next_subscription_poll = Some(Instant::now() + interval);
+        } else {
+            self.workshop.next_subscription_poll = None;
+        }
     }
 
     pub(super) fn apply_workshop_acquisition(
@@ -141,6 +164,7 @@ impl StudioApp {
         subscriptions: Vec<vapor_studio_core::WorkshopSubscription>,
     ) {
         self.workshop.subscriptions_loaded = true;
+        let downloading = subscriptions.iter().any(|item| item.downloading);
         self.workshop.subscriptions = subscriptions
             .iter()
             .map(|item| item.published_file_id.clone())
@@ -149,6 +173,9 @@ impl StudioApp {
             .into_iter()
             .map(|item| (item.published_file_id.clone(), item))
             .collect();
+        self.workshop.subscription_poll_interval = WORKSHOP_PROGRESS_POLL_INTERVAL;
+        self.workshop.next_subscription_poll = downloading
+            .then(|| Instant::now() + WORKSHOP_PROGRESS_POLL_INTERVAL);
         self.status = format!(
             "Loaded {} Steam Workshop subscriptions.",
             self.workshop.subscriptions.len()
@@ -367,12 +394,26 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn refresh_workshop_subscriptions(&mut self) {
+        self.workshop.next_subscription_poll = Some(
+            Instant::now() + self.workshop.subscription_poll_interval,
+        );
         self.spawn(OperationKind::LoadWorkshopSubscriptions, move |_context| {
             OperationResult::WorkshopSubscriptions(vapor_studio_core::workshop_subscriptions(
                 vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
             ))
         });
         self.status = "Loading Steam Workshop subscriptions…".to_owned();
+    }
+
+    pub(super) fn poll_workshop_download_progress(&mut self) {
+        let downloading = self.workshop.subscription_details.values().any(|item| item.downloading);
+        let due = self
+            .workshop
+            .next_subscription_poll
+            .is_some_and(|at| Instant::now() >= at);
+        if downloading && due {
+            self.refresh_workshop_subscriptions();
+        }
     }
 
     pub(in crate::app) fn set_workshop_subscription(&mut self, id: String, subscribed: bool) {

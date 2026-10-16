@@ -58,9 +58,11 @@ impl StudioApp {
                 self.apply_workshop_acquisition_error(error)
             }
             OperationResult::WorkshopPublish(Err(error))
-            | OperationResult::WorkshopSearch(Err(error), _)
-            | OperationResult::WorkshopSubscriptions(Err(error)) => {
+            | OperationResult::WorkshopSearch(Err(error), _) => {
                 self.apply_workshop_error(error)
+            }
+            OperationResult::WorkshopSubscriptions(Err(error)) => {
+                self.apply_workshop_subscriptions_error(error)
             }
             OperationResult::WorkshopAcquisition(Ok(acquisitions)) => {
                 self.apply_workshop_acquisition(acquisitions)

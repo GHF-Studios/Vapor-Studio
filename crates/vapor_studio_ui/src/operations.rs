@@ -50,6 +50,9 @@ fn apply_core_operation_event(
 
 impl StudioApp {
     pub(super) fn poll_operation(&mut self) {
+        if !self.operation.running {
+            self.poll_workshop_download_progress();
+        }
         let latest_event = self
             .operation
             .latest_operation_event
