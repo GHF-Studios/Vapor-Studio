@@ -33,6 +33,11 @@ it. The Workspace project overview reads the same Shell-validated metadata back
 so creators can inspect the intended AppID, item identity, visibility, title,
 and tags before staging a review package.
 
+The Workspace file editor opens a bounded set of text sources with TOML syntax
+feedback and contextual guidance. Saves use a per-file lock, check the original
+snapshot again before replacement, preserve file permissions, and restore the
+original if replacement fails.
+
 The Workspace project overview also opens a structured Workshop metadata
 editor for existing source projects. Saving checks that the opened manifest
 snapshot is still current, preserves unrelated manifest fields, validates the

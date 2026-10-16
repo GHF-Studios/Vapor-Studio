@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 use vapor_core::{
     ContentKind, DevelopmentOperation, OperationEvent as CoreOperationEvent,
     OperationRequest as CoreOperationRequest, OperationService, VaporWorkspace,
@@ -2536,6 +2537,9 @@ fn write_workspace_file(
     contents: &str,
 ) -> Result<(), String> {
     let path = safe_workspace_file(root, relative)?;
+    let lock_path = sibling_edit_path(&path, "lock");
+    let _lock = WorkspaceFileEditLock::acquire(lock_path)?;
+    let metadata = fs::metadata(&path).map_err(|error| format!("{}: {error}", relative.display()))?;
     let current =
         fs::read_to_string(&path).map_err(|error| format!("{}: {error}", relative.display()))?;
     if current != expected_contents {
@@ -2544,7 +2548,79 @@ fn write_workspace_file(
             relative.display()
         ));
     }
-    fs::write(&path, contents).map_err(|error| format!("{}: {error}", relative.display()))
+    let temporary = sibling_edit_path(&path, "tmp");
+    let backup = sibling_edit_path(&path, "backup");
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("could not prepare {}: {error}", relative.display()))?;
+        use std::io::Write;
+        file.write_all(contents.as_bytes())
+            .map_err(|error| format!("could not write {}: {error}", relative.display()))?;
+        fs::set_permissions(&temporary, metadata.permissions())
+            .map_err(|error| format!("could not preserve permissions for {}: {error}", relative.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("could not sync {}: {error}", relative.display()))?;
+        let latest = fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", relative.display()))?;
+        if latest != expected_contents {
+            return Err(format!(
+                "{} changed on disk while the save was being prepared; reload before saving",
+                relative.display()
+            ));
+        }
+        fs::rename(&path, &backup)
+            .map_err(|error| format!("could not preserve original {}: {error}", relative.display()))?;
+        if let Err(error) = fs::rename(&temporary, &path) {
+            return Err(match fs::rename(&backup, &path) {
+                Ok(()) => format!("could not replace {}: {error}; original restored", relative.display()),
+                Err(restore) => format!("could not replace {}: {error}; restoring original also failed: {restore}", relative.display()),
+            });
+        }
+        let _ = fs::remove_file(&backup);
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_result
+}
+
+fn sibling_edit_path(path: &Path, suffix: &str) -> PathBuf {
+    let name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("workspace-file"))
+        .to_string_lossy();
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    path.with_file_name(format!(".{name}.{}.{}.studio-{suffix}", std::process::id(), nonce))
+}
+
+struct WorkspaceFileEditLock {
+    path: PathBuf,
+    file: Option<fs::File>,
+}
+
+impl WorkspaceFileEditLock {
+    fn acquire(path: PathBuf) -> Result<Self, String> {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error| format!("cannot acquire workspace file edit lock '{}': {error}", path.display()))?;
+        Ok(Self { path, file: Some(file) })
+    }
+}
+
+impl Drop for WorkspaceFileEditLock {
+    fn drop(&mut self) {
+        drop(self.file.take());
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 fn create_new_workspace_file(
