@@ -179,9 +179,8 @@ impl StudioApp {
                             {
                                 self.load_source_workshop_metadata(&content);
                             }
-                            if content.kind == vapor_core::ContentKind::Packagepack.as_str()
-                                && ui
-                                    .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Edit composition"))
+                            if ui
+                                    .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Edit dependencies"))
                                     .clicked()
                             {
                                 self.composition_edit_selector =

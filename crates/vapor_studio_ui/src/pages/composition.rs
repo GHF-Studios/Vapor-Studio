@@ -5,28 +5,36 @@ use vapor_studio_core::SourceCompositionLink;
 
 impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Compose a Packagepack");
-        ui.label("Edit the dependency graph of a locally authored Packagepack.");
+        ui.heading("Compose source content");
+        ui.label("Edit the dependency graph of a locally authored content project.");
         ui.weak("Vapor Shell owns validation and manifest writes. Studio shows the current source snapshot and the exact graph you are changing.");
 
-        let packagepacks = self
+        let source_projects = self
             .contents
             .iter()
-            .filter(|content| content.kind == vapor_core::ContentKind::Packagepack.as_str())
-            .map(|content| (super::super::source_content_selector(content), content.version.clone()))
+            .map(|content| {
+                (
+                    super::super::source_content_selector(content),
+                    content.kind.clone(),
+                    content.version.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         ui.horizontal(|ui| {
-            ui.label("Source Packagepack");
-            egui::ComboBox::from_id_salt("composition-source-packagepack")
+            ui.label("Source project");
+            egui::ComboBox::from_id_salt("composition-source-project")
                 .selected_text(if self.composition_edit_selector.is_empty() {
-                    "Select a Packagepack".to_owned()
+                    "Select content".to_owned()
                 } else {
                     self.composition_edit_selector.clone()
                 })
                 .show_ui(ui, |ui| {
-                    for (selector, _) in &packagepacks {
+                    for (selector, kind, _) in &source_projects {
                         if ui
-                            .selectable_label(self.composition_edit_selector == *selector, selector)
+                            .selectable_label(
+                                self.composition_edit_selector == *selector,
+                                format!("{selector} · {kind}"),
+                            )
                             .clicked()
                         {
                             self.composition_edit_selector = selector.clone();
@@ -39,34 +47,34 @@ impl StudioApp {
                 .add_enabled(
                     !self.running
                         && !self.workspace_editor_dirty
-                        && !self.composition_edit_selector.trim().is_empty(),
-                    egui::Button::new("Load graph"),
+                    && !self.composition_edit_selector.trim().is_empty(),
+                    egui::Button::new("Load dependencies"),
                 )
                 .clicked()
             {
                 self.load_source_composition();
             }
             if ui
-                .add_enabled(!self.running && self.composition_edit.is_some(), egui::Button::new("Save graph"))
+                .add_enabled(!self.running && self.composition_edit.is_some(), egui::Button::new("Save dependencies"))
                 .clicked()
             {
                 self.save_source_composition();
             }
         });
 
-        if packagepacks.is_empty() {
-            ui.weak("No local Packagepacks found. Open a workspace and discover its content first.");
+        if source_projects.is_empty() {
+            ui.weak("No local content projects found. Open a workspace and discover its content first.");
         }
 
         let mut remove_link = None;
         let mut use_profile_root = false;
         if let Some(composition) = self.composition_edit.as_mut() {
             ui.separator();
-            ui.label(format!("Editing {}", composition.id));
+            ui.label(format!("Editing {} · {}", composition.id, composition.kind));
             ui.small(format!("Manifest: {}", composition.manifest.display()));
             ui.label("Current edges");
             if composition.links.is_empty() {
-                ui.weak("This graph has no edges yet. A valid Packagepack needs exactly one Engine or Enginepack.");
+                ui.weak("This project currently has no dependency edges. Vapor Shell enforces role-specific requirements when saving.");
             }
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 egui::Grid::new("composition-edges")
@@ -114,12 +122,13 @@ impl StudioApp {
                 .iter()
                 .filter(|content| content.id != composition.id)
                 .filter(|content| {
-                    super::super::source_content_kind(&content.kind).is_some_and(|kind| {
-                        vapor_studio_core::source_dependency_allowed(
-                            vapor_core::ContentKind::Packagepack,
-                            kind,
-                        )
-                    })
+                    match (
+                        super::super::source_content_kind(&composition.kind),
+                        super::super::source_content_kind(&content.kind),
+                    ) {
+                        (Some(parent), Some(child)) => vapor_studio_core::source_dependency_relationship(parent, child).is_some(),
+                        _ => false,
+                    }
                 })
                 .map(|content| {
                     (
@@ -160,13 +169,10 @@ impl StudioApp {
                         .find(|(selector, _, _)| selector == &self.composition_link_candidate)
                     {
                         let id = selector.split('@').next().unwrap_or(selector).to_owned();
-                        let relationship = match kind.as_str() {
-                            "engine" => "engine",
-                            "enginepack" => "enginepack",
-                            "game" => "game",
-                            "gamepack" => "gamepack",
-                            _ => "dependency",
-                        };
+                        let relationship = super::super::source_content_kind(&composition.kind)
+                            .and_then(|parent| super::super::source_content_kind(kind)
+                                .and_then(|child| vapor_studio_core::source_dependency_relationship(parent, child)))
+                            .unwrap_or("dependency");
                         if composition.links.iter().any(|link| link.id == id && link.relationship == relationship) {
                             self.status = format!("{id} is already in this graph.");
                         } else {
@@ -182,19 +188,21 @@ impl StudioApp {
                     }
                 }
             });
-            ui.horizontal(|ui| {
-                let graph_saved = self.composition_original_links.as_ref() == Some(&composition.links);
-                if ui.add_enabled(!self.running && graph_saved, egui::Button::new("Use as active profile root"))
-                    .on_disabled_hover_text("Save the current graph before resolving it into a profile.")
-                    .clicked()
-                {
-                    use_profile_root = true;
-                }
-                ui.weak("This selects the source Packagepack and refreshes its resolved plan after save.");
-            });
+            if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
+                ui.horizontal(|ui| {
+                    let graph_saved = self.composition_original_links.as_ref() == Some(&composition.links);
+                    if ui.add_enabled(!self.running && graph_saved, egui::Button::new("Use as active profile root"))
+                        .on_disabled_hover_text("Save the current graph before resolving it into a profile.")
+                        .clicked()
+                    {
+                        use_profile_root = true;
+                    }
+                    ui.weak("This selects the source Packagepack and refreshes its resolved plan after save.");
+                });
+            }
         } else {
             ui.separator();
-            ui.weak("Load a source Packagepack to inspect and edit its graph. Cache and installed copies remain read-only here.");
+            ui.weak("Load a source content project to inspect and edit its dependencies. Cache and installed copies remain read-only here.");
         }
         if use_profile_root {
             self.use_edited_composition_for_profile();

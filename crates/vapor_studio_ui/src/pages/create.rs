@@ -46,6 +46,14 @@ impl StudioApp {
                     ui.selectable_value(&mut self.draft_content_kind, kind, kind.as_str());
                 }
             });
+        let role_constraints = match self.draft_content_kind {
+            vapor_core::ContentKind::Packagepack => "Choose exactly one Engine or Enginepack; optionally choose at most one Game or Gamepack.",
+            vapor_core::ContentKind::Game => "Choose exactly one Engine.",
+            vapor_core::ContentKind::Enginepack => "Choose exactly one Engine.",
+            vapor_core::ContentKind::Gamepack => "Choose exactly one Game.",
+            _ => "Dependencies are checked against this role's supported content kinds.",
+        };
+        ui.weak(role_constraints);
         ui.horizontal(|ui| {
             ui.label("Content ID under this workspace's namespace");
             ui.text_edit_singleline(&mut self.draft_content_id);

@@ -88,13 +88,21 @@ pub fn source_dependency_allowed(
     parent: vapor_core::ContentKind,
     child: vapor_core::ContentKind,
 ) -> bool {
+    source_dependency_relationship(parent, child).is_some()
+}
+
+/// Return the Shell-authored relationship for one supported role pair.
+pub fn source_dependency_relationship(
+    parent: vapor_core::ContentKind,
+    child: vapor_core::ContentKind,
+) -> Option<&'static str> {
     let Some(parent) = shell_content_kind(parent) else {
-        return false;
+        return None;
     };
     let Some(child) = shell_content_kind(child) else {
-        return false;
+        return None;
     };
-    content::source_dependency_allowed(parent, child)
+    content::source_dependency_relationship(parent, child)
 }
 
 pub fn discover_source_content(

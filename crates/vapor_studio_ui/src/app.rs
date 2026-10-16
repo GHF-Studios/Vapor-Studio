@@ -640,22 +640,32 @@ impl StudioApp {
                     self.status = "Created content and opened its manifest.".to_owned();
                 }
                 OperationResult::SourceCompositionLoaded(Ok(composition)) => {
-                    self.composition_edit_selector = composition.id.clone();
+                    self.composition_edit_selector = composition
+                        .version
+                        .as_deref()
+                        .map(|version| format!("{}@{version}", composition.id))
+                        .unwrap_or_else(|| composition.id.clone());
                     self.composition_original_links = Some(composition.links.clone());
                     self.composition_edit = Some(composition);
-                    self.status = "Loaded the source Packagepack graph. Review its edges before saving.".to_owned();
+                    self.status = format!(
+                        "Loaded the {} dependency graph. Review its edges before saving.",
+                        self.composition_edit.as_ref().map(|graph| graph.kind.as_str()).unwrap_or("source content"),
+                    );
                 }
                 OperationResult::SourceCompositionSaved(Ok(composition)) => {
-                    let selected_root = self.profiles[self.active_profile].root_package.as_ref()
-                        .is_some_and(|root| root.id == composition.id);
+                    let affects_active_profile = self.profiles[self.active_profile].root_package.as_ref()
+                        .is_some_and(|root| root.id == composition.id)
+                        || self.profiles[self.active_profile].resolved_graph.as_ref()
+                            .is_some_and(|graph| graph.nodes.iter().any(|node| node.content.id == composition.id));
                     self.composition_original_links = Some(composition.links.clone());
                     self.composition_edit = Some(composition);
-                    if selected_root {
+                    self.workshop_preview = None;
+                    if affects_active_profile {
                         self.profiles[self.active_profile].resolved_graph = None;
                         self.profiles[self.active_profile].installation = vapor_studio_core::InstallationState::NotInstalled;
                         self.repreview_after_catalog_refresh = true;
                     }
-                    self.status = "Saved the Packagepack graph. Studio is refreshing its catalog and composition plan.".to_owned();
+                    self.status = "Saved the source content graph. Studio is refreshing its catalog and composition plan.".to_owned();
                 }
                 OperationResult::SourceWorkshopLoaded(Ok(metadata)) => {
                     self.set_workshop_metadata_fields(&metadata.policy);
@@ -667,6 +677,7 @@ impl StudioApp {
                     self.set_workshop_metadata_fields(&metadata.policy);
                     self.workshop_metadata_edit = Some(metadata.clone());
                     self.workshop_metadata_dirty = false;
+                    self.workshop_preview = None;
                     if let Ok(relative) = metadata.manifest.strip_prefix(Path::new(self.workspace_root.trim())) {
                         let relative = relative.to_path_buf();
                         if self.selected_workspace_file.as_ref() == Some(&relative) {
@@ -1898,28 +1909,31 @@ impl StudioApp {
     }
 
     pub(super) fn load_source_composition(&mut self) {
-        if !self.require_saved_workspace("edit a Packagepack composition") { return; }
+        if !self.require_saved_workspace("edit a source content dependency graph") { return; }
         let selector = self.composition_edit_selector.trim().to_owned();
-        if selector.is_empty() { self.status = "Select a source Packagepack first.".to_owned(); return; }
+        if selector.is_empty() { self.status = "Select a source content project first.".to_owned(); return; }
         let root = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; } };
         self.spawn(OperationKind::LoadComposition, move |_context| {
             OperationResult::SourceCompositionLoaded(vapor_studio_core::load_source_composition(&executable, &root, &selector))
         });
-        self.status = format!("Loading {selector} through Vapor Shell…");
+        self.status = format!("Loading dependencies for {selector} through Vapor Shell…");
     }
 
     pub(super) fn save_source_composition(&mut self) {
-        if !self.require_saved_workspace("save a Packagepack composition") { return; }
-        let Some(composition) = self.composition_edit.clone() else { self.status = "Load a source Packagepack before saving.".to_owned(); return; };
+        if !self.require_saved_workspace("save a source content dependency graph") { return; }
+        let Some(composition) = self.composition_edit.clone() else { self.status = "Load a source content project before saving.".to_owned(); return; };
+        let selector = composition.version.as_deref()
+            .map(|version| format!("{}@{version}", composition.id))
+            .unwrap_or_else(|| composition.id.clone());
         let root = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() { Ok(value) => value, Err(error) => { self.status = format!("Could not locate the Studio executable: {error}"); return; } };
         self.spawn(OperationKind::SaveComposition, move |_context| {
             OperationResult::SourceCompositionSaved(vapor_studio_core::save_source_composition(
-                &executable, &root, &composition.id, &composition.source, &composition.links,
+                &executable, &root, &selector, &composition.source, &composition.links,
             ))
         });
-        self.status = "Validating and saving the Packagepack graph through Vapor Shell…".to_owned();
+        self.status = "Validating and saving the source content graph through Vapor Shell…".to_owned();
     }
 
     pub(super) fn load_source_workshop_metadata(&mut self, content: &vapor_studio_core::SourceContent) {
@@ -1997,6 +2011,10 @@ impl StudioApp {
 
     pub(super) fn use_edited_composition_for_profile(&mut self) {
         let Some(composition) = self.composition_edit.as_ref() else { self.status = "Load a source Packagepack first.".to_owned(); return; };
+        if composition.kind != vapor_core::ContentKind::Packagepack.as_str() {
+            self.status = "Only a Packagepack can be selected as a launch profile root.".to_owned();
+            return;
+        }
         let root = ContentIdentity { id: composition.id.clone(), version: composition.version.clone() };
         self.assign_profile_root(root, Some(PathBuf::from(self.workspace_root.trim())));
         self.preview_selected_composition();
