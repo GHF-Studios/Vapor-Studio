@@ -129,6 +129,16 @@ pub fn source_dependency_relationship(
     content::source_dependency_relationship(parent, child)
 }
 
+/// Return the exclusive role slot used to prevent conflicting content choices.
+pub fn source_dependency_choice_group(
+    parent: vapor_core::ContentKind,
+    child: vapor_core::ContentKind,
+) -> Option<&'static str> {
+    let parent = shell_content_kind(parent)?;
+    let child = shell_content_kind(child)?;
+    content::source_dependency_choice_group(parent, child)
+}
+
 pub fn discover_source_content(
     application_executable: &Path,
     workspace_root: &Path,

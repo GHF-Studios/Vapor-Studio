@@ -29,6 +29,7 @@ impl StudioApp {
                 ui.weak("The destination must be empty. Its package metadata uses this Vapor installation's Steam AppID.");
             });
         ui.separator();
+        let mut content_kind_changed = false;
         egui::ComboBox::from_id_salt("new-content-kind")
             .selected_text(self.draft_content_kind.as_str())
             .show_ui(ui, |ui| {
@@ -43,9 +44,14 @@ impl StudioApp {
                     vapor_core::ContentKind::GameMod,
                     vapor_core::ContentKind::ExtensionMod,
                 ] {
-                    ui.selectable_value(&mut self.draft_content_kind, kind, kind.as_str());
+                    content_kind_changed |= ui
+                        .selectable_value(&mut self.draft_content_kind, kind, kind.as_str())
+                        .changed();
                 }
             });
+        if content_kind_changed {
+            self.draft_dependencies.clear();
+        }
         let role_constraints = match self.draft_content_kind {
             vapor_core::ContentKind::Packagepack => "Choose exactly one Engine or Enginepack; optionally choose at most one Game or Gamepack.",
             vapor_core::ContentKind::Game => "Choose exactly one Engine.",
@@ -140,7 +146,18 @@ impl StudioApp {
                 if !allowed {
                     continue;
                 }
+                let role_group = child_kind.and_then(|kind| {
+                    vapor_studio_core::source_dependency_choice_group(
+                        self.draft_content_kind,
+                        kind,
+                    )
+                });
                 let mut included = self.draft_dependencies.iter().any(|value| value == &id);
+                let choice_help = if role_group.is_some() {
+                    "This occupies one exclusive role slot. Selecting it replaces the current choice for that slot."
+                } else {
+                    "Select any number of supported dependencies."
+                };
                 if ui
                     .checkbox(
                         &mut included,
@@ -151,9 +168,40 @@ impl StudioApp {
                             content.version.as_deref().unwrap_or("unversioned")
                         ),
                     )
+                    .on_hover_text(choice_help)
                     .changed()
                 {
                     if included {
+                        if let Some(role_group) = role_group {
+                            let old_role_choices = self
+                                .contents
+                                .iter()
+                                .filter(|candidate| {
+                                    let candidate_id =
+                                        super::super::source_content_selector(candidate);
+                                    let Some(candidate_kind) =
+                                        super::super::source_content_kind(&candidate.kind)
+                                    else {
+                                        return false;
+                                    };
+                                    let candidate_group = vapor_studio_core::source_dependency_choice_group(
+                                        self.draft_content_kind,
+                                        candidate_kind,
+                                    );
+                                    candidate_group == Some(role_group)
+                                        && self
+                                            .draft_dependencies
+                                            .iter()
+                                            .any(|selected| selected == candidate_id)
+                                })
+                                .map(|candidate| {
+                                    super::super::source_content_selector(candidate).to_owned()
+                                })
+                                .collect::<Vec<_>>();
+                            self.draft_dependencies.retain(|value| {
+                                !old_role_choices.iter().any(|old| old == value)
+                            });
+                        }
                         self.draft_dependencies.push(id.to_owned());
                     } else {
                         self.draft_dependencies.retain(|value| value != &id);

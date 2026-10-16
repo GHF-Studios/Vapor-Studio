@@ -944,6 +944,7 @@ impl StudioApp {
         let catalog_error = catalog.as_ref().err().cloned();
         self.workspace_root = root.display().to_string();
         self.workspace_root_draft = self.workspace_root.clone();
+        self.draft_dependencies.clear();
         self.profiles[self.active_profile].workspace = Some(WorkspaceAssociation { root });
         self.profiles[self.active_profile].root_package = None;
         self.profiles[self.active_profile].resolved_graph = None;
@@ -1871,6 +1872,7 @@ impl StudioApp {
             .map(|workspace| workspace.root.display().to_string())
             .unwrap_or_else(|| self.fallback_workspace_root.display().to_string());
         self.workspace_root_draft = self.workspace_root.clone();
+        self.draft_dependencies.clear();
         self.contents.clear();
         self.catalog.clear();
         self.selected_catalog_content = None;
