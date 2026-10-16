@@ -62,7 +62,7 @@ enum OperationResult {
     WorkshopStage(Result<vapor_studio_core::WorkshopPackagePreview, String>),
     WorkshopAcquisition(Result<vapor_studio_core::WorkshopAcquisition, String>),
     WorkshopPublish(Result<vapor_studio_core::WorkshopPublication, String>),
-    WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>),
+    WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>, String),
     WorkshopSubscriptions(Result<Vec<vapor_studio_core::WorkshopSubscription>, String>),
     WorkshopSubscriptionChange(Result<(), String>, String, bool),
 }
@@ -103,7 +103,7 @@ fn operation_failure(result: &OperationResult) -> Option<String> {
         | OperationResult::WorkshopStage(Err(error))
         | OperationResult::WorkshopAcquisition(Err(error))
         | OperationResult::WorkshopPublish(Err(error))
-        | OperationResult::WorkshopSearch(Err(error))
+        | OperationResult::WorkshopSearch(Err(error), _)
         | OperationResult::WorkshopSubscriptions(Err(error))
         | OperationResult::WorkshopSubscriptionChange(Err(error), _, _) => Some(error.clone()),
         OperationResult::Discovery(_, Err(error)) => Some(error.clone()),
@@ -184,6 +184,7 @@ pub struct StudioApp {
     pending_workshop: Option<vapor_studio_core::WorkshopAcquisition>,
     workshop_search_text: String,
     workshop_results: Vec<vapor_studio_core::WorkshopItem>,
+    workshop_results_query: Option<String>,
     workshop_subscriptions: std::collections::BTreeSet<String>,
     workshop_subscription_details:
         std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
@@ -295,6 +296,7 @@ impl StudioApp {
             pending_workshop: None,
             workshop_search_text: String::new(),
             workshop_results: Vec::new(),
+            workshop_results_query: None,
             workshop_subscriptions: std::collections::BTreeSet::new(),
             workshop_subscription_details: std::collections::BTreeMap::new(),
             workshop_result_total: 0,
@@ -571,7 +573,7 @@ impl StudioApp {
                 }
                 OperationResult::WorkshopAcquisition(Err(error))
                 | OperationResult::WorkshopPublish(Err(error))
-                | OperationResult::WorkshopSearch(Err(error))
+                | OperationResult::WorkshopSearch(Err(error), _)
                 | OperationResult::WorkshopSubscriptions(Err(error)) => self.status = error,
                 OperationResult::WorkshopAcquisition(Ok(acquisition)) => {
                     self.status = format!(
@@ -605,10 +607,11 @@ impl StudioApp {
                     );
                     self.workshop_preview = Some(preview);
                 }
-                OperationResult::WorkshopSearch(Ok(page)) => {
+                OperationResult::WorkshopSearch(Ok(page), query) => {
                     self.workshop_page = page.page;
                     self.workshop_result_total = page.total_results;
                     self.workshop_results = page.items;
+                    self.workshop_results_query = Some(query);
                     self.status = format!(
                         "Steam Workshop returned {} items on page {} of {}.",
                         self.workshop_results.len(),
@@ -1695,12 +1698,18 @@ impl StudioApp {
     pub(in crate::app) fn search_workshop(&mut self) {
         let query = self.workshop_search_text.trim().to_owned();
         let page = self.workshop_page;
+        self.workshop_results.clear();
+        self.workshop_results_query = None;
+        self.workshop_result_total = 0;
         self.spawn(OperationKind::Discover, move |_context| {
-            OperationResult::WorkshopSearch(vapor_studio_core::search_workshop(
-                vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
-                &query,
-                page,
-            ))
+            OperationResult::WorkshopSearch(
+                vapor_studio_core::search_workshop(
+                    vapor_sdk_core::root::types::ROOT_STEAM_APP_ID,
+                    &query,
+                    page,
+                ),
+                query,
+            )
         });
         self.status = "Searching Steam Workshop…".to_owned();
     }

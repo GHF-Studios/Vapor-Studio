@@ -171,6 +171,17 @@ impl StudioApp {
                     }
                 });
             }
+            if let Some(query) = &self.workshop_results_query {
+                if self.workshop_results.is_empty() {
+                    if query.is_empty() {
+                        ui.weak("Workshop search returned no items.");
+                    } else {
+                        ui.weak(format!("No Workshop items matched ‘{query}’."));
+                    }
+                } else {
+                    ui.small(format!("Results for ‘{query}’"));
+                }
+            }
             for item in self.workshop_results.clone() {
                 ui.separator();
                 ui.horizontal(|ui| {
