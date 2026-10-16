@@ -215,9 +215,18 @@ impl StudioApp {
         let saved_workspace = creation
             .storage
             .and_then(|storage| storage.get_string("workspace_root"));
-        let root = workspace
+        let current_directory = std::env::current_dir().ok();
+        let requested_workspace = workspace
             .or_else(|| saved_workspace.map(PathBuf::from))
-            .or_else(|| std::env::current_dir().ok())
+            .or_else(|| {
+                current_directory
+                    .as_ref()
+                    .filter(|root| root.join("Workspace.vapor.toml").is_file())
+                    .cloned()
+            });
+        let root = requested_workspace
+            .clone()
+            .or(current_directory)
             .unwrap_or_default();
         let saved_profiles = creation
             .storage
@@ -246,8 +255,12 @@ impl StudioApp {
             .workspace
             .as_ref()
             .map(|workspace| workspace.root.display().to_string())
-            .unwrap_or_else(|| root.display().to_string());
-        let workspace_root_draft = workspace_root.clone();
+            .unwrap_or_default();
+        let workspace_root_draft = if workspace_root.is_empty() {
+            root.display().to_string()
+        } else {
+            workspace_root.clone()
+        };
         let mut app = Self {
             section: if play_mode {
                 Section::Library
@@ -341,6 +354,8 @@ impl StudioApp {
         app.refresh_registered_sources();
         if play_mode {
             app.launch_default_profile();
+        } else if let Some(workspace) = requested_workspace {
+            app.open_workspace_path(workspace);
         } else {
             app.discover();
         }
@@ -889,7 +904,7 @@ impl StudioApp {
     }
 
     fn run_operation(&mut self, operation: DevelopmentOperation) {
-        if !self.require_saved_workspace("run a workspace operation") {
+        if !self.require_open_workspace("run a workspace operation") {
             return;
         }
         let root = PathBuf::from(self.workspace_root.trim());
@@ -940,15 +955,21 @@ impl StudioApp {
         catalog: Result<Vec<vapor_studio_core::CatalogContent>, String>,
         files: Vec<PathBuf>,
     ) {
+        let workspace_changed = self.profiles[self.active_profile]
+            .workspace
+            .as_ref()
+            .is_none_or(|workspace| workspace.root != root);
         let catalog_error = catalog.as_ref().err().cloned();
         self.workspace_root = root.display().to_string();
         self.workspace_root_draft = self.workspace_root.clone();
         self.draft_dependencies.clear();
-        self.profiles[self.active_profile].workspace = Some(WorkspaceAssociation { root });
-        self.profiles[self.active_profile].root_package = None;
-        self.profiles[self.active_profile].resolved_graph = None;
-        self.profiles[self.active_profile].installation =
-            vapor_studio_core::InstallationState::Unknown;
+        let profile = &mut self.profiles[self.active_profile];
+        profile.workspace = Some(WorkspaceAssociation { root });
+        if workspace_changed {
+            profile.root_package = None;
+            profile.resolved_graph = None;
+            profile.installation = vapor_studio_core::InstallationState::Unknown;
+        }
         self.contents = contents;
         self.catalog = catalog.unwrap_or_default();
         self.selected_catalog_content = None;
@@ -992,10 +1013,6 @@ impl StudioApp {
             self.status = "Enter a workspace folder path.".to_owned();
             return;
         }
-        if path == Path::new(self.workspace_root.trim()) {
-            self.status = "That workspace is already open for this profile.".to_owned();
-            return;
-        }
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
@@ -1021,7 +1038,7 @@ impl StudioApp {
     }
 
     pub(super) fn validate_source_project(&mut self, content: &vapor_studio_core::SourceContent) {
-        if !self.require_saved_workspace("validate this content project") {
+        if !self.require_open_workspace("validate this content project") {
             return;
         }
         let root = PathBuf::from(self.workspace_root.trim());
@@ -1042,7 +1059,7 @@ impl StudioApp {
     }
 
     fn validate_selected_source(&mut self) {
-        if !self.require_saved_workspace("validate source content") {
+        if !self.require_open_workspace("validate source content") {
             return;
         }
         let Some(root_package) = self
@@ -1072,7 +1089,7 @@ impl StudioApp {
     }
 
     pub(super) fn validate_workspace_source(&mut self) {
-        if !self.require_saved_workspace("validate workspace content") {
+        if !self.require_open_workspace("validate workspace content") {
             return;
         }
         let root = PathBuf::from(self.workspace_root.trim());
@@ -1170,7 +1187,7 @@ impl StudioApp {
     }
 
     pub(super) fn preview_source_composition(&mut self, selector: String) {
-        if !self.require_saved_workspace("preview this source composition") {
+        if !self.require_open_workspace("preview this source composition") {
             return;
         }
         let workspace = Some(PathBuf::from(self.workspace_root.trim()));
@@ -1219,7 +1236,7 @@ impl StudioApp {
             );
             return;
         }
-        if !self.require_saved_workspace("stage this Workshop item") {
+        if !self.require_open_workspace("stage this Workshop item") {
             return;
         }
         self.invalidate_workshop_review();
@@ -1252,7 +1269,7 @@ impl StudioApp {
             );
             return;
         }
-        if !self.require_saved_workspace("publish this Workshop item") {
+        if !self.require_open_workspace("publish this Workshop item") {
             return;
         }
         let account = self.workshop_account.trim().to_owned();
@@ -1507,7 +1524,7 @@ impl StudioApp {
     }
 
     fn run_selected(&mut self) {
-        if !self.require_saved_workspace("build and play this workspace composition") {
+        if !self.require_open_workspace("build and play this workspace composition") {
             return;
         }
         let Some(profile) = self.profiles.get(self.active_profile).cloned() else {
@@ -1556,7 +1573,27 @@ impl StudioApp {
         false
     }
 
+    fn require_open_workspace(&mut self, action: &str) -> bool {
+        if !self.require_saved_workspace(action) {
+            return false;
+        }
+        if self
+            .profiles
+            .get(self.active_profile)
+            .and_then(|profile| profile.workspace.as_ref())
+            .is_some()
+            && !self.workspace_root.trim().is_empty()
+        {
+            return true;
+        }
+        self.status = format!("Open a Vapor Workspace before you {action}.");
+        false
+    }
+
     fn refresh_workspace_files(&mut self) {
+        if !self.require_open_workspace("read workspace files") {
+            return;
+        }
         let root = PathBuf::from(self.workspace_root.trim());
         self.spawn(OperationKind::DiscoverWorkspace, move |_context| {
             OperationResult::WorkspaceFiles(discover_workspace_files(&root))
@@ -1584,6 +1621,9 @@ impl StudioApp {
     }
 
     fn open_workspace_file(&mut self, path: PathBuf) {
+        if !self.require_open_workspace("open a workspace file") {
+            return;
+        }
         if self.manifest_metadata_dirty {
             self.status = "Save or discard structured manifest edits before opening another file.".to_owned();
             return;
@@ -1603,6 +1643,9 @@ impl StudioApp {
     }
 
     fn save_workspace_file(&mut self) {
+        if !self.require_open_workspace("save a workspace file") {
+            return;
+        }
         let Some(path) = self.selected_workspace_file.clone() else {
             return;
         };
@@ -1618,6 +1661,9 @@ impl StudioApp {
     }
 
     pub(super) fn reload_workspace_file(&mut self) {
+        if !self.require_open_workspace("reload a workspace file") {
+            return;
+        }
         let Some(path) = self.selected_workspace_file.clone() else {
             return;
         };
@@ -1631,6 +1677,9 @@ impl StudioApp {
     }
 
     pub(super) fn create_workspace_file(&mut self) {
+        if !self.require_open_workspace("create a workspace file") {
+            return;
+        }
         let root = PathBuf::from(self.workspace_root.trim());
         let relative = PathBuf::from(self.new_workspace_file_path.trim());
         if relative.as_os_str().is_empty() {
@@ -1869,13 +1918,22 @@ impl StudioApp {
             .workspace
             .as_ref()
             .map(|workspace| workspace.root.display().to_string())
-            .unwrap_or_else(|| self.fallback_workspace_root.display().to_string());
-        self.workspace_root_draft = self.workspace_root.clone();
+            .unwrap_or_default();
+        self.workspace_root_draft = if self.workspace_root.is_empty() {
+            self.fallback_workspace_root.display().to_string()
+        } else {
+            self.workspace_root.clone()
+        };
         self.draft_dependencies.clear();
         self.contents.clear();
         self.catalog.clear();
         self.selected_catalog_content = None;
         self.composition_preview = None;
+        self.composition_edit = None;
+        self.composition_original_links = None;
+        self.composition_edit_selector.clear();
+        self.composition_link_candidate.clear();
+        self.repreview_after_catalog_refresh = false;
         self.invalidate_workshop_review();
         self.pending_content_unregistration = None;
         self.workshop_metadata_edit = None;
@@ -1887,6 +1945,7 @@ impl StudioApp {
         self.workspace_editor_original.clear();
         self.workspace_editor_toml_diagnostic = None;
         self.workspace_editor_dirty = false;
+        self.workspace_files_open = false;
         self.new_workspace_file_path.clear();
         self.unregistered_projects = vapor_studio_core::UnregisteredProjectScan::default();
         self.discover();
@@ -1901,9 +1960,10 @@ impl StudioApp {
             self.status = "Save or discard structured manifest edits before changing the profile composition.".to_owned();
             return;
         }
-        let next_workspace = workspace
-            .clone()
-            .unwrap_or_else(|| self.fallback_workspace_root.clone());
+        let current_workspace = self.profiles[self.active_profile]
+            .workspace
+            .as_ref()
+            .map(|association| association.root.clone());
         if self.catalog.iter().any(|content| {
             content.identity() == identity
                 && !content.is_unambiguous()
@@ -1914,16 +1974,16 @@ impl StudioApp {
             );
             return;
         }
-        if self.workspace_editor_dirty && Path::new(self.workspace_root.trim()) != next_workspace {
+        if self.workspace_editor_dirty && current_workspace.as_deref() != workspace.as_deref() {
             self.status =
                 "Save or discard workspace edits before assigning content from another workspace."
                     .to_owned();
             return;
         }
-        let workspace_changed = Path::new(self.workspace_root.trim()) != next_workspace;
+        let workspace_changed = current_workspace != workspace;
         let profile = &mut self.profiles[self.active_profile];
         profile.root_package = Some(identity.clone());
-        profile.workspace = workspace.map(|root| WorkspaceAssociation { root });
+        profile.workspace = workspace.clone().map(|root| WorkspaceAssociation { root });
         profile.resolved_graph = None;
         profile.installation = vapor_studio_core::InstallationState::NotInstalled;
         self.composition_preview = None;
@@ -1933,12 +1993,20 @@ impl StudioApp {
             self.composition_edit_selector.clear();
             self.composition_link_candidate.clear();
             self.repreview_after_catalog_refresh = false;
-            self.workspace_root = next_workspace.display().to_string();
-            self.workspace_root_draft = self.workspace_root.clone();
+            self.workspace_root = workspace
+                .as_ref()
+                .map(|root| root.display().to_string())
+                .unwrap_or_default();
+            self.workspace_root_draft = if self.workspace_root.is_empty() {
+                self.fallback_workspace_root.display().to_string()
+            } else {
+                self.workspace_root.clone()
+            };
             self.contents.clear();
             self.catalog.clear();
             self.selected_catalog_content = None;
             self.workspace_files.clear();
+            self.workspace_files_open = false;
             self.selected_workspace_file = None;
             self.workspace_editor.clear();
             self.workspace_editor_original.clear();
@@ -1957,8 +2025,9 @@ impl StudioApp {
 
     fn add_profile(&mut self) {
         let name = self.new_profile_name.trim();
-        let workspace = PathBuf::from(self.workspace_root.trim());
-        let index = match vapor_studio_core::add_profile(&mut self.profiles, name, Some(workspace))
+        let workspace = (!self.workspace_root.trim().is_empty())
+            .then(|| PathBuf::from(self.workspace_root.trim()));
+        let index = match vapor_studio_core::add_profile(&mut self.profiles, name, workspace)
         {
             Ok(index) => index,
             Err(error) => {
@@ -2019,7 +2088,7 @@ impl StudioApp {
     }
 
     pub(super) fn load_source_composition(&mut self) {
-        if !self.require_saved_workspace("edit a source content dependency graph") { return; }
+        if !self.require_open_workspace("edit a source content dependency graph") { return; }
         let selector = self.composition_edit_selector.trim().to_owned();
         if selector.is_empty() { self.status = "Select a source content project first.".to_owned(); return; }
         let root = PathBuf::from(self.workspace_root.trim());
@@ -2031,7 +2100,7 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_composition(&mut self) {
-        if !self.require_saved_workspace("save a source content dependency graph") { return; }
+        if !self.require_open_workspace("save a source content dependency graph") { return; }
         let Some(composition) = self.composition_edit.clone() else { self.status = "Load a source content project before saving.".to_owned(); return; };
         let selector = composition.version.as_deref()
             .map(|version| format!("{}@{version}", composition.id))
@@ -2047,7 +2116,7 @@ impl StudioApp {
     }
 
     pub(super) fn load_source_workshop_metadata(&mut self, content: &vapor_studio_core::SourceContent) {
-        if !self.require_saved_workspace("edit Workshop metadata") { return; }
+        if !self.require_open_workspace("edit Workshop metadata") { return; }
         let selector = source_content_selector(content);
         let root = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
@@ -2063,7 +2132,7 @@ impl StudioApp {
     }
 
     pub(super) fn load_source_runtime_outputs(&mut self, content: &vapor_studio_core::SourceContent) {
-        if !self.require_saved_workspace("edit runtime output declarations") { return; }
+        if !self.require_open_workspace("edit runtime output declarations") { return; }
         let selector = source_content_selector(content);
         let root = PathBuf::from(self.workspace_root.trim());
         let executable = match std::env::current_exe() {
@@ -2079,6 +2148,7 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_runtime_outputs(&mut self) {
+        if !self.require_open_workspace("save runtime output declarations") { return; }
         if self.workspace_editor_dirty {
             self.status = "Save or reload the open file before saving runtime outputs.".to_owned();
             return;
@@ -2131,6 +2201,7 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_workshop_metadata(&mut self) {
+        if !self.require_open_workspace("save Workshop metadata") { return; }
         if self.workspace_editor_dirty {
             self.status = "Save or reload the open file before saving Workshop metadata.".to_owned();
             return;
@@ -2199,7 +2270,7 @@ impl StudioApp {
     }
 
     fn create_content_workspace(&mut self) {
-        if !self.require_saved_workspace("create content in this workspace") {
+        if !self.require_open_workspace("create content in this workspace") {
             return;
         }
         let root = PathBuf::from(self.workspace_root.trim());
@@ -2323,7 +2394,7 @@ impl StudioApp {
     }
 
     pub(super) fn scan_unregistered_content_projects(&mut self) {
-        if !self.require_saved_workspace("scan for unregistered content") {
+        if !self.require_open_workspace("scan for unregistered content") {
             return;
         }
         let executable = match std::env::current_exe() {
@@ -2343,7 +2414,7 @@ impl StudioApp {
     }
 
     pub(super) fn adopt_content_project(&mut self, project_path: PathBuf) {
-        if !self.require_saved_workspace("adopt a content project") {
+        if !self.require_open_workspace("adopt a content project") {
             return;
         }
         let executable = match std::env::current_exe() {
@@ -2366,7 +2437,7 @@ impl StudioApp {
     }
 
     pub(super) fn unregister_content_project(&mut self) {
-        if !self.require_saved_workspace("unregister a content project") {
+        if !self.require_open_workspace("unregister a content project") {
             return;
         }
         let Some(project) = self.pending_content_unregistration.clone() else {
@@ -2392,6 +2463,9 @@ impl StudioApp {
     }
 
     pub(super) fn remember_open_workspace(&mut self) {
+        if !self.require_open_workspace("add this workspace to Vapor sources") {
+            return;
+        }
         let root = PathBuf::from(self.workspace_root.trim());
         if root.as_os_str().is_empty() {
             self.status = "Open a workspace before adding it to Vapor sources.".to_owned();

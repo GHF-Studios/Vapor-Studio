@@ -36,6 +36,7 @@ impl StudioApp {
         ui.separator();
         if !self.workspace_files_open {
             ui.label("Operations use the workspace pin and Vapor-managed toolchain and cache.");
+            let has_workspace = !self.workspace_root.trim().is_empty();
             ui.horizontal(|ui| {
                 if ui.button("Refresh registered workspaces").clicked() {
                     self.refresh_registered_sources();
@@ -413,8 +414,15 @@ impl StudioApp {
                     ("Clean", DevelopmentOperation::Clean),
                 ] {
                     if ui
-                        .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new(label))
-                        .on_disabled_hover_text("Save or reload the open file first; workspace operations read files from disk.")
+                        .add_enabled(
+                            !self.running && !self.workspace_editor_dirty && has_workspace,
+                            egui::Button::new(label),
+                        )
+                        .on_disabled_hover_text(if has_workspace {
+                            "Save or reload the open file first; workspace operations read files from disk."
+                        } else {
+                            "Open a Vapor Workspace before running workspace operations."
+                        })
                         .clicked()
                     {
                         self.run_operation(operation);
