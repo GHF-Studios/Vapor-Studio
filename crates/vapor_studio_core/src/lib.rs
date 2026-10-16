@@ -49,6 +49,6 @@ pub use workspace::{
     load_source_workshop_metadata, load_source_runtime_outputs, save_source_composition,
     save_source_workshop_metadata, save_source_runtime_outputs, remember_workspace, scan_unregistered_content_projects,
     source_dependency_allowed, source_dependency_choice_group, source_dependency_relationship,
-    validate_profile_source,
+    source_required_dependency_choice_group, validate_profile_source,
     validate_workspace_source,
 };

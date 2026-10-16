@@ -59,6 +59,21 @@ impl StudioApp {
             vapor_core::ContentKind::Gamepack => "Choose exactly one Game.",
             _ => "Dependencies are checked against this role's supported content kinds.",
         };
+        let required_role_group =
+            vapor_studio_core::source_required_dependency_choice_group(self.draft_content_kind);
+        let required_role_selected = required_role_group.is_none_or(|required_group| {
+            self.contents.iter().any(|content| {
+                self.draft_dependencies
+                    .iter()
+                    .any(|selected| selected == super::super::source_content_selector(content))
+                    && super::super::source_content_kind(&content.kind).is_some_and(|kind| {
+                        vapor_studio_core::source_dependency_choice_group(
+                            self.draft_content_kind,
+                            kind,
+                        ) == Some(required_group)
+                    })
+            })
+        });
         ui.weak(role_constraints);
         ui.horizontal(|ui| {
             ui.label("Content ID under this workspace's namespace");
@@ -124,8 +139,20 @@ impl StudioApp {
                 self.discover();
             }
             if ui
-                .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Create content workspace"))
-                .on_disabled_hover_text("Save or reload the open file before creating content; Studio opens the new manifest afterward.")
+                .add_enabled(
+                    !self.running
+                        && !self.workspace_editor_dirty
+                        && !self.workspace_root.trim().is_empty()
+                        && required_role_selected,
+                    egui::Button::new("Create content workspace"),
+                )
+                .on_disabled_hover_text(if !required_role_selected {
+                    "Select the required Engine, Enginepack, Game, or Gamepack role first."
+                } else if self.workspace_root.trim().is_empty() {
+                    "Open a Vapor Workspace before creating content."
+                } else {
+                    "Save or reload the open file before creating content; Studio opens the new manifest afterward."
+                })
                 .clicked()
             {
                 self.create_content_workspace();
