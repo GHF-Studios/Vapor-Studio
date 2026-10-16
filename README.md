@@ -37,7 +37,8 @@ and tags before staging a review package.
 The Workspace file editor opens a bounded set of text sources with TOML syntax
 feedback and contextual guidance. Saves use a per-file lock, check the original
 snapshot again before replacement, preserve file permissions, and restore the
-original if replacement fails.
+original if replacement fails. Creating a file can make missing parent folders
+inside the workspace, while rejecting path escapes and symlinked folders.
 
 The Workspace project overview also opens a structured Workshop metadata
 editor for existing source projects. Saving checks that the opened manifest

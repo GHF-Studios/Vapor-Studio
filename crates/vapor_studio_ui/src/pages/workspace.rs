@@ -424,7 +424,7 @@ impl StudioApp {
                 self.create_workspace_file();
             }
         });
-        ui.weak("Creates a new text file inside an existing workspace folder; existing files are never overwritten.");
+        ui.weak("Creates a new text file inside this workspace, making missing parent folders as needed; existing files are never overwritten.");
         ui.horizontal(|ui| {
             ui.heading("Files");
             if ui

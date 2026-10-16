@@ -2657,29 +2657,74 @@ fn create_new_workspace_file(
     }
     let root = fs::canonicalize(root).map_err(|error| format!("{}: {error}", root.display()))?;
     let requested = root.join(relative);
-    let parent = requested
+    let relative_parent = relative
         .parent()
         .ok_or_else(|| "file path has no parent directory".to_owned())?;
-    let parent =
-        fs::canonicalize(parent).map_err(|error| format!("{}: {error}", parent.display()))?;
-    if !parent.starts_with(&root) || !parent.is_dir() {
-        return Err("file path must stay inside an existing workspace directory".to_owned());
+    let mut parent = root.clone();
+    let mut created_directories = Vec::new();
+    for component in relative_parent.components() {
+        let Component::Normal(name) = component else {
+            return Err("file parent path must stay inside the workspace".to_owned());
+        };
+        parent.push(name);
+        match fs::symlink_metadata(&parent) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                cleanup_created_directories(&created_directories);
+                return Err(format!(
+                    "file parent must use regular workspace directories: {}",
+                    parent.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Err(error) = fs::create_dir(&parent) {
+                    cleanup_created_directories(&created_directories);
+                    return Err(format!("could not create folder {}: {error}", parent.display()));
+                }
+                created_directories.push(parent.clone());
+            }
+            Err(error) => {
+                cleanup_created_directories(&created_directories);
+                return Err(format!("{}: {error}", parent.display()));
+            }
+        }
+        let canonical_parent = match fs::canonicalize(&parent) {
+            Ok(path) => path,
+            Err(error) => {
+                cleanup_created_directories(&created_directories);
+                return Err(format!("{}: {error}", parent.display()));
+            }
+        };
+        if !canonical_parent.starts_with(&root) {
+            cleanup_created_directories(&created_directories);
+            return Err("file path must stay inside the workspace".to_owned());
+        }
+        parent = canonical_parent;
     }
-    let name = requested
-        .file_name()
-        .ok_or_else(|| "file path must include a filename".to_owned())?;
+    let Some(name) = requested.file_name() else {
+        cleanup_created_directories(&created_directories);
+        return Err("file path must include a filename".to_owned());
+    };
     let target = parent.join(name);
-    let _file = fs::OpenOptions::new()
+    let file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&target)
         .map_err(|error| {
+            cleanup_created_directories(&created_directories);
             format!(
                 "could not create {} without overwriting: {error}",
                 relative.display()
             )
         })?;
+    drop(file);
     Ok(relative.to_path_buf())
+}
+
+fn cleanup_created_directories(directories: &[PathBuf]) {
+    for directory in directories.iter().rev() {
+        let _ = fs::remove_dir(directory);
+    }
 }
 
 pub(super) fn catalog_matches_filters(
