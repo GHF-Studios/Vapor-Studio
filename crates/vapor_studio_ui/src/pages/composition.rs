@@ -69,6 +69,7 @@ impl StudioApp {
         let mut remove_link = None;
         let mut use_profile_root = false;
         let mut preview_source_selector = None;
+        let mut stage_source_selector = None;
         let mut source_graph_saved = false;
         if let Some(composition) = self.composition_edit.as_mut() {
             ui.separator();
@@ -190,9 +191,9 @@ impl StudioApp {
                     }
                 }
             });
+            source_graph_saved = self.composition_original_links.as_ref() == Some(&composition.links);
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
-                source_graph_saved = self.composition_original_links.as_ref() == Some(&composition.links);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let source_selector = composition.version.as_ref()
                         .map(|version| format!("{}@{version}", composition.id))
                         .unwrap_or_else(|| composition.id.clone());
@@ -208,6 +209,20 @@ impl StudioApp {
                     ui.weak("This selects the source Packagepack and refreshes its resolved plan after save.");
                 });
             }
+            if ui
+                .add_enabled(
+                    !self.running && source_graph_saved,
+                    egui::Button::new("Stage Workshop review"),
+                )
+                .on_disabled_hover_text("Save the current graph before staging its source content for review.")
+                .clicked()
+            {
+                stage_source_selector = Some(
+                    composition.version.as_ref()
+                        .map(|version| format!("{}@{version}", composition.id))
+                        .unwrap_or_else(|| composition.id.clone()),
+                );
+            }
         } else {
             ui.separator();
             ui.weak("Load a source content project to inspect and edit its dependencies. Cache and installed copies remain read-only here.");
@@ -217,6 +232,11 @@ impl StudioApp {
         }
         if use_profile_root {
             self.use_edited_composition_for_profile();
+        }
+        if let Some(selector) = stage_source_selector {
+            self.selected_catalog_content = Some(selector.clone());
+            self.section = super::super::Section::Discover;
+            self.stage_workshop_content(selector);
         }
         let selector = self.composition_edit.as_ref().map(|composition| {
             composition.version.as_ref()

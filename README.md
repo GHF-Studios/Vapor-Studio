@@ -13,6 +13,9 @@ manifest. A saved Packagepack graph can become the active profile root and be
 previewed directly against workspace, cache, and installed content, with source
 provenance, blockers, and Workshop acquisition links shown beside the graph.
 That preview is read-only; cache and installed content remain unchanged.
+Any saved source project can also move straight from Compose to a staged
+Workshop review. Studio opens the existing review surface; publishing still
+requires the separate explicit review and confirmation.
 
 The Workspace screen also surfaces projects from the explicit Vapor project
 registry. It shows their role, version, dependencies, and declared runtime
