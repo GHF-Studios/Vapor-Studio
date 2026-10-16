@@ -76,6 +76,67 @@ impl StudioApp {
                 self.open_workspace_path(PathBuf::from(self.workspace_root_draft.trim()));
             }
         });
+        if !self.contents.is_empty() {
+            ui.collapsing(format!("Content projects · {}", self.contents.len()), |ui| {
+                ui.label("These are the content projects Vapor discovered from this Workspace's explicit project registry.");
+                for content in self.contents.clone() {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong(&content.id);
+                            ui.weak(&content.kind);
+                            ui.weak(content.version.as_deref().unwrap_or("workspace version"));
+                        });
+                        if !content.dependencies.is_empty() {
+                            ui.small(format!("Dependencies: {}", content.dependencies.join(" · ")));
+                        }
+                        ui.horizontal(|ui| {
+                            let relative_manifest = content
+                                .manifest
+                                .strip_prefix(Path::new(self.workspace_root.trim()))
+                                .ok()
+                                .map(PathBuf::from);
+                            if let Some(relative_manifest) = relative_manifest {
+                                if ui
+                                    .add_enabled(
+                                        !self.running && !self.workspace_editor_dirty,
+                                        egui::Button::new("Edit manifest"),
+                                    )
+                                    .on_disabled_hover_text("Save or discard the current file before opening a project manifest.")
+                                    .clicked()
+                                {
+                                    self.open_workspace_file(relative_manifest);
+                                }
+                            }
+                            if content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                                && ui
+                                    .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Edit composition"))
+                                    .clicked()
+                            {
+                                self.composition_edit_selector =
+                                    super::super::source_content_selector(&content);
+                                self.composition_edit = None;
+                                self.composition_original_links = None;
+                                self.section = super::super::Section::Compose;
+                                self.load_source_composition();
+                            }
+                            if content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                                && ui
+                                    .add_enabled(!self.running && !self.workspace_editor_dirty, egui::Button::new("Use in active profile"))
+                                    .clicked()
+                            {
+                                self.assign_profile_root(
+                                    vapor_studio_core::ContentIdentity {
+                                        id: content.id.clone(),
+                                        version: content.version.clone(),
+                                    },
+                                    Some(PathBuf::from(self.workspace_root.trim())),
+                                );
+                            }
+                        });
+                    });
+                }
+            });
+        }
         ui.horizontal_wrapped(|ui| {
             if ui.add_enabled(!self.running && !self.workspace_editor_dirty && !self.workspace_root.trim().is_empty(), egui::Button::new("Validate content"))
                 .on_disabled_hover_text("Save or reload the open file first; validation reads workspace files from disk.")

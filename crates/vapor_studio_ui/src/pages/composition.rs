@@ -68,23 +68,41 @@ impl StudioApp {
             if composition.links.is_empty() {
                 ui.weak("This graph has no edges yet. A valid Packagepack needs exactly one Engine or Enginepack.");
             }
-            egui::Grid::new("composition-edges")
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.strong("Role");
-                    ui.strong("Content");
-                    ui.strong("Version requirement");
-                    ui.end_row();
-                    for (index, link) in composition.links.iter().enumerate() {
-                        ui.label(&link.relationship);
-                        ui.label(&link.id);
-                        ui.label(link.version.as_deref().unwrap_or("any compatible version"));
-                        if ui.small_button("Remove").clicked() {
-                            remove_link = Some(index);
-                        }
+            egui::ScrollArea::horizontal().show(ui, |ui| {
+                egui::Grid::new("composition-edges")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.strong("Role");
+                        ui.strong("Content");
+                        ui.strong("Version requirement");
+                        ui.strong("Optional");
+                        ui.strong("Reason");
                         ui.end_row();
-                    }
-                });
+                        for (index, link) in composition.links.iter_mut().enumerate() {
+                            ui.label(&link.relationship);
+                            ui.label(&link.id);
+                            let mut version = link.version.clone().unwrap_or_default();
+                            if ui
+                                .add(egui::TextEdit::singleline(&mut version).desired_width(150.0).hint_text("any compatible version"))
+                                .changed()
+                            {
+                                link.version = (!version.trim().is_empty()).then_some(version);
+                            }
+                            ui.checkbox(&mut link.optional, "");
+                            let mut reason = link.reason.clone().unwrap_or_default();
+                            if ui
+                                .add(egui::TextEdit::singleline(&mut reason).desired_width(180.0).hint_text("Why is this included?"))
+                                .changed()
+                            {
+                                link.reason = (!reason.trim().is_empty()).then_some(reason);
+                            }
+                            if ui.small_button("Remove").clicked() {
+                                remove_link = Some(index);
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
             if let Some(index) = remove_link {
                 composition.links.remove(index);
             }

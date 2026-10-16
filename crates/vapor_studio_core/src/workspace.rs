@@ -11,6 +11,7 @@ pub struct SourceContent {
     pub version: Option<String>,
     pub kind: String,
     pub root: PathBuf,
+    pub manifest: PathBuf,
     pub dependencies: Vec<String>,
 }
 
@@ -66,6 +67,7 @@ pub fn discover_source_content(
             version: artifact.version().map(ToOwned::to_owned),
             kind: artifact.kind().to_string(),
             root: artifact.root().to_path_buf(),
+            manifest: artifact.manifest().to_path_buf(),
             dependencies: artifact
                 .dependencies()
                 .iter()

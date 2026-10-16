@@ -11,3 +11,9 @@ remove workspace content edges, then asks Shell to enforce role/cardinality,
 version, cycle, and local-descendant rules before replacing the manifest. A
 saved graph can become the active profile root and be resolved through the
 normal composition preview. Cache and installed Packagepacks remain read-only.
+
+The Workspace screen also surfaces projects from the explicit Vapor project
+registry. It shows their role, version, and dependencies, and provides direct
+links to each manifest and to Packagepack graph editing/profile selection. The
+Packagepack composer also exposes version requirements, optional edges, and
+dependency reasons; Vapor Shell validates them before saving.
