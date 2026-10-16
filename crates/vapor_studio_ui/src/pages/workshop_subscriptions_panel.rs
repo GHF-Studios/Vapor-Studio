@@ -4,7 +4,7 @@ use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_workshop_subscriptions_panel(&mut self, ui: &mut egui::Ui) {
-        section_header(ui, "Your Steam subscriptions", "Steam subscription downloads and Vapor Library imports are separate steps.");
+        section_header(ui, "Your Steam subscriptions", "Steam subscription downloads and imports to Vapor's local cache are separate steps.");
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
@@ -73,7 +73,7 @@ impl StudioApp {
                             }
                         }
                         if locally_available {
-                            ui.weak("Available in Vapor Library");
+                            ui.weak("Available in local content");
                             let available_packagepack = self.catalog.items.iter().any(|content| {
                                 content.published_file_id.as_deref() == Some(id.as_str())
                                     && content.kind
@@ -110,9 +110,9 @@ impl StudioApp {
                             }
                         }
                         let import_label = if locally_available {
-                            "Update Vapor Library copy"
+                            "Refresh cached copy"
                         } else {
-                            "Import to Vapor Library"
+                            "Import to Vapor cache"
                         };
                         if ui.add_enabled(!self.operation.running, egui::Button::new(import_label)).clicked() {
                             self.workshop.published_file_id = id.clone();

@@ -8,7 +8,7 @@ impl StudioApp {
             for (tab, label) in [
                 (WorkshopTab::Browse, "Browse items"),
                 (WorkshopTab::Subscriptions, "Subscriptions"),
-                (WorkshopTab::Imports, "Vapor Library"),
+                (WorkshopTab::Imports, "Recent imports"),
             ] {
                 if ui
                     .add(egui::Button::selectable(self.workshop.tab == tab, label))

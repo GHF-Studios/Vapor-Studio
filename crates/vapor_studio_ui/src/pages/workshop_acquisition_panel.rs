@@ -4,7 +4,7 @@ use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_workshop_acquisition_panel(&mut self, ui: &mut egui::Ui) {
-        section_header(ui, "Vapor Library copies", "Import downloads an item into Vapor's local cache. Installing it into a profile is a separate action.");
+        section_header(ui, "Recent imports", "These Workshop downloads were added to Vapor's local cache during this session. Browse all available content in Discover.");
         ui.horizontal(|ui| {
             ui.add_enabled(
                 !self.operation.running,
@@ -13,16 +13,16 @@ impl StudioApp {
                     .desired_width(220.0),
             );
             if ui
-                .add_enabled(!self.operation.running, egui::Button::new("Download item"))
+                .add_enabled(!self.operation.running, egui::Button::new("Download to cache"))
                 .clicked()
             {
                 self.download_workshop_item();
             }
         });
         if self.workshop.pending_acquisitions.is_empty() {
-            empty_state(ui, "Nothing imported in this session", "Items imported from Workshop become available in the local content catalog and can then be selected for a composition.", |_| {});
+            empty_state(ui, "No recent imports", "Items imported from Workshop are added to Vapor's local cache. Browse Discover to find cached and installed content.", |_| {});
         } else {
-            section_header(ui, "Recently imported", "These copies are in Vapor's cache; they have not necessarily been installed into a play profile.");
+            section_header(ui, "Downloaded this session", "Cached items are available to dependency plans. Installing a composition into a play profile is a separate step.");
             for acquisition in self.workshop.pending_acquisitions.clone() {
                 ui.group(|ui| {
                     ui.label(format!(

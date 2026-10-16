@@ -7,7 +7,7 @@ use vapor_studio_core::InstallationState;
 impl StudioApp {
     pub(in crate::app) fn draw_home(&mut self, ui: &mut egui::Ui) {
         let profile = self.profile.items[self.profile.active_index].clone();
-        page_header(ui, "Start", "Your space", "Play your selected composition or continue working on content.");
+        page_header(ui, "Start", "Home", "Play your selected composition or continue working on content.");
         ui.add_space(8.0);
 
         let card_style = ui.style().clone();
@@ -123,17 +123,16 @@ impl StudioApp {
                             self.refresh_workspace_files();
                         }
                     }
-                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Review workspace content")).clicked() {
-                        self.navigate_to_workspace_content();
-                    }
                     if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content in this workspace")).clicked() {
                         self.section = Section::Create;
                     }
                 }
-                if ui.add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                    egui::Button::new("Browse content"),
-                ).clicked() {
+                if profile.root_package.is_some()
+                    && ui.add_enabled(
+                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        egui::Button::new("Browse content"),
+                    ).clicked()
+                {
                     self.section = Section::Discover;
                     self.discover();
                 }

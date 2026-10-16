@@ -94,7 +94,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running,
-                        egui::Button::new(format!("Import {count} to Vapor Library")),
+                        egui::Button::new(format!("Import {count} to Vapor cache")),
                     )
                     .clicked()
                 {
@@ -194,6 +194,13 @@ impl StudioApp {
                     columns[1].label(&item.description);
                 }
                 let subscribed = self.workshop.subscriptions.contains(&item.published_file_id);
+                columns[1].weak(if !self.workshop.subscriptions_loaded {
+                    "Steam subscription status has not been loaded."
+                } else if subscribed {
+                    "Subscribed through Steam"
+                } else {
+                    "Not subscribed through Steam"
+                });
                 columns[1].separator();
                 let locally_available = self.catalog.items.iter().any(|content| {
                     content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
@@ -211,7 +218,7 @@ impl StudioApp {
                     columns[1].add_enabled_ui(!self.operation.running, |ui| {
                         clicked = super::super::components::design::primary_button(
                             ui,
-                            "Import to Vapor Library",
+                            "Import to Vapor cache",
                         )
                         .clicked();
                     });
@@ -220,7 +227,7 @@ impl StudioApp {
                         self.download_workshop_item();
                     }
                 } else if available_packagepack {
-                    columns[1].label("Available in Vapor Library");
+                    columns[1].label("Available in local content");
                     let mut clicked = false;
                     columns[1].add_enabled_ui(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
@@ -236,7 +243,7 @@ impl StudioApp {
                         self.use_available_workshop_package_as_profile_root(&item.published_file_id);
                     }
                 } else if can_review_profile {
-                    columns[1].label("Available in Vapor Library");
+                    columns[1].label("Available in local content");
                     let mut clicked = false;
                     columns[1].add_enabled_ui(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
@@ -253,7 +260,7 @@ impl StudioApp {
                         self.preview_selected_composition();
                     }
                 } else {
-                    columns[1].label("Available in Vapor Library");
+                    columns[1].label("Available in local content");
                 }
                 columns[1].horizontal_wrapped(|ui| {
                     if ui
@@ -261,6 +268,11 @@ impl StudioApp {
                             !self.operation.running,
                             egui::Button::new(if subscribed { "Unsubscribe" } else { "Subscribe" }),
                         )
+                        .on_hover_text(if self.workshop.subscriptions_loaded {
+                            "Change this item's Steam Workshop subscription."
+                        } else {
+                            "Subscription status has not been checked. Load Subscriptions first if you want to confirm its current Steam state."
+                        })
                         .clicked()
                     {
                         self.set_workshop_subscription(item.published_file_id.clone(), !subscribed);
@@ -269,7 +281,7 @@ impl StudioApp {
                         if ui
                             .add_enabled(
                                 !self.operation.running,
-                                egui::Button::new("Update Vapor Library copy"),
+                                egui::Button::new("Refresh cached copy"),
                             )
                             .clicked()
                         {
