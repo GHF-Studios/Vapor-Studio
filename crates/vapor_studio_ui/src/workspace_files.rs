@@ -76,7 +76,7 @@ pub(super) fn write_workspace_file(
     contents: &str,
 ) -> Result<(), String> {
     let path = safe_workspace_file(root, relative)?;
-    let _lock = WorkspaceFileEditLock::acquire(sibling_edit_path(&path, "lock"))?;
+    let _lock = WorkspaceFileEditLock::acquire(workspace_edit_lock_path(&path))?;
     let metadata = fs::metadata(&path).map_err(|error| format!("{}: {error}", relative.display()))?;
     let current = fs::read_to_string(&path)
         .map_err(|error| format!("{}: {error}", relative.display()))?;
@@ -125,6 +125,14 @@ pub(super) fn write_workspace_file(
         let _ = fs::remove_file(&temporary);
     }
     write_result
+}
+
+fn workspace_edit_lock_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("workspace-file"))
+        .to_string_lossy();
+    path.with_file_name(format!(".{name}.studio-edit.lock"))
 }
 
 fn sibling_edit_path(path: &Path, suffix: &str) -> PathBuf {
