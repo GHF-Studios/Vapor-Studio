@@ -3,8 +3,16 @@ use super::{StudioApp, source_content_selector};
 use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, OperationKind};
 
+#[derive(Clone, Copy)]
+pub(super) enum PendingManifestDraftDiscard {
+    WorkshopMetadata,
+    RuntimeOutputs,
+}
+
 pub(super) struct AuthoringState {
     pub(super) create: CreateDraft,
+    pub(super) composition_discard_confirmation_open: bool,
+    pub(super) pending_composition_role_change: Option<PendingCompositionRoleChange>,
     pub(super) composition_edit_selector: String,
     pub(super) composition_source_search: String,
     pub(super) composition_edit: Option<vapor_studio_core::SourceComposition>,
@@ -15,6 +23,7 @@ pub(super) struct AuthoringState {
     pub(super) packagepack_game_search: String,
     pub(super) workshop_metadata_edit: Option<vapor_studio_core::SourceWorkshopMetadata>,
     pub(super) manifest_metadata_dirty: bool,
+    pub(super) pending_manifest_discard: Option<PendingManifestDraftDiscard>,
     pub(super) runtime_outputs_edit: Option<vapor_studio_core::SourceRuntimeOutputs>,
     pub(super) runtime_binaries_text: String,
     pub(super) runtime_libraries_text: String,
@@ -27,13 +36,25 @@ pub(super) struct AuthoringState {
     pub(super) workshop_metadata_change_note: String,
 }
 
+#[derive(Clone)]
+pub(super) struct PendingCompositionRoleChange {
+    pub(super) group: &'static str,
+    pub(super) previous: Vec<vapor_studio_core::SourceCompositionLink>,
+    pub(super) proposed: Option<vapor_studio_core::SourceCompositionLink>,
+}
+
 pub(super) struct CreateDraft {
     pub(super) details_open: bool,
+    pub(super) discard_confirmation_open: bool,
+    pub(super) pending_template_change: Option<vapor_core::ContentKind>,
+    pub(super) pending_dependency_clear: bool,
+    pub(super) pending_role_replacement: Option<PendingRoleReplacement>,
     pub(super) dependency_search: String,
     pub(super) content_id: String,
     pub(super) content_version: String,
     pub(super) content_kind: vapor_core::ContentKind,
     pub(super) dependencies: Vec<String>,
+    pub(super) exclusive_dependency_groups: std::collections::BTreeMap<String, &'static str>,
     pub(super) workshop_app_id: String,
     pub(super) workshop_published_file_id: String,
     pub(super) workshop_visibility: String,
@@ -43,15 +64,27 @@ pub(super) struct CreateDraft {
     pub(super) workshop_change_note: String,
 }
 
+#[derive(Clone)]
+pub(super) struct PendingRoleReplacement {
+    pub(super) target: String,
+    pub(super) replacing: Vec<String>,
+    pub(super) group: &'static str,
+}
+
 impl Default for CreateDraft {
     fn default() -> Self {
         Self {
             details_open: false,
+            discard_confirmation_open: false,
+            pending_template_change: None,
+            pending_dependency_clear: false,
+            pending_role_replacement: None,
             dependency_search: String::new(),
             content_id: String::new(),
             content_version: "0.1.0".to_owned(),
             content_kind: vapor_core::ContentKind::Packagepack,
             dependencies: Vec::new(),
+            exclusive_dependency_groups: Default::default(),
             workshop_app_id: String::new(),
             workshop_published_file_id: String::new(),
             workshop_visibility: String::new(),
@@ -67,6 +100,8 @@ impl Default for AuthoringState {
     fn default() -> Self {
         Self {
             create: CreateDraft::default(),
+            composition_discard_confirmation_open: false,
+            pending_composition_role_change: None,
             composition_edit_selector: String::new(),
             composition_source_search: String::new(),
             composition_edit: None,
@@ -77,6 +112,7 @@ impl Default for AuthoringState {
             packagepack_game_search: String::new(),
             workshop_metadata_edit: None,
             manifest_metadata_dirty: false,
+            pending_manifest_discard: None,
             runtime_outputs_edit: None,
             runtime_binaries_text: String::new(),
             runtime_libraries_text: String::new(),
@@ -101,6 +137,8 @@ impl AuthoringState {
 
     pub(super) fn clear_selected_source(&mut self) {
         self.composition_edit_selector.clear();
+        self.composition_discard_confirmation_open = false;
+        self.pending_composition_role_change = None;
         self.composition_source_search.clear();
         self.composition_edit = None;
         self.composition_original_links = None;
@@ -112,12 +150,17 @@ impl AuthoringState {
 
     pub(super) fn clear_workspace_context(&mut self) {
         self.create.details_open = false;
+        self.create.discard_confirmation_open = false;
+        self.create.pending_template_change = None;
+        self.create.pending_dependency_clear = false;
+        self.create.pending_role_replacement = None;
         self.create.dependency_search.clear();
-        self.create.dependencies.clear();
+        self.create.clear_dependencies();
         self.clear_selected_source();
         self.workshop_metadata_edit = None;
         self.runtime_outputs_edit = None;
         self.manifest_metadata_dirty = false;
+        self.pending_manifest_discard = None;
     }
 }
 
@@ -139,6 +182,65 @@ impl CreateDraft {
     pub(super) fn reset(&mut self) {
         *self = Self::default();
     }
+
+    pub(super) fn request_dependency_selection(
+        &mut self,
+        id: String,
+        role_group: Option<&'static str>,
+    ) {
+        if self.dependencies.contains(&id) {
+            return;
+        }
+        let Some(role_group) = role_group else {
+            self.dependencies.push(id);
+            return;
+        };
+        let replacing = self
+            .dependencies
+            .iter()
+            .filter(|selected| self.exclusive_dependency_groups.get(*selected) == Some(&role_group))
+            .cloned()
+            .collect::<Vec<_>>();
+        if replacing.is_empty() {
+            self.dependencies.push(id.clone());
+            self.exclusive_dependency_groups.insert(id, role_group);
+        } else {
+            self.pending_role_replacement = Some(PendingRoleReplacement {
+                target: id,
+                replacing,
+                group: role_group,
+            });
+        }
+    }
+
+    pub(super) fn remove_dependency(&mut self, id: &str) {
+        self.dependencies.retain(|selected| selected != id);
+        self.exclusive_dependency_groups.remove(id);
+    }
+
+    pub(super) fn clear_dependencies(&mut self) {
+        self.dependencies.clear();
+        self.exclusive_dependency_groups.clear();
+    }
+
+    pub(super) fn resolve_role_replacement(&mut self, replace: bool) {
+        let Some(replacement) = self.pending_role_replacement.take() else {
+            return;
+        };
+        if !replace {
+            return;
+        }
+        self.dependencies
+            .retain(|selected| !replacement.replacing.iter().any(|old| old == selected));
+        for replaced in &replacement.replacing {
+            self.exclusive_dependency_groups.remove(replaced);
+        }
+        if !self.dependencies.contains(&replacement.target) {
+            self.dependencies.push(replacement.target.clone());
+        }
+        self.exclusive_dependency_groups
+            .insert(replacement.target, replacement.group);
+    }
 }
 
 impl StudioApp {
@@ -150,12 +252,17 @@ impl StudioApp {
             return;
         };
         composition.links = original_links;
+        self.authoring.composition_discard_confirmation_open = false;
         self.authoring.composition_link_candidate.clear();
         self.status =
             "Discarded unsaved dependency changes. The saved composition is unchanged.".to_owned();
     }
 
     pub(super) fn load_source_composition(&mut self) {
+        if self.authoring.pending_composition_role_change.is_some() {
+            self.status = "Confirm or keep the pending Packagepack role choice before loading another composition.".to_owned();
+            return;
+        }
         if !self.require_open_workspace("edit source content dependencies") {
             return;
         }
@@ -184,6 +291,10 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_composition(&mut self) {
+        if self.authoring.pending_composition_role_change.is_some() {
+            self.status = "Confirm or keep the pending Packagepack role choice before saving the composition.".to_owned();
+            return;
+        }
         if self.authoring.manifest_metadata_dirty {
             self.status = "Save or discard the open manifest metadata draft before saving dependency changes.".to_owned();
             return;

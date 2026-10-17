@@ -1,5 +1,7 @@
 use super::super::StudioApp;
-use super::super::components::design::{ACCENT, page_header};
+use super::super::components::design::{
+    ACCENT, confirmation_card, discard_confirmation, page_header,
+};
 use eframe::egui;
 use std::path::Path;
 
@@ -16,10 +18,25 @@ impl StudioApp {
             "Create",
             "Start a content project from a template, then add its identity and required relationships.",
         );
-        if self.authoring.create.is_dirty() && ui.button("Discard current content draft").clicked()
+        if self.authoring.create.is_dirty()
+            && !self.authoring.create.discard_confirmation_open
+            && ui.button("Discard current content draft").clicked()
         {
-            self.authoring.create.reset();
-            self.status = "Discarded the new content project draft.".to_owned();
+            self.authoring.create.discard_confirmation_open = true;
+        }
+        if self.authoring.create.discard_confirmation_open {
+            if let Some(discard) = discard_confirmation(
+                ui,
+                "Discard this new-content draft?",
+                "This clears the identity and dependency choices held in Studio. No project files have been created yet.",
+            ) {
+                if discard {
+                    self.authoring.create.reset();
+                    self.status = "Discarded the new content project draft.".to_owned();
+                } else {
+                    self.authoring.create.discard_confirmation_open = false;
+                }
+            }
         }
         egui::CollapsingHeader::new("Start from a complete playable workspace")
             .default_open(self.workspace.root.trim().is_empty())
@@ -78,7 +95,7 @@ impl StudioApp {
         ui.horizontal(|ui| {
             ui.weak(format!("Workspace · {}", self.workspace.root));
             if ui.small_button("Change").clicked() {
-                self.section = super::super::Section::Workspace;
+                self.activate_navigation_section(super::super::Section::Workspace);
             }
         });
 
@@ -99,6 +116,8 @@ impl StudioApp {
                     ("EXTENSIONS", vapor_core::ContentKind::ExtensionMod, "Extension", "A general-purpose content extension."),
                 ];
                 let card_style = ui.style().clone();
+                let template_change_pending =
+                    self.authoring.create.pending_template_change.is_some();
                 for group in ["PACKS", "RUNTIME", "EXTENSIONS"] {
                     ui.small(group);
                     ui.horizontal_wrapped(|ui| {
@@ -107,23 +126,48 @@ impl StudioApp {
                                 ui.set_min_width(175.0);
                                 ui.set_max_width(220.0);
                                 let selected = self.authoring.create.content_kind == *kind;
-                                if ui.add_sized(
-                                    [ui.available_width(), 34.0],
-                                    egui::Button::selectable(selected, egui::RichText::new(*title).strong()),
+                                if ui.add_enabled(
+                                    !template_change_pending,
+                                    egui::Button::selectable(selected, egui::RichText::new(*title).strong())
+                                        .min_size(egui::vec2(ui.available_width(), 34.0)),
                                 ).clicked() && !selected {
-                                    let cleared_dependencies =
-                                        !self.authoring.create.dependencies.is_empty();
-                                    self.authoring.create.content_kind = *kind;
-                                    self.authoring.create.dependencies.clear();
-                                    self.authoring.create.dependency_search.clear();
-                                    if cleared_dependencies {
-                                        self.status = "Changed the content template and cleared its dependency selections.".to_owned();
+                                    if self.authoring.create.dependencies.is_empty() {
+                                        self.authoring.create.content_kind = *kind;
+                                        self.authoring.create.dependency_search.clear();
+                                    } else {
+                                        self.authoring.create.pending_template_change = Some(*kind);
                                     }
                                 }
                                 ui.small(*description);
                             });
                         }
                     });
+                }
+                if let Some(next_kind) = self.authoring.create.pending_template_change {
+                    let description = format!(
+                        "Changing from {} to {} clears the {} selected dependencies. Your identity and Workshop metadata stay in the draft.",
+                        self.authoring.create.content_kind,
+                        next_kind,
+                        self.authoring.create.dependencies.len(),
+                    );
+                    if let Some(change) = confirmation_card(
+                        ui,
+                        "Change the template and clear its dependency choices?",
+                        &description,
+                        "Change template",
+                        "Keep current template",
+                        !self.operation.running,
+                    ) {
+                        if change {
+                            self.authoring.create.content_kind = next_kind;
+                            self.authoring.create.clear_dependencies();
+                            self.authoring.create.dependency_search.clear();
+                            self.status = format!(
+                                "Changed the content template to {next_kind}; dependency choices were cleared."
+                            );
+                        }
+                        self.authoring.create.pending_template_change = None;
+                    }
                 }
                 let description = match self.authoring.create.content_kind {
                     vapor_core::ContentKind::Packagepack => "A launchable composition that selects an Engine and optional Game.",
@@ -140,7 +184,11 @@ impl StudioApp {
                 ui.label(description);
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(!self.operation.running, egui::Button::new("Continue")).clicked() {
+                    if ui.add_enabled(
+                        !self.operation.running
+                            && self.authoring.create.pending_template_change.is_none(),
+                        egui::Button::new("Continue"),
+                    ).clicked() {
                         self.authoring.create.details_open = true;
                     }
                     if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Refresh workspace content")).clicked() {
@@ -152,7 +200,14 @@ impl StudioApp {
         }
 
         ui.horizontal(|ui| {
-            if ui.small_button("← Templates").clicked() {
+            if ui
+                .add_enabled(
+                    self.authoring.create.pending_dependency_clear == false
+                        && self.authoring.create.pending_role_replacement.is_none(),
+                    egui::Button::new("← Templates"),
+                )
+                .clicked()
+            {
                 self.authoring.create.details_open = false;
             }
             ui.label(
@@ -215,6 +270,17 @@ impl StudioApp {
                     })
             })
         });
+        let unavailable_selected_dependencies = self
+            .authoring
+            .create
+            .dependencies
+            .iter()
+            .filter(|selected| {
+                !self.catalog.sources.iter().any(|content| {
+                    super::super::source_content_selector(content) == selected.as_str()
+                })
+            })
+            .count();
         ui.small(source_shape);
         if ui.available_width() < 640.0 {
             ui.label("Content ID");
@@ -304,8 +370,11 @@ impl StudioApp {
                     ui.text_edit_singleline(&mut self.authoring.create.workshop_change_note);
                 });
             });
+        let dependency_confirmation_open = self.authoring.create.pending_dependency_clear
+            || self.authoring.create.pending_role_replacement.is_some();
         egui::CollapsingHeader::new("Dependencies")
             .default_open(true)
+            .open(dependency_confirmation_open.then_some(true))
             .show(ui, |ui| {
                 ui.weak(role_constraints);
                 ui.horizontal(|ui| {
@@ -315,15 +384,36 @@ impl StudioApp {
                     ));
                     if ui
                         .add_enabled(
-                            !self.authoring.create.dependencies.is_empty(),
+                            !self.authoring.create.dependencies.is_empty()
+                                && !self.authoring.create.pending_dependency_clear
+                                && self.authoring.create.pending_role_replacement.is_none(),
                             egui::Button::new("Clear selection"),
                         )
                         .clicked()
                     {
-                        self.authoring.create.dependencies.clear();
-                        self.status = "Cleared the new content project's dependency selections.".to_owned();
+                        self.authoring.create.pending_dependency_clear = true;
                     }
                 });
+                if self.authoring.create.pending_dependency_clear {
+                    let description = format!(
+                        "This removes all {} dependency choices from the unsaved content draft. The project identity and Workshop metadata stay in the draft.",
+                        self.authoring.create.dependencies.len(),
+                    );
+                    if let Some(clear) = confirmation_card(
+                        ui,
+                        "Clear every selected dependency?",
+                        &description,
+                        "Clear dependencies",
+                        "Keep selection",
+                        !self.operation.running,
+                    ) {
+                        if clear {
+                            self.authoring.create.clear_dependencies();
+                            self.status = "Cleared the new content project's dependency selections.".to_owned();
+                        }
+                        self.authoring.create.pending_dependency_clear = false;
+                    }
+                }
                 if self.catalog.sources.is_empty() {
                     ui.weak("Refresh workspace content to choose dependencies.");
                 } else {
@@ -341,6 +431,65 @@ impl StudioApp {
                             self.authoring.create.dependency_search.clear();
                         }
                     });
+                    let selected_dependencies = self
+                        .authoring
+                        .create
+                        .dependencies
+                        .iter()
+                        .map(|selected| {
+                            let content = self.catalog.sources.iter().find(|content| {
+                                super::super::source_content_selector(content) == *selected
+                            });
+                            let role = self
+                                .authoring
+                                .create
+                                .exclusive_dependency_groups
+                                .get(selected)
+                                .copied();
+                            (
+                                selected.clone(),
+                                content.map(|content| {
+                                    format!(
+                                        "{} · {}",
+                                        content.kind,
+                                        content.version.as_deref().unwrap_or("unversioned")
+                                    )
+                                }),
+                                role,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    if !selected_dependencies.is_empty() {
+                        ui.label("Selected for this draft");
+                        ui.horizontal_wrapped(|ui| {
+                            for (selected, detail, role) in selected_dependencies {
+                                let role_label = role.map(|role| format!("{role} · ")).unwrap_or_default();
+                                let label = match detail {
+                                    Some(detail) => format!("{role_label}{selected} · {detail}"),
+                                    None => format!("{role_label}{selected} · unavailable after refresh"),
+                                };
+                                ui.label(label);
+                                if ui
+                                    .add_enabled(
+                                        !self.authoring.create.pending_dependency_clear
+                                            && self.authoring.create.pending_role_replacement.is_none(),
+                                        egui::Button::new("Remove"),
+                                    )
+                                    .clicked()
+                                {
+                                    self.authoring.create.remove_dependency(&selected);
+                                }
+                            }
+                        });
+                    }
+                    if unavailable_selected_dependencies > 0 {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            format!(
+                                "{unavailable_selected_dependencies} selected dependency(ies) are no longer available. Remove them or refresh content before creating this project."
+                            ),
+                        );
+                    }
                     let query = self.authoring.create.dependency_search.trim().to_lowercase();
                     let mut visible_dependencies = 0;
                     egui::ScrollArea::vertical()
@@ -390,65 +539,28 @@ impl StudioApp {
                                     "Select any number of supported dependencies."
                                 };
                                 if ui
-                                    .checkbox(
-                                        &mut included,
-                                        format!(
-                                            "{} · {} · {}",
-                                            id,
-                                            content.kind,
-                                            content.version.as_deref().unwrap_or("unversioned")
+                                    .add_enabled(
+                                        !self.authoring.create.pending_dependency_clear
+                                            && self.authoring.create.pending_role_replacement.is_none(),
+                                        egui::Checkbox::new(
+                                            &mut included,
+                                            format!(
+                                                "{} · {} · {}",
+                                                id,
+                                                content.kind,
+                                                content.version.as_deref().unwrap_or("unversioned")
+                                            ),
                                         ),
                                     )
                                     .on_hover_text(choice_help)
                                     .changed()
                                 {
                                     if included {
-                                        if let Some(role_group) = role_group {
-                                            let old_role_choices = self
-                                                .catalog
-                                                .sources
-                                                .iter()
-                                                .filter(|candidate| {
-                                                    let candidate_id =
-                                                        super::super::source_content_selector(
-                                                            candidate,
-                                                        );
-                                                    let Some(candidate_kind) =
-                                                        super::super::source_content_kind(
-                                                            &candidate.kind,
-                                                        )
-                                                    else {
-                                                        return false;
-                                                    };
-                                                    let candidate_group =
-                                                        vapor_studio_core::source_dependency_choice_group(
-                                                            self.authoring.create.content_kind,
-                                                            candidate_kind,
-                                                        );
-                                                    candidate_group == Some(role_group)
-                                                        && self
-                                                            .authoring
-                                                            .create
-                                                            .dependencies
-                                                            .iter()
-                                                            .any(|selected| {
-                                                                selected == &candidate_id
-                                                            })
-                                                })
-                                                .map(|candidate| {
-                                                    super::super::source_content_selector(candidate)
-                                                })
-                                                .collect::<Vec<_>>();
-                                            self.authoring.create.dependencies.retain(|value| {
-                                                !old_role_choices.iter().any(|old| old == value)
-                                            });
-                                        }
-                                        self.authoring.create.dependencies.push(id);
-                                    } else {
                                         self.authoring
                                             .create
-                                            .dependencies
-                                            .retain(|value| value != &id);
+                                            .request_dependency_selection(id, role_group);
+                                    } else {
+                                        self.authoring.create.remove_dependency(&id);
                                     }
                                 }
                             }
@@ -462,10 +574,40 @@ impl StudioApp {
                     }
                 }
             });
+        if let Some(replacement) = self.authoring.create.pending_role_replacement.clone() {
+            let target_is_available = self.catalog.sources.iter().any(|content| {
+                super::super::source_content_selector(content) == replacement.target
+            });
+            let description = if target_is_available {
+                format!(
+                    "Replace {} with {} in this exclusive role slot? Other dependency choices stay selected.",
+                    replacement.replacing.join(", "),
+                    replacement.target,
+                )
+            } else {
+                format!(
+                    "{} is no longer available in the workspace catalog. Cancel this replacement, refresh content, then choose it again.",
+                    replacement.target,
+                )
+            };
+            if let Some(replace) = confirmation_card(
+                ui,
+                "Replace the current role choice?",
+                &description,
+                "Replace role choice",
+                "Keep current choice",
+                !self.operation.running && target_is_available,
+            ) {
+                self.authoring.create.resolve_role_replacement(replace);
+            }
+        }
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                    !self.operation.running
+                        && !self.has_unsaved_workspace_edits()
+                        && !self.authoring.create.pending_dependency_clear
+                        && self.authoring.create.pending_role_replacement.is_none(),
                     egui::Button::new("Refresh available content"),
                 )
                 .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; discovery reads saved manifests.")
@@ -477,11 +619,16 @@ impl StudioApp {
                 .add_enabled(
                     !self.operation.running
                         && !self.has_unsaved_workspace_edits()
+                        && !self.authoring.create.pending_dependency_clear
+                        && self.authoring.create.pending_role_replacement.is_none()
+                        && unavailable_selected_dependencies == 0
                         && required_role_selected,
                     egui::Button::new("Create content project"),
                 )
                 .on_disabled_hover_text(if !required_role_selected {
                     "Select the required Engine, Enginepack, Game, or Gamepack role first."
+                } else if unavailable_selected_dependencies > 0 {
+                    "Remove dependencies that are no longer in the workspace catalog, or refresh available content."
                 } else {
                     "Save or discard workspace file and structured metadata drafts before creating content; Studio opens the new manifest afterward."
                 })

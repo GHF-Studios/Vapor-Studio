@@ -26,6 +26,7 @@ pub(super) struct WorkspaceState {
     pub(super) unregistered_projects: vapor_studio_core::UnregisteredProjectScan,
     pub(super) unregistered_scan_completed: bool,
     pub(super) pending_unregistration: Option<vapor_studio_core::SourceContent>,
+    pub(super) pending_clean_confirmation: Option<PathBuf>,
     pub(super) registered_sources: Vec<PathBuf>,
     pub(super) active_source: Option<PathBuf>,
     pub(super) overview_panel: WorkspacePanel,
@@ -45,6 +46,7 @@ impl WorkspaceState {
             unregistered_projects: vapor_studio_core::UnregisteredProjectScan::default(),
             unregistered_scan_completed: false,
             pending_unregistration: None,
+            pending_clean_confirmation: None,
             registered_sources: Vec::new(),
             active_source: None,
             overview_panel: WorkspacePanel::default(),
@@ -54,15 +56,14 @@ impl WorkspaceState {
     }
     pub(super) fn clear_file_context(&mut self) {
         self.content_search.clear();
+        self.pending_clean_confirmation = None;
         self.editor.clear_context();
     }
 }
 
 impl StudioApp {
     pub(super) fn navigate_to_workspace_content(&mut self) {
-        self.section = Section::Workspace;
-        self.workspace.editor.files_open = false;
-        self.workspace.overview_panel = WorkspacePanel::Content;
+        self.open_workspace_panel(WorkspacePanel::Content);
         if !self.workspace.root.trim().is_empty()
             && !self.workspace.unregistered_scan_completed
             && !self.operation.running
@@ -81,6 +82,35 @@ impl StudioApp {
     }
 
     pub(super) fn run_operation(&mut self, operation: DevelopmentOperation) {
+        if self.workspace.pending_clean_confirmation.is_some() {
+            return;
+        }
+        if operation == DevelopmentOperation::Clean {
+            if !self.require_open_workspace("clean generated build files") {
+                return;
+            }
+            self.workspace.pending_clean_confirmation =
+                Some(PathBuf::from(self.workspace.root.trim()));
+            self.open_workspace_panel(WorkspacePanel::Build);
+            self.status =
+                "Review the cleanup scope before removing generated build files.".to_owned();
+            return;
+        }
+        self.start_workspace_operation(operation);
+    }
+
+    pub(super) fn confirm_clean_workspace(&mut self) {
+        let Some(confirmed_root) = self.workspace.pending_clean_confirmation.take() else {
+            return;
+        };
+        if confirmed_root != PathBuf::from(self.workspace.root.trim()) {
+            self.status = "The workspace changed; review the cleanup target again.".to_owned();
+            return;
+        }
+        self.start_workspace_operation(DevelopmentOperation::Clean);
+    }
+
+    fn start_workspace_operation(&mut self, operation: DevelopmentOperation) {
         if !self.require_open_workspace("run a workspace operation") {
             return;
         }
@@ -168,13 +198,14 @@ impl StudioApp {
         self.profile_composition.clear_context();
         self.invalidate_workshop_review();
         self.workspace.editor.files = workspace_files;
+        self.workspace.editor.files_loaded = true;
         self.workspace.editor.rebuild_file_index();
         let restored_editor_drafts = self
             .workspace
             .editor
             .restore_editor_drafts(&PathBuf::from(self.workspace.root.trim()));
         self.workspace.pending_unregistration = None;
-        self.section = landing_section;
+        self.activate_navigation_section(landing_section);
         self.status = catalog_error.map_or_else(
             || format!(
                 "Opened workspace {} · {} registered content projects · {} local catalog entries · {} projects ready to adopt.",
@@ -293,7 +324,9 @@ impl StudioApp {
     }
 
     pub(super) fn has_unsaved_context_switch_edits(&self) -> bool {
-        self.has_unsaved_workspace_edits() || self.authoring.create.is_dirty()
+        self.has_unsaved_workspace_edits()
+            || self.authoring.create.is_dirty()
+            || self.authoring.pending_composition_role_change.is_some()
     }
 
     pub(super) fn require_open_workspace(&mut self, action: &str) -> bool {

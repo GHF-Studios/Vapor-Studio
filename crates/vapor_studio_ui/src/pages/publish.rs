@@ -1,5 +1,5 @@
-use super::super::root_publishing::{PublishTab, root_publish_confirmation};
 use super::super::components::design::page_header;
+use super::super::root_publishing::{PublishTab, root_publish_confirmation};
 use super::super::{Section, StudioApp};
 use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
@@ -11,20 +11,37 @@ enum WorkshopPublishAction {
 
 impl StudioApp {
     pub(in crate::app) fn draw_publish(&mut self, ui: &mut egui::Ui) {
-        page_header(ui, "Share", "Publish", "Review the destination and exact payload before sending anything outside this device.");
+        page_header(
+            ui,
+            "Share",
+            "Publish",
+            "Review the destination and exact payload before sending anything outside this device.",
+        );
 
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::selectable(self.root_publishing.tab == PublishTab::WorkshopContent, "Workshop content")).clicked() {
+            if ui
+                .add(egui::Button::selectable(
+                    self.root_publishing.tab == PublishTab::WorkshopContent,
+                    "Workshop content",
+                ))
+                .clicked()
+            {
                 self.root_publishing.tab = PublishTab::WorkshopContent;
             }
-            if ui.add(egui::Button::selectable(self.root_publishing.tab == PublishTab::VaporApp, "Vapor app release")).clicked() {
+            if ui
+                .add(egui::Button::selectable(
+                    self.root_publishing.tab == PublishTab::VaporApp,
+                    "Vapor app release",
+                ))
+                .clicked()
+            {
                 self.root_publishing.tab = PublishTab::VaporApp;
             }
         });
 
         if self.root_publishing.tab == PublishTab::WorkshopContent {
-        let mut action = None;
-        ui.group(|ui| {
+            let mut action = None;
+            ui.group(|ui| {
             ui.heading("Publish a Workshop item");
             ui.label("Stage an authored item from Discover. The staged review remains available here while you inspect its identity, files, dependencies, and target.");
             let Some(preview) = self.workshop.preview.as_ref() else {
@@ -36,7 +53,7 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    self.section = Section::Discover;
+                    self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
                     self.discover();
                 }
                 return;
@@ -109,7 +126,8 @@ impl StudioApp {
                 );
             }
 
-            let publish_phrase = format!("PUBLISH {}", preview.id);
+            let publisher_account = self.workshop.publisher_account.trim();
+            let publish_phrase = format!("PUBLISH {} TO {}", preview.id, publisher_account);
             ui.separator();
             ui.strong(if preview.published_file_id.is_some() {
                 "Publish Workshop update"
@@ -118,10 +136,10 @@ impl StudioApp {
             });
             ui.label(format!(
                 "Steam account · {}",
-                if self.workshop.publisher_account.trim().is_empty() {
+                if publisher_account.is_empty() {
                     "enter the publisher account"
                 } else {
-                    self.workshop.publisher_account.trim()
+                    publisher_account
                 }
             ));
             ui.add_enabled(
@@ -167,15 +185,15 @@ impl StudioApp {
                 }
             });
         });
-        match action {
-            Some(WorkshopPublishAction::Publish(identity, preview)) => {
-                self.publish_reviewed_workshop_content(identity, preview);
+            match action {
+                Some(WorkshopPublishAction::Publish(identity, preview)) => {
+                    self.publish_reviewed_workshop_content(identity, preview);
+                }
+                Some(WorkshopPublishAction::DiscardReview) => self.invalidate_workshop_review(),
+                None => {}
             }
-            Some(WorkshopPublishAction::DiscardReview) => self.invalidate_workshop_review(),
-            None => {}
-        }
         } else {
-        ui.group(|ui| {
+            ui.group(|ui| {
             ui.heading("Publish a Vapor app build");
             ui.label("SteamPipe uploads a Vapor application release to the Steam app and depot shown below.");
             ui.label(format!(

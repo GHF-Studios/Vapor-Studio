@@ -1,4 +1,5 @@
 use super::super::StudioApp;
+use super::super::components::design::confirmation_card;
 use super::super::workspace_editor::{WorkspaceTreeChild, WorkspaceTreeNode};
 use eframe::egui;
 use std::path::PathBuf;
@@ -83,10 +84,19 @@ impl StudioApp {
                         && self.workspace.editor.selected_file.is_some(),
                     egui::Button::new("Reload from disk"),
                 )
-                .on_hover_text("Discard the editor buffer and reopen the current on-disk file.")
+                .on_hover_text(if self.workspace.editor.active_document_is_dirty() {
+                    "The current file has unsaved edits; Studio will ask before discarding them."
+                } else {
+                    "Reopen the current file from disk."
+                })
                 .clicked()
             {
-                self.reload_workspace_file();
+                if self.workspace.editor.active_document_is_dirty() {
+                    self.workspace.editor.pending_reload_confirmation =
+                        self.workspace.editor.selected_file.clone();
+                } else {
+                    self.reload_workspace_file();
+                }
             }
             if self.workspace.editor.active_document_is_dirty() {
                 ui.colored_label(egui::Color32::YELLOW, "Unsaved");
@@ -104,6 +114,28 @@ impl StudioApp {
                 self.save_all_workspace_files();
             }
         });
+        let mut reload_confirmation = None;
+        if let Some(path) = self.workspace.editor.pending_reload_confirmation.as_ref() {
+            let title = format!("Discard unsaved edits in {}?", path.display());
+            reload_confirmation = confirmation_card(
+                ui,
+                &title,
+                "Reload replaces this editor buffer with the file currently saved on disk.",
+                "Discard edits and reload",
+                "Keep my edits",
+                !self.operation.running && !self.authoring.manifest_metadata_dirty,
+            );
+        }
+        if let Some(confirm) = reload_confirmation {
+            let path = self.workspace.editor.pending_reload_confirmation.take();
+            if confirm {
+                if let Some(path) = path {
+                    self.workspace.editor.selected_file = Some(path);
+                    self.reload_workspace_file();
+                }
+            }
+        }
+
         let open_tabs = self
             .workspace
             .editor

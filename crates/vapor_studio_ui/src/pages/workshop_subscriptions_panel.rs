@@ -69,12 +69,7 @@ impl StudioApp {
                     graph
                         .nodes
                         .iter()
-                        .map(|node| {
-                            (
-                                node.content.id.as_str(),
-                                node.content.version.as_deref(),
-                            )
-                        })
+                        .map(|node| (node.content.id.as_str(), node.content.version.as_deref()))
                         .collect::<BTreeSet<_>>()
                 })
                 .unwrap_or_default();
@@ -92,8 +87,8 @@ impl StudioApp {
                 let status = local_by_workshop_id.entry(id).or_default();
                 status.available = true;
                 status.conflicted |= !content.is_unambiguous();
-                status.included_in_active_profile |= active_content
-                    .contains(&(content.id.as_str(), content.version.as_deref()));
+                status.included_in_active_profile |=
+                    active_content.contains(&(content.id.as_str(), content.version.as_deref()));
                 status.packagepack_available |= content.kind
                     == vapor_core::ContentKind::Packagepack.as_str()
                     && content.is_unambiguous();
@@ -110,26 +105,40 @@ impl StudioApp {
                     self.workshop.subscription_search_query.clear();
                 }
             });
-            let query = self.workshop.subscription_search_query.trim().to_lowercase();
-            let matching_subscriptions = self.workshop.subscriptions.iter().filter(|id| {
-                subscription_matches_query(
-                    id,
-                    &query,
-                    &self.workshop.subscription_details,
-                    &results_by_id,
-                )
-            }).count();
-            let selected_visible = self.workshop.subscriptions.iter().filter(|id| {
-                self.workshop.selected_items.contains(*id)
-                    && subscription_matches_query(
+            let query = self
+                .workshop
+                .subscription_search_query
+                .trim()
+                .to_lowercase();
+            let matching_subscriptions = self
+                .workshop
+                .subscriptions
+                .iter()
+                .filter(|id| {
+                    subscription_matches_query(
                         id,
                         &query,
                         &self.workshop.subscription_details,
                         &results_by_id,
                     )
-            }).count();
-            let all_visible_selected = matching_subscriptions > 0
-                && selected_visible == matching_subscriptions;
+                })
+                .count();
+            let selected_visible = self
+                .workshop
+                .subscriptions
+                .iter()
+                .filter(|id| {
+                    self.workshop.selected_items.contains(*id)
+                        && subscription_matches_query(
+                            id,
+                            &query,
+                            &self.workshop.subscription_details,
+                            &results_by_id,
+                        )
+                })
+                .count();
+            let all_visible_selected =
+                matching_subscriptions > 0 && selected_visible == matching_subscriptions;
             let mut action = None;
             ui.horizontal_wrapped(|ui| {
                 ui.small(format!(
@@ -200,24 +209,24 @@ impl StudioApp {
                         }
                     });
                     ui.group(|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        let mut selected = self.workshop.selected_items.contains(id);
-                        if ui
-                            .add_enabled(
-                                !self.operation.running,
-                                egui::Checkbox::new(&mut selected, ""),
-                            )
-                            .changed()
-                        {
-                            action = Some(SubscriptionAction::SetSelected(id.clone(), selected));
-                        }
-                        ui.strong(title);
+                        ui.horizontal_wrapped(|ui| {
+                            let mut selected = self.workshop.selected_items.contains(id);
+                            if ui
+                                .add_enabled(
+                                    !self.operation.running,
+                                    egui::Checkbox::new(&mut selected, ""),
+                                )
+                                .changed()
+                            {
+                                action = Some(SubscriptionAction::SetSelected(id.clone(), selected));
+                            }
+                            ui.strong(title);
                             if let Some(state) = steam_state {
-                            ui.weak(state);
-                        }
-                        if local.available {
+                                ui.weak(state);
+                            }
+                            if local.available {
                                 ui.weak("In Vapor cache");
-                            if local.conflicted {
+                                if local.conflicted {
                                     ui.colored_label(egui::Color32::YELLOW, "Local conflict");
                                 }
                             }
@@ -239,8 +248,8 @@ impl StudioApp {
                                 );
                                 if ui
                                     .add_enabled(
-                                    !self.operation.running,
-                                    egui::Button::new("Review local records"),
+                                        !self.operation.running,
+                                        egui::Button::new("Review local records"),
                                     )
                                     .clicked()
                                 {
@@ -248,44 +257,44 @@ impl StudioApp {
                                 }
                             }
                             if local.packagepack_available && !local.conflicted {
-                            let create_draft_blocks_assignment = self
-                                .workshop_root_change_blocked_by_create_draft(id);
+                                let create_draft_blocks_assignment = self
+                                    .workshop_root_change_blocked_by_create_draft(id);
                                 if ui
                                     .add_enabled(
-                                    !self.operation.running
-                                        && !self.has_unsaved_workspace_edits()
-                                        && !create_draft_blocks_assignment,
-                                    egui::Button::new(format!(
-                                        "Set {} root",
-                                        self.profile.items[self.profile.active_index].name
-                                    )),
-                                )
-                                .on_disabled_hover_text(if create_draft_blocks_assignment {
-                                    "Discard the Create draft before changing the profile to this item's workspace."
-                                } else if self.has_unsaved_workspace_edits() {
-                                    "Save or discard workspace edits before changing the active profile."
-                                } else {
-                                    "Finish the current operation before changing the active profile."
-                                })
-                                .clicked()
-                            {
-                                action = Some(SubscriptionAction::UseAsProfileRoot(id.clone()));
-                            }
-                            if local.included_in_active_profile
+                                        !self.operation.running
+                                            && !self.has_unsaved_workspace_edits()
+                                            && !create_draft_blocks_assignment,
+                                        egui::Button::new(format!(
+                                            "Set {} root",
+                                            self.profile.items[self.profile.active_index].name
+                                        )),
+                                    )
+                                    .on_disabled_hover_text(if create_draft_blocks_assignment {
+                                        "Discard the Create draft before changing the profile to this item's workspace."
+                                    } else if self.has_unsaved_workspace_edits() {
+                                        "Save or discard workspace edits before changing the active profile."
+                                    } else {
+                                        "Finish the current operation before changing the active profile."
+                                    })
+                                    .clicked()
+                                {
+                                    action = Some(SubscriptionAction::UseAsProfileRoot(id.clone()));
+                                }
+                                if local.included_in_active_profile
                                     && ui
                                         .add_enabled(
                                             !self.operation.running
                                                 && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new("Review active profile plan"),
-                                )
-                                .on_hover_text(
-                                        "Resolve this profile again using the current local cache.",
-                                )
-                                .clicked()
-                            {
-                                action = Some(SubscriptionAction::ReviewProfile);
+                                            egui::Button::new("Review active profile plan"),
+                                        )
+                                        .on_hover_text(
+                                            "Resolve this profile again using the current local cache.",
+                                        )
+                                        .clicked()
+                                {
+                                    action = Some(SubscriptionAction::ReviewProfile);
+                                }
                             }
-                        }
                             if local.available
                                 && self.profile.items[self.profile.active_index]
                                     .root_package
@@ -296,11 +305,11 @@ impl StudioApp {
                                     "Available locally · not included in the active profile's composition",
                                 );
                             }
-                        let import_label = if local.available {
-                            "Refresh cached copy"
-                        } else {
-                            "Import to Vapor cache"
-                        };
+                            let import_label = if local.available {
+                                "Refresh cached copy"
+                            } else {
+                                "Import to Vapor cache"
+                            };
                             ui.horizontal_wrapped(|ui| {
                                 if ui
                                     .add_enabled(
@@ -309,8 +318,8 @@ impl StudioApp {
                                     )
                                     .clicked()
                                 {
-                            action = Some(SubscriptionAction::Import(id.clone()));
-                        }
+                                    action = Some(SubscriptionAction::Import(id.clone()));
+                                }
                                 if ui
                                     .add_enabled(
                                         !self.operation.running,
@@ -318,20 +327,20 @@ impl StudioApp {
                                     )
                                     .clicked()
                                 {
-                            action = Some(SubscriptionAction::Unsubscribe(id.clone()));
-                        }
-                    });
+                                    action = Some(SubscriptionAction::Unsubscribe(id.clone()));
+                                }
+                            });
                             if let Some(item) = details
                                 && !item.description.is_empty()
-                    {
+                            {
                                 ui.collapsing("Description", |ui| {
                                     ui.label(&item.description);
                                 });
-                    }
-                        ui.small(format!("PublishedFileId {id}"));
-                    if let Some(url) = details.and_then(|item| item.preview_url.as_ref()) {
-                        ui.hyperlink_to("Open Workshop item", url);
-                    }
+                            }
+                            ui.small(format!("PublishedFileId {id}"));
+                            if let Some(url) = details.and_then(|item| item.preview_url.as_ref()) {
+                                ui.hyperlink_to("Open Workshop item", url);
+                            }
                         });
                     });
                 }
@@ -358,7 +367,7 @@ impl StudioApp {
                     self.use_available_workshop_package_as_profile_root(&id);
                 }
                 Some(SubscriptionAction::ReviewProfile) => {
-                    self.section = super::super::Section::Library;
+                    self.activate_navigation_section(super::super::Section::Library);
                     self.preview_selected_composition();
                 }
                 Some(SubscriptionAction::Import(id)) => {

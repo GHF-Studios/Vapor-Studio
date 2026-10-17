@@ -142,7 +142,8 @@ impl StudioApp {
         let has_source = profile.workspace.is_some();
         let root_plan_node = profile.root_package.as_ref().and_then(|root| {
             let selector = content_selector(root);
-            self.profile_composition.preview()
+            self.profile_composition
+                .preview()
                 .filter(|preview| preview.selector == selector && preview.ready())
                 .and_then(|preview| preview.nodes.last())
         });
@@ -155,8 +156,10 @@ impl StudioApp {
             node.source == vapor_studio_core::CompositionPreviewSource::Workspace
         });
         let installed = matches!(&profile.installation, InstallationState::Installed { .. });
-        let needs_repair = matches!(&profile.installation,
-            InstallationState::NeedsRepair { .. } | InstallationState::Partial { .. });
+        let needs_repair = matches!(
+            &profile.installation,
+            InstallationState::NeedsRepair { .. } | InstallationState::Partial { .. }
+        );
         let out_of_date = matches!(&profile.installation, InstallationState::OutOfDate { .. });
         let primary_action = if !has_root {
             None
@@ -226,21 +229,20 @@ impl StudioApp {
                     "{} exact content versions installed",
                     artifacts.len()
                 ));
-                egui::CollapsingHeader::new("Installed file locations")
-                    .show(ui, |ui| {
-                        for artifact in artifacts {
-                            ui.small(format!(
-                                "{}{} · {}",
-                                artifact.id,
-                                artifact
-                                    .version
-                                    .as_ref()
-                                    .map(|version| format!("@{version}"))
-                                    .unwrap_or_default(),
-                                artifact.root.display()
-                            ));
-                        }
-                    });
+                egui::CollapsingHeader::new("Installed file locations").show(ui, |ui| {
+                    for artifact in artifacts {
+                        ui.small(format!(
+                            "{}{} · {}",
+                            artifact.id,
+                            artifact
+                                .version
+                                .as_ref()
+                                .map(|version| format!("@{version}"))
+                                .unwrap_or_default(),
+                            artifact.root.display()
+                        ));
+                    }
+                });
             }
             InstallationState::OutOfDate {
                 detail,
@@ -254,7 +256,9 @@ impl StudioApp {
                 );
                 ui.label(detail);
                 if !verified {
-                    ui.label("Verify the installed files before saving these changes to the profile.");
+                    ui.label(
+                        "Verify the installed files before saving these changes to the profile.",
+                    );
                 }
                 if let Some(saved_graph) = &profile.resolved_graph {
                     egui::CollapsingHeader::new("Review changes")
@@ -272,24 +276,23 @@ impl StudioApp {
                     actual_graph.nodes.len(),
                     actual_graph.effective_engine.id,
                 ));
-                egui::CollapsingHeader::new("Installed content details")
-                    .show(ui, |ui| {
-                        for node in &actual_graph.nodes {
-                            ui.small(format!(
-                                "{} · {}{} · {} · {}",
-                                node.kind,
-                                node.content.id,
-                                node.content
-                                    .version
-                                    .as_deref()
-                                    .map(|version| format!("@{version}"))
-                                    .unwrap_or_default(),
-                                node.fingerprint.as_deref().unwrap_or("unfingerprinted"),
-                                node.source.as_deref().unwrap_or("source unknown"),
-                            ));
-                        }
-                        ui.small(format!("{} installed artifacts observed", artifacts.len()));
-                    });
+                egui::CollapsingHeader::new("Installed content details").show(ui, |ui| {
+                    for node in &actual_graph.nodes {
+                        ui.small(format!(
+                            "{} · {}{} · {} · {}",
+                            node.kind,
+                            node.content.id,
+                            node.content
+                                .version
+                                .as_deref()
+                                .map(|version| format!("@{version}"))
+                                .unwrap_or_default(),
+                            node.fingerprint.as_deref().unwrap_or("unfingerprinted"),
+                            node.source.as_deref().unwrap_or("source unknown"),
+                        ));
+                    }
+                    ui.small(format!("{} installed artifacts observed", artifacts.len()));
+                });
                 if ui
                     .add_enabled(
                         !self.operation.running && *verified,

@@ -4,6 +4,8 @@ mod app_shell;
 mod authoring_results;
 #[path = "catalog.rs"]
 mod catalog;
+#[path = "command_palette.rs"]
+mod command_palette;
 #[path = "components/mod.rs"]
 mod components;
 #[path = "composition_lifecycle.rs"]

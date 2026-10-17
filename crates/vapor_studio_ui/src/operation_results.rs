@@ -25,8 +25,24 @@ impl StudioApp {
             OperationResult::Discovery(source_result, catalog_result, unregistered_result) => {
                 self.apply_catalog_discovery(source_result, catalog_result, unregistered_result)
             }
-            OperationResult::Message(Err(error))
-            | OperationResult::CompositionPreview(Err(error))
+            OperationResult::Message(Err(error)) => {
+                if self
+                    .operation
+                    .active_operation
+                    .as_ref()
+                    .is_some_and(|operation| {
+                        matches!(
+                            &operation.kind,
+                            vapor_studio_core::OperationKind::SearchWorkshop
+                        )
+                    })
+                {
+                    self.apply_workshop_error(error);
+                } else {
+                    self.status = error;
+                }
+            }
+            OperationResult::CompositionPreview(Err(error))
             | OperationResult::WorkspaceFiles(Err(error))
             | OperationResult::WorkspaceFileCreated(Err(error))
             | OperationResult::FileContents(Err(error))

@@ -1,6 +1,6 @@
 use super::super::StudioApp;
-use super::super::content_selector;
 use super::super::components::design::empty_state;
+use super::super::content_selector;
 use eframe::egui;
 use vapor_studio_core::InstallationState;
 
@@ -50,9 +50,7 @@ impl StudioApp {
         });
         if ui
             .add_enabled(
-                !self.operation.running
-                    && !self.has_unsaved_workspace_edits()
-                    && editable_source,
+                !self.operation.running && !self.has_unsaved_workspace_edits() && editable_source,
                 egui::Button::new("Edit composition"),
             )
             .on_disabled_hover_text(
@@ -92,10 +90,7 @@ impl StudioApp {
 
         if let Some(graph) = &profile.resolved_graph {
             ui.group(|ui| {
-                ui.label(format!(
-                    "Selected content · {} items",
-                    graph.nodes.len()
-                ));
+                ui.label(format!("Selected content · {} items", graph.nodes.len()));
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
                         "Engine: {}",
@@ -123,28 +118,31 @@ impl StudioApp {
                             });
                         }
                     });
-                egui::CollapsingHeader::new("Integrity details")
-                    .show(ui, |ui| {
-                        if let InstallationState::Installed {
-                            graph_fingerprint: Some(fingerprint),
-                            ..
-                        } = &profile.installation
-                        {
-                            ui.small(format!("Composition fingerprint: {fingerprint}"));
-                        }
-                        for node in &graph.nodes {
-                            ui.small(format!(
-                                "{} · {} · source {} · file fingerprint {}",
-                                node.kind,
-                                content_selector(&node.content),
-                                node.source.as_deref().unwrap_or("not recorded"),
-                                node.fingerprint.as_deref().unwrap_or("file fingerprint unavailable"),
-                            ));
-                        }
-                    });
+                egui::CollapsingHeader::new("Integrity details").show(ui, |ui| {
+                    if let InstallationState::Installed {
+                        graph_fingerprint: Some(fingerprint),
+                        ..
+                    } = &profile.installation
+                    {
+                        ui.small(format!("Composition fingerprint: {fingerprint}"));
+                    }
+                    for node in &graph.nodes {
+                        ui.small(format!(
+                            "{} · {} · source {} · file fingerprint {}",
+                            node.kind,
+                            content_selector(&node.content),
+                            node.source.as_deref().unwrap_or("not recorded"),
+                            node.fingerprint
+                                .as_deref()
+                                .unwrap_or("file fingerprint unavailable"),
+                        ));
+                    }
+                });
             });
         } else {
-            ui.weak("Install this composition to record its exact content versions and dependencies.");
+            ui.weak(
+                "Install this composition to record its exact content versions and dependencies.",
+            );
         }
         action
     }

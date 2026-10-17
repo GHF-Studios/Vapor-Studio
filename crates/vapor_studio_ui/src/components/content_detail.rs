@@ -13,11 +13,10 @@ impl StudioApp {
     pub(in crate::app) fn draw_content_detail(&mut self, ui: &mut egui::Ui) {
         let mut action = None;
         if let Some(identity) = self.catalog.selected.as_ref() {
-            if let Some(content) = self
-                .catalog
-                .items
-                .iter()
-                .find(|content| super::super::catalog_content_selector_matches(content, identity))
+            if let Some(content) =
+                self.catalog.items.iter().find(|content| {
+                    super::super::catalog_content_selector_matches(content, identity)
+                })
             {
                 ui.heading("Content details");
                 ui.label(format!(
@@ -51,8 +50,7 @@ impl StudioApp {
                     ui,
                     |ui| {
                         for location in &content.locations {
-                            let source =
-                                super::super::catalog::catalog_location_label(location);
+                            let source = super::super::catalog::catalog_location_label(location);
                             ui.label(format!(
                                 "{source}{} · {}",
                                 location
@@ -167,7 +165,7 @@ impl StudioApp {
             Some(ContentDetailAction::ReviewPublish) => {
                 self.root_publishing.tab =
                     super::super::root_publishing::PublishTab::WorkshopContent;
-                self.section = Section::Publish;
+                self.activate_navigation_section(Section::Publish);
             }
             Some(ContentDetailAction::AssignProfileRoot(identity, workspace)) => {
                 self.assign_profile_root(identity, workspace);

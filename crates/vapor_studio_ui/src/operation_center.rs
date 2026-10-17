@@ -19,14 +19,9 @@ impl StudioApp {
                         } else {
                             (progress.completed as f32 / total as f32).clamp(0.0, 1.0)
                         };
-                        ui.add(
-                            egui::ProgressBar::new(fraction)
-                                .desired_width(150.0)
-                                .text(format!(
-                                    "{} / {} {}",
-                                    progress.completed, total, progress.unit
-                                )),
-                        );
+                        ui.add(egui::ProgressBar::new(fraction).desired_width(150.0).text(
+                            format!("{} / {} {}", progress.completed, total, progress.unit),
+                        ));
                     } else {
                         ui.weak(format!("{} {}", progress.completed, progress.unit));
                     }
@@ -34,9 +29,15 @@ impl StudioApp {
             } else if let Some(last) = self.operation.operation_history.front() {
                 let tone = match &last.event.status {
                     vapor_studio_core::OperationStatus::Succeeded { summary }
-                        if summary == &self.status => StatusTone::Positive,
+                        if summary == &self.status =>
+                    {
+                        StatusTone::Positive
+                    }
                     vapor_studio_core::OperationStatus::Failed { message }
-                        if message == &self.status => StatusTone::Error,
+                        if message == &self.status =>
+                    {
+                        StatusTone::Error
+                    }
                     vapor_studio_core::OperationStatus::Cancelled if self.status == "Cancelled" => {
                         StatusTone::Caution
                     }

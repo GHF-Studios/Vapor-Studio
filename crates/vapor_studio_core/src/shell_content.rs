@@ -189,12 +189,7 @@ pub fn download_workshop_items(
         }
     }
     let installation = InstallationPaths::from_application_executable(application_executable)?;
-    let reports = content::download_many(
-        &installation,
-        None,
-        &normalized_ids,
-        None,
-    )?;
+    let reports = content::download_many(&installation, None, &normalized_ids, None)?;
     if reports.is_empty() {
         return Err("Workshop download returned no artifacts".to_owned());
     }
@@ -361,9 +356,8 @@ pub fn run_installed_profile(
         content::install(&installation, paths.as_ref(), selector)?;
     }
     let composition = installed_composition(&installation, selector)?;
-    let profile_graph_matches = expected_graph.is_none_or(|expected| {
-        crate::resolved_graph_matches(expected, &composition.graph)
-    });
+    let profile_graph_matches = expected_graph
+        .is_none_or(|expected| crate::resolved_graph_matches(expected, &composition.graph));
     let launch_error = if profile_graph_matches {
         content::prepare_packagepack_launch(&installation, selector)
             .and_then(|plan| content::run_packagepack_launch(&plan, "studio-profile", arguments))

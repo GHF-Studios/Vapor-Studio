@@ -1,5 +1,5 @@
 use super::super::StudioApp;
-use super::super::components::design::{installation_status, status_text};
+use super::super::components::design::{confirmation_card, installation_status, status_text};
 use eframe::egui;
 
 impl StudioApp {
@@ -86,24 +86,21 @@ impl StudioApp {
                 }
             });
             if self.profile.confirm_removal {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    format!(
-                        "Remove {} from Studio? Installed content and workspace files remain untouched.",
-                        profile_name
-                    ),
-                );
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(!self.operation.running, egui::Button::new("Confirm removal"))
-                        .clicked()
-                    {
+                let title = format!("Remove {profile_name} from Studio?");
+                if let Some(remove) = confirmation_card(
+                    ui,
+                    &title,
+                    "Installed content and workspace files remain untouched.",
+                    "Remove profile",
+                    "Keep profile",
+                    !self.operation.running,
+                ) {
+                    if remove {
                         self.remove_active_profile();
-                    }
-                    if ui.button("Cancel").clicked() {
+                    } else {
                         self.profile.confirm_removal = false;
                     }
-                });
+                }
             }
         });
     }

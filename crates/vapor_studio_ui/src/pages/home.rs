@@ -2,6 +2,8 @@ use super::super::components::design::{
     installation_status, page_header, primary_button, status_text,
 };
 use super::super::operation_center::operation_kind_label;
+use super::super::workshop::WorkshopTab;
+use super::super::workspace_ops::WorkspacePanel;
 use super::super::{Section, StudioApp, content_selector};
 use eframe::egui;
 use vapor_studio_core::InstallationState;
@@ -74,27 +76,52 @@ impl StudioApp {
                 "Completed installs, builds, validation, and publishing actions will appear here.",
             );
         } else {
-            for entry in self.operation.operation_history.iter().take(5) {
-                ui.horizontal(|ui| {
-                    ui.small(operation_kind_label(&entry.event.kind));
-                    match &entry.event.status {
-                        vapor_studio_core::OperationStatus::Succeeded { summary } => {
-                            ui.colored_label(egui::Color32::from_rgb(120, 210, 150), summary);
-                        }
-                        vapor_studio_core::OperationStatus::Failed { message } => {
-                            ui.colored_label(egui::Color32::LIGHT_RED, message);
-                        }
-                        vapor_studio_core::OperationStatus::Cancelled => {
-                            ui.weak("Cancelled");
-                        }
-                        vapor_studio_core::OperationStatus::Running => {
-                            ui.weak("In progress");
-                        }
-                    }
-                    ui.weak(super::super::operations::elapsed_label(
+            let recent_activity = self
+                .operation
+                .operation_history
+                .iter()
+                .take(5)
+                .map(|entry| {
+                    (
+                        entry.event.kind.clone(),
+                        entry.event.status.clone(),
                         entry.completed_at_unix,
-                    ));
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut open_destination = None;
+            let card_style = ui.style().clone();
+            for (kind, status, completed_at) in recent_activity {
+                egui::Frame::group(&card_style).show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.strong(operation_kind_label(&kind));
+                        match &status {
+                            vapor_studio_core::OperationStatus::Succeeded { summary } => {
+                                ui.colored_label(egui::Color32::from_rgb(120, 210, 150), summary);
+                            }
+                            vapor_studio_core::OperationStatus::Failed { message } => {
+                                ui.colored_label(egui::Color32::LIGHT_RED, message);
+                            }
+                            vapor_studio_core::OperationStatus::Cancelled => {
+                                ui.weak("Cancelled");
+                            }
+                            vapor_studio_core::OperationStatus::Running => {
+                                ui.weak("In progress");
+                            }
+                        }
+                        ui.weak(super::super::operations::elapsed_label(completed_at));
+                        if ui
+                            .small_button("Open")
+                            .on_hover_text("Return to the screen for this operation")
+                            .clicked()
+                        {
+                            open_destination = Some(operation_destination(&kind));
+                        }
+                    });
                 });
+            }
+            if let Some(destination) = open_destination {
+                self.open_operation_destination(destination);
             }
         }
     }
@@ -138,13 +165,13 @@ impl StudioApp {
             });
             if play_clicked {
                 if profile.needs_review {
-                    self.section = Section::Library;
+                    self.activate_navigation_section(Section::Library);
                 } else if profile.installed {
                     self.run_installed_selected();
                 } else if source_ready {
                     self.run_selected();
                 } else {
-                    self.section = Section::Library;
+                    self.activate_navigation_section(Section::Library);
                     self.preview_selected_composition();
                 }
             }
@@ -179,12 +206,12 @@ impl StudioApp {
                 )
                 .clicked()
             {
-                self.section = Section::Discover;
+                self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
                 self.discover();
             }
         }
         if ui.button("Manage play profiles").clicked() {
-            self.section = Section::Library;
+            self.activate_navigation_section(Section::Library);
         }
     }
 
@@ -194,7 +221,7 @@ impl StudioApp {
             ui.heading("Start a workspace");
             ui.label("Create a starter workspace or open existing source to author content.");
             if ui.button("Create a workspace").clicked() {
-                self.section = Section::Create;
+                self.activate_navigation_section(Section::Create);
             }
             if ui.button("Open a workspace").clicked() {
                 self.open_workspace_picker();
@@ -220,24 +247,52 @@ impl StudioApp {
             } else {
                 "Content discovery has not run yet".to_owned()
             });
-            if ui
-                .add_enabled(!self.operation.running, egui::Button::new("Open workspace"))
-                .clicked()
-            {
-                self.section = Section::Workspace;
-                if self.workspace.editor.files.is_empty() && !self.operation.running {
-                    self.refresh_workspace_files();
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(
+                        !self.operation.running,
+                        egui::Button::new("Source projects"),
+                    )
+                    .clicked()
+                {
+                    self.open_workspace_panel(WorkspacePanel::Sources);
                 }
-            }
-            if ui
-                .add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                    egui::Button::new("Create content in this workspace"),
-                )
-                .clicked()
-            {
-                self.section = Section::Create;
-            }
+                let content_label = if self.workspace.unregistered_scan_completed {
+                    "Workspace content"
+                } else {
+                    "Find workspace content"
+                };
+                if ui
+                    .add_enabled(
+                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        egui::Button::new(content_label),
+                    )
+                    .clicked()
+                {
+                    self.navigate_to_workspace_content();
+                }
+                if ui
+                    .add_enabled(!self.operation.running, egui::Button::new("Open files"))
+                    .clicked()
+                {
+                    self.open_workspace_files();
+                }
+                if ui
+                    .add_enabled(!self.operation.running, egui::Button::new("Build"))
+                    .clicked()
+                {
+                    self.open_workspace_panel(WorkspacePanel::Build);
+                }
+                if ui
+                    .add_enabled(
+                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        egui::Button::new("Create content"),
+                    )
+                    .clicked()
+                {
+                    self.activate_navigation_section(Section::Create);
+                }
+            });
         }
         if has_profile_root
             && ui
@@ -247,8 +302,87 @@ impl StudioApp {
                 )
                 .clicked()
         {
-            self.section = Section::Discover;
+            self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
             self.discover();
         }
+    }
+}
+
+enum OperationDestination {
+    Section(Section),
+    LocalDiscover,
+    Workshop(WorkshopTab),
+    Workspace(WorkspacePanel),
+    WorkspaceFiles,
+}
+
+impl StudioApp {
+    fn open_operation_destination(&mut self, destination: OperationDestination) {
+        match destination {
+            OperationDestination::Section(section) => {
+                self.activate_navigation_section(section);
+            }
+            OperationDestination::LocalDiscover => {
+                self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
+            }
+            OperationDestination::Workshop(tab) => {
+                self.open_workshop_tab(tab);
+            }
+            OperationDestination::Workspace(panel) => {
+                self.open_workspace_panel(panel);
+            }
+            OperationDestination::WorkspaceFiles => {
+                self.open_workspace_files();
+            }
+        }
+    }
+}
+
+fn operation_destination(kind: &vapor_studio_core::OperationKind) -> OperationDestination {
+    use vapor_studio_core::OperationKind;
+    match kind {
+        OperationKind::Discover => OperationDestination::LocalDiscover,
+        OperationKind::SearchWorkshop => OperationDestination::Workshop(WorkshopTab::Browse),
+        OperationKind::LoadWorkshopSubscriptions | OperationKind::ChangeWorkshopSubscription => {
+            OperationDestination::Workshop(WorkshopTab::Subscriptions)
+        }
+        OperationKind::Acquire => OperationDestination::Workshop(WorkshopTab::Imports),
+        OperationKind::Resolve
+        | OperationKind::Install
+        | OperationKind::Verify
+        | OperationKind::Update
+        | OperationKind::Repair
+        | OperationKind::Run
+        | OperationKind::RunInstalled => OperationDestination::Section(Section::Library),
+        OperationKind::CreateContent => OperationDestination::WorkspaceFiles,
+        OperationKind::CreateWorkspace => OperationDestination::Workspace(WorkspacePanel::Sources),
+        OperationKind::StageWorkshop
+        | OperationKind::PublishWorkshop
+        | OperationKind::StageRootDistribution
+        | OperationKind::PublishRootDistribution => OperationDestination::Section(Section::Publish),
+        OperationKind::LoadComposition | OperationKind::SaveComposition => {
+            OperationDestination::Section(Section::Compose)
+        }
+        OperationKind::LoadWorkshopMetadata
+        | OperationKind::SaveWorkshopMetadata
+        | OperationKind::LoadRuntimeOutputs
+        | OperationKind::SaveRuntimeOutputs
+        | OperationKind::AdoptContentProject
+        | OperationKind::UnregisterContentProject
+        | OperationKind::DiscoverContentProjects
+        | OperationKind::Validate => OperationDestination::Workspace(WorkspacePanel::Content),
+        OperationKind::CreateWorkspaceFile
+        | OperationKind::OpenWorkspaceFile
+        | OperationKind::SaveWorkspaceFile => OperationDestination::WorkspaceFiles,
+        OperationKind::OpenWorkspace
+        | OperationKind::RememberWorkspace
+        | OperationKind::DiscoverWorkspace => {
+            OperationDestination::Workspace(WorkspacePanel::Sources)
+        }
+        OperationKind::Fmt
+        | OperationKind::Check
+        | OperationKind::Test
+        | OperationKind::Build
+        | OperationKind::Clean => OperationDestination::Workspace(WorkspacePanel::Build),
     }
 }

@@ -1,4 +1,3 @@
-use super::catalog::DiscoverTab;
 use super::operation_protocol::OperationResult;
 use super::{StudioApp, catalog_content_selector};
 use crate::navigation::CatalogSourceFilter;
@@ -29,6 +28,7 @@ pub(super) struct WorkshopState {
     pub(super) selected_items: std::collections::BTreeSet<String>,
     pub(super) pending_acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
     pub(super) search_query: String,
+    pub(super) pending_search: Option<(String, u32)>,
     pub(super) results: Vec<vapor_studio_core::WorkshopItem>,
     pub(super) focused_result: Option<String>,
     pub(super) results_query: Option<String>,
@@ -55,6 +55,7 @@ impl Default for WorkshopState {
             selected_items: Default::default(),
             pending_acquisitions: Vec::new(),
             search_query: String::new(),
+            pending_search: None,
             results: Vec::new(),
             focused_result: None,
             results_query: None,
@@ -86,11 +87,10 @@ impl StudioApp {
             .iter()
             .find(|content| content.published_file_id.as_deref() == Some(published_file_id))
             .map(catalog_content_selector);
-        self.catalog.discover_tab = DiscoverTab::Local;
         self.catalog.source_filter = CatalogSourceFilter::Workshop;
         self.catalog.kind_filter = None;
         self.catalog.search_query = published_file_id.to_owned();
-        self.section = crate::navigation::Section::Discover;
+        self.open_discover_tab(super::catalog::DiscoverTab::Local);
     }
 
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
@@ -110,7 +110,18 @@ impl StudioApp {
     }
 
     pub(super) fn apply_workshop_error(&mut self, error: String) {
-        self.status = error;
+        if let Some((query, page)) = self.workshop.pending_search.take() {
+            self.status = format!(
+                "Workshop search for ‘{}’ (page {page}) failed: {error}. Previous results remain available.",
+                if query.is_empty() {
+                    "all items"
+                } else {
+                    &query
+                },
+            );
+        } else {
+            self.status = error;
+        }
     }
 
     pub(super) fn apply_workshop_subscriptions_error(&mut self, error: String) {
@@ -187,12 +198,13 @@ impl StudioApp {
         page: vapor_studio_core::WorkshopPage,
         query: String,
     ) {
+        self.workshop.pending_search = None;
         self.workshop.page = page.page;
         self.workshop.total_results = page.total_results;
         self.workshop.results = page.items;
         if self.workshop.focused_result.as_ref().is_none_or(|focused| {
             !self
-            .workshop
+                .workshop
                 .results
                 .iter()
                 .any(|item| &item.published_file_id == focused)
@@ -241,6 +253,7 @@ impl StudioApp {
         subscribed: bool,
     ) {
         for id in &ids {
+            self.workshop.selected_items.remove(id);
             if subscribed {
                 self.workshop.subscriptions.insert(id.clone());
             } else {
@@ -436,11 +449,17 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn search_workshop(&mut self) {
+        self.search_workshop_page(1);
+    }
+
+    pub(in crate::app) fn search_workshop_page(&mut self, page: u32) {
         let query = self.workshop.search_query.trim().to_owned();
-        let page = self.workshop.page;
-        self.workshop.results.clear();
-        self.workshop.results_query = None;
-        self.workshop.total_results = 0;
+        let status = if query.is_empty() {
+            format!("Searching Steam Workshop · page {page}…")
+        } else {
+            format!("Searching Workshop for ‘{query}’ · page {page}…")
+        };
+        self.workshop.pending_search = Some((query.clone(), page));
         self.spawn(OperationKind::SearchWorkshop, move |_context| {
             OperationResult::WorkshopSearch(
                 vapor_studio_core::search_workshop(
@@ -451,7 +470,7 @@ impl StudioApp {
                 query,
             )
         });
-        self.status = "Searching Steam Workshop…".to_owned();
+        self.status = status;
     }
 
     pub(in crate::app) fn refresh_workshop_subscriptions(&mut self) {

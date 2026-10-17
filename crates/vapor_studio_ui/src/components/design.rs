@@ -49,6 +49,51 @@ pub(crate) fn empty_state(
     });
 }
 
+pub(crate) fn confirmation_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    description: &str,
+    confirm_label: &str,
+    cancel_label: &str,
+    confirm_enabled: bool,
+) -> Option<bool> {
+    let style = ui.style().clone();
+    egui::Frame::group(&style)
+        .show(ui, |ui| {
+            ui.colored_label(egui::Color32::YELLOW, title);
+            ui.label(description);
+            let mut decision = None;
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(confirm_enabled, egui::Button::new(confirm_label))
+                    .clicked()
+                {
+                    decision = Some(true);
+                }
+                if ui.button(cancel_label).clicked() {
+                    decision = Some(false);
+                }
+            });
+            decision
+        })
+        .inner
+}
+
+pub(crate) fn discard_confirmation(
+    ui: &mut egui::Ui,
+    title: &str,
+    description: &str,
+) -> Option<bool> {
+    confirmation_card(
+        ui,
+        title,
+        description,
+        "Discard changes",
+        "Keep editing",
+        true,
+    )
+}
+
 pub(crate) fn status_text(ui: &mut egui::Ui, text: &str, tone: StatusTone) {
     let color = match tone {
         StatusTone::Neutral => egui::Color32::from_rgb(177, 190, 204),
@@ -64,8 +109,7 @@ pub(crate) fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let width = ui.available_width().max(1.0);
     ui.add_sized(
         [width, 38.0],
-        egui::Button::new(egui::RichText::new(label).strong())
-            .fill(ACCENT_FILL),
+        egui::Button::new(egui::RichText::new(label).strong()).fill(ACCENT_FILL),
     )
 }
 

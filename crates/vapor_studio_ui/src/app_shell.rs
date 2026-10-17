@@ -1,44 +1,38 @@
-use super::catalog::DiscoverTab;
 use super::components::design::{ACCENT, MUTED_TEXT};
 use super::directory_picker::{DirectoryPickerPurpose, DirectoryPickerResult};
 use super::workshop::WorkshopTab;
+use super::workspace_ops::WorkspacePanel;
 use super::{Section, StudioApp};
 use eframe::egui;
 use vapor_studio_core::{CURRENT_SCHEMA_VERSION, ProfileDocument};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CommandPaletteAction {
-    Navigate(Section),
-    Workshop(WorkshopTab),
-    ValidateWorkspace,
-    WorkspaceOperation(vapor_core::DevelopmentOperation),
-    OpenWorkspace,
-    OpenWorkspaceFiles,
-    RefreshLocalContent,
-}
-
-fn command_palette_entry_matches(title: &str, keywords: &str, query: &str) -> bool {
-    let title = title.to_lowercase();
-    query
-        .split_whitespace()
-        .all(|term| title.contains(term) || keywords.contains(term))
-}
-
 impl StudioApp {
     pub(super) fn draw_profile_target_selector(&mut self, ui: &mut egui::Ui) {
         let active_profile = self.profile.active_index;
+        let can_switch = !self.operation.running && !self.has_unsaved_context_switch_edits();
         let mut requested_profile = None;
-        egui::ComboBox::from_id_salt("active-profile")
-            .width(190.0)
-            .selected_text(&self.profile.items[active_profile].name)
-            .show_ui(ui, |ui| {
-                for (index, profile) in self.profile.items.iter().enumerate() {
-                    let selected = index == active_profile;
-                    if ui.selectable_label(selected, &profile.name).clicked() && !selected {
-                        requested_profile = Some(index);
+        let selector = ui.add_enabled_ui(can_switch, |ui| {
+            egui::ComboBox::from_id_salt("active-profile")
+                .width(190.0)
+                .selected_text(&self.profile.items[active_profile].name)
+                .show_ui(ui, |ui| {
+                    for (index, profile) in self.profile.items.iter().enumerate() {
+                        let selected = index == active_profile;
+                        if ui.selectable_label(selected, &profile.name).clicked() && !selected {
+                            requested_profile = Some(index);
+                        }
                     }
-                }
+                })
+        });
+        if !can_switch {
+            selector.response.on_hover_text(if self.operation.running {
+                "Wait for the current operation to finish before switching profiles."
+            } else if self.authoring.pending_composition_role_change.is_some() {
+                "Resolve the pending composition role choice before switching profiles."
+            } else {
+                "Save or discard the Create draft and workspace edits before switching profiles."
             });
+        }
         if let Some(requested_profile) = requested_profile {
             self.select_profile(requested_profile);
         }
@@ -49,6 +43,9 @@ impl StudioApp {
             Section::Create if self.authoring.create.is_dirty() => "Create · draft".to_owned(),
             Section::Workspace if self.has_unsaved_workspace_edits() => {
                 "Workspace · unsaved".to_owned()
+            }
+            Section::Compose if self.authoring.pending_composition_role_change.is_some() => {
+                "Compose · choice pending".to_owned()
             }
             Section::Compose if self.authoring.composition_has_unsaved_changes() => {
                 "Compose · unsaved".to_owned()
@@ -62,15 +59,40 @@ impl StudioApp {
         }
     }
 
-    fn activate_navigation_section(&mut self, section: Section) {
-            self.section = section;
-            if section == Section::Workspace
-                && self.workspace.editor.files.is_empty()
-                && !self.operation.running
-            {
-                self.refresh_workspace_files();
-            }
+    pub(super) fn activate_navigation_section(&mut self, section: Section) {
+        self.section = section;
+        if section == Section::Workspace
+            && self.workspace.editor.files_open
+            && !self.workspace.editor.files_loaded
+            && !self.operation.running
+        {
+            self.refresh_workspace_files();
         }
+    }
+
+    pub(super) fn open_workshop_tab(&mut self, tab: WorkshopTab) {
+        self.open_discover_tab(super::catalog::DiscoverTab::Workshop);
+        self.workshop.tab = tab;
+    }
+
+    pub(super) fn open_discover_tab(&mut self, tab: super::catalog::DiscoverTab) {
+        self.catalog.discover_tab = tab;
+        self.activate_navigation_section(Section::Discover);
+    }
+
+    pub(super) fn open_workspace_panel(&mut self, panel: WorkspacePanel) {
+        self.workspace.overview_panel = panel;
+        self.workspace.editor.files_open = false;
+        self.activate_navigation_section(Section::Workspace);
+    }
+
+    pub(super) fn open_workspace_files(&mut self) {
+        self.workspace.editor.files_open = true;
+        self.activate_navigation_section(Section::Workspace);
+        if !self.workspace.editor.files_loaded && !self.operation.running {
+            self.refresh_workspace_files();
+        }
+    }
 
     fn select_navigation_section(&mut self, ui: &mut egui::Ui, section: Section) {
         let response = ui.add_sized(
@@ -83,13 +105,6 @@ impl StudioApp {
         if response.clicked() {
             self.activate_navigation_section(section);
         }
-    }
-
-    fn open_command_palette(&mut self) {
-        self.command_palette_open = true;
-        self.command_palette_search.clear();
-        self.command_palette_focus_search = true;
-        self.command_palette_selected_index = 0;
     }
 
     fn draw_navigation(&mut self, ui: &mut egui::Ui) {
@@ -115,48 +130,48 @@ impl StudioApp {
             .auto_shrink([false, false])
             .max_height((ui.available_height() - 150.0).max(100.0))
             .show(ui, |ui| {
-        self.select_navigation_section(ui, Section::Home);
-        ui.add_space(12.0);
-        ui.label(
-            egui::RichText::new("PLAY")
-                .small()
-                .strong()
-                .color(MUTED_TEXT),
-        );
-        self.select_navigation_section(ui, Section::Library);
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new("EXPLORE")
-                .small()
-                .strong()
-                .color(MUTED_TEXT),
-        );
-        self.select_navigation_section(ui, Section::Discover);
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new("CREATE")
-                .small()
-                .strong()
-                .color(MUTED_TEXT),
-        );
-        self.select_navigation_section(ui, Section::Create);
-        self.select_navigation_section(ui, Section::Workspace);
-        self.select_navigation_section(ui, Section::Compose);
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new("SHARE")
-                .small()
-                .strong()
-                .color(MUTED_TEXT),
-        );
-        self.select_navigation_section(ui, Section::Publish);
+                self.select_navigation_section(ui, Section::Home);
+                ui.add_space(12.0);
+                ui.label(
+                    egui::RichText::new("PLAY")
+                        .small()
+                        .strong()
+                        .color(MUTED_TEXT),
+                );
+                self.select_navigation_section(ui, Section::Library);
                 ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new("TOOLS")
-                    .small()
-                    .strong()
-                    .color(MUTED_TEXT),
-            );
+                ui.label(
+                    egui::RichText::new("EXPLORE")
+                        .small()
+                        .strong()
+                        .color(MUTED_TEXT),
+                );
+                self.select_navigation_section(ui, Section::Discover);
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("CREATE")
+                        .small()
+                        .strong()
+                        .color(MUTED_TEXT),
+                );
+                self.select_navigation_section(ui, Section::Create);
+                self.select_navigation_section(ui, Section::Workspace);
+                self.select_navigation_section(ui, Section::Compose);
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("SHARE")
+                        .small()
+                        .strong()
+                        .color(MUTED_TEXT),
+                );
+                self.select_navigation_section(ui, Section::Publish);
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("TOOLS")
+                        .small()
+                        .strong()
+                        .color(MUTED_TEXT),
+                );
                 self.select_navigation_section(ui, Section::Diagnostics);
             });
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -205,11 +220,7 @@ impl StudioApp {
     fn draw_compact_navigation(&mut self, ui: &mut egui::Ui) {
         let mut requested_section = None;
         ui.horizontal_wrapped(|ui| {
-            ui.label(
-                egui::RichText::new("VAPOR STUDIO")
-                    .strong()
-                    .color(ACCENT),
-            );
+            ui.label(egui::RichText::new("VAPOR STUDIO").strong().color(ACCENT));
             if ui
                 .button("Search · Ctrl/Cmd+K")
                 .on_hover_text("Find a page or common workspace action")
@@ -239,8 +250,8 @@ impl StudioApp {
                         {
                             requested_section = Some(section);
                         }
-                }
-            });
+                    }
+                });
             ui.separator();
             let workspace_name = if self.workspace.root.trim().is_empty() {
                 "Choose workspace"
@@ -250,7 +261,11 @@ impl StudioApp {
                     .and_then(|name| name.to_str())
                     .unwrap_or(&self.workspace.root)
             };
-            if ui.button(workspace_name).on_hover_text(&self.workspace.root).clicked() {
+            if ui
+                .button(workspace_name)
+                .on_hover_text(&self.workspace.root)
+                .clicked()
+            {
                 if self.workspace.root.trim().is_empty() {
                     self.open_workspace_picker();
                 } else {
@@ -263,188 +278,16 @@ impl StudioApp {
         }
     }
 
-    fn draw_command_palette(&mut self, ui: &mut egui::Ui) {
-        if !self.command_palette_open {
-            return;
-        }
-
-        let entries = [
-            ("Home", "launcher start profiles", CommandPaletteAction::Navigate(Section::Home)),
-            ("Profiles", "library play install update", CommandPaletteAction::Navigate(Section::Library)),
-            ("Discover", "local content catalog workshop browse", CommandPaletteAction::Navigate(Section::Discover)),
-            ("Browse Steam Workshop", "search acquire browse remote", CommandPaletteAction::Workshop(WorkshopTab::Browse)),
-            ("Workshop subscriptions", "subscribed download unsubscribe installed", CommandPaletteAction::Workshop(WorkshopTab::Subscriptions)),
-            ("Recent Workshop imports", "cache imported acquisition", CommandPaletteAction::Workshop(WorkshopTab::Imports)),
-            ("Validate workspace content", "manifest references", CommandPaletteAction::ValidateWorkspace),
-            ("Format workspace", "fmt rust source", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Fmt)),
-            ("Check workspace", "compiler type check", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Check)),
-            ("Test workspace", "tests verification", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Test)),
-            ("Build workspace", "compile executable", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Build)),
-            ("Clean workspace", "remove derived artifacts", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Clean)),
-            ("Create content", "new project template author", CommandPaletteAction::Navigate(Section::Create)),
-            ("Workspace", "source projects files build", CommandPaletteAction::Navigate(Section::Workspace)),
-            ("Compose", "packagepack dependencies graph", CommandPaletteAction::Navigate(Section::Compose)),
-            ("Publish", "steam workshop review upload", CommandPaletteAction::Navigate(Section::Publish)),
-            ("Diagnostics", "logs telemetry runtime", CommandPaletteAction::Navigate(Section::Diagnostics)),
-            ("Open workspace", "folder select source", CommandPaletteAction::OpenWorkspace),
-            ("Open workspace files", "project editor source code", CommandPaletteAction::OpenWorkspaceFiles),
-            ("Refresh local content", "rescan catalog workspace", CommandPaletteAction::RefreshLocalContent),
-        ];
-        let mut window_open = true;
-        let mut requested_action = None;
-        let mut close_requested = false;
-        let mut request_focus = self.command_palette_focus_search;
-        self.command_palette_focus_search = false;
-
-        egui::Window::new("Command palette")
-            .id(egui::Id::new("studio-command-palette"))
-            .collapsible(false)
-            .resizable(false)
-            .default_width(ui.ctx().content_rect().width().min(560.0))
-            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 72.0))
-            .open(&mut window_open)
-            .show(ui.ctx(), |ui| {
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.command_palette_search)
-                        .desired_width(ui.available_width())
-                        .hint_text("Search pages and actions"),
-                );
-                if request_focus {
-                    response.request_focus();
-                    request_focus = false;
-                }
-                        ui.weak("↑ / ↓ move · Enter open · Esc close");
-                let query = self.command_palette_search.trim().to_lowercase();
-                if response.changed() {
-                    self.command_palette_selected_index = 0;
-                }
-                let enter_pressed = response.has_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                let move_down = response.has_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::ArrowDown));
-                let move_up = response.has_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::ArrowUp));
-                let escape_pressed = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                let can_switch_workspace = !self.operation.running
-                    && !self.has_unsaved_context_switch_edits();
-                let can_refresh = !self.operation.running
-                    && !self.has_unsaved_workspace_edits();
-                let can_run_workspace_action = can_refresh
-                    && !self.workspace.root.trim().is_empty();
-                let enabled = |action: CommandPaletteAction| match action {
-                    CommandPaletteAction::Navigate(_) | CommandPaletteAction::Workshop(_) => true,
-                    CommandPaletteAction::ValidateWorkspace
-                    | CommandPaletteAction::WorkspaceOperation(_) => can_run_workspace_action,
-                    CommandPaletteAction::OpenWorkspace => can_switch_workspace,
-                    CommandPaletteAction::OpenWorkspaceFiles => {
-                        !self.operation.running && !self.workspace.root.trim().is_empty()
-                    }
-                    CommandPaletteAction::RefreshLocalContent => can_refresh,
-                };
-                let matching_entries = entries
-                    .iter()
-                    .filter(|(title, terms, _)| {
-                        command_palette_entry_matches(title, terms, &query)
-                    })
-                    .collect::<Vec<_>>();
-                let enabled_entries = matching_entries
-                    .iter()
-                    .filter(|(_, _, action)| enabled(*action))
-                    .collect::<Vec<_>>();
-                if !enabled_entries.is_empty() {
-                    let last_index = enabled_entries.len() - 1;
-                    if move_down {
-                        self.command_palette_selected_index =
-                            (self.command_palette_selected_index + 1) % enabled_entries.len();
-                    } else if move_up {
-                        self.command_palette_selected_index = if self.command_palette_selected_index == 0 {
-                            last_index
-                        } else {
-                            self.command_palette_selected_index - 1
-                        };
-                    } else {
-                        self.command_palette_selected_index =
-                            self.command_palette_selected_index.min(last_index);
-                    }
-                } else {
-                    self.command_palette_selected_index = 0;
-                }
-                let selected_action = enabled_entries
-                    .get(self.command_palette_selected_index)
-                    .map(|(_, _, action)| *action);
-                let mut match_count = 0;
-                egui::ScrollArea::vertical()
-                    .max_height(340.0)
-                    .show(ui, |ui| {
-                        for (title, _terms, action) in matching_entries {
-                            match_count += 1;
-                            let is_selected = enabled(*action) && selected_action == Some(*action);
-                            let response = ui.add_enabled(
-                                enabled(*action),
-                                egui::Button::selectable(
-                                    is_selected,
-                                    *title,
-                                )
-                                .min_size(egui::vec2(ui.available_width(), 32.0)),
-                            );
-                            if response.clicked() {
-                                requested_action = Some(*action);
-                            }
-                            if !enabled(*action) {
-                                response.on_hover_text("Finish the current operation or save/discard edits first.");
-                            }
-                        }
-                    });
-                if match_count == 0 {
-                    ui.weak("No pages or actions match this search.");
-                }
-                if enter_pressed {
-                    requested_action = selected_action;
-                }
-                if escape_pressed {
-                    close_requested = true;
-                }
-            });
-
-        window_open &= !close_requested && requested_action.is_none();
-        self.command_palette_open = window_open;
-        if !window_open || requested_action.is_some() {
-            self.command_palette_search.clear();
-            self.command_palette_focus_search = false;
-        }
-        match requested_action {
-            Some(CommandPaletteAction::Navigate(section)) => {
-                self.activate_navigation_section(section);
-            }
-            Some(CommandPaletteAction::Workshop(tab)) => {
-                self.catalog.discover_tab = DiscoverTab::Workshop;
-                self.workshop.tab = tab;
-                self.activate_navigation_section(Section::Discover);
-            }
-            Some(CommandPaletteAction::ValidateWorkspace) => self.validate_workspace_source(),
-            Some(CommandPaletteAction::WorkspaceOperation(operation)) => {
-                self.run_operation(operation);
-            }
-            Some(CommandPaletteAction::OpenWorkspace) => self.open_workspace_picker(),
-            Some(CommandPaletteAction::OpenWorkspaceFiles) => {
-                self.activate_navigation_section(Section::Workspace);
-                self.workspace.editor.files_open = true;
-                if self.workspace.editor.files.is_empty() && !self.operation.running {
-                    self.refresh_workspace_files();
-                }
-            }
-            Some(CommandPaletteAction::RefreshLocalContent) => self.discover(),
-            None => {}
-        }
-    }
-
     fn draw_header(&mut self, ui: &mut egui::Ui, compact_navigation: bool) {
         let show_workspace = !compact_navigation
             && matches!(
+                self.section,
+                Section::Discover | Section::Create | Section::Workspace | Section::Compose
+            );
+        let show_profile_picker = matches!(
             self.section,
-            Section::Discover | Section::Create | Section::Workspace | Section::Compose
+            Section::Home | Section::Discover | Section::Compose
         );
-        let show_profile_picker = matches!(self.section, Section::Home | Section::Discover);
         let show_profile_create = matches!(self.section, Section::Home | Section::Library);
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("VAPOR STUDIO").small().strong().color(MUTED_TEXT));
@@ -463,7 +306,7 @@ impl StudioApp {
                     if self.workspace.root.trim().is_empty() {
                         self.open_workspace_picker();
                     } else {
-                        self.section = Section::Workspace;
+                        self.activate_navigation_section(Section::Workspace);
                     }
                 }
             }
@@ -523,14 +366,11 @@ impl eframe::App for StudioApp {
         let quick_open_requested =
             ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::P));
         if quick_open_requested && !self.operation.running {
-            self.section = Section::Workspace;
             if self.workspace.root.trim().is_empty() {
                 self.workspace.editor.files_open = false;
+                self.activate_navigation_section(Section::Workspace);
             } else {
-                self.workspace.editor.files_open = true;
-                if self.workspace.editor.files.is_empty() {
-                    self.refresh_workspace_files();
-                }
+                self.open_workspace_files();
             }
         }
         let viewport = ui.ctx().content_rect().size();
@@ -539,13 +379,12 @@ impl eframe::App for StudioApp {
             egui::Panel::top("studio-compact-navigation")
                 .show(ui, |ui| self.draw_compact_navigation(ui));
         } else {
-        egui::Panel::left("studio-navigation")
-            .resizable(false)
-            .default_size(220.0)
-            .show(ui, |ui| self.draw_navigation(ui));
+            egui::Panel::left("studio-navigation")
+                .resizable(false)
+                .default_size(220.0)
+                .show(ui, |ui| self.draw_navigation(ui));
         }
-        egui::Panel::top("studio-header")
-            .show(ui, |ui| self.draw_header(ui, compact_navigation));
+        egui::Panel::top("studio-header").show(ui, |ui| self.draw_header(ui, compact_navigation));
         egui::Panel::bottom("studio-operation-center")
             .show(ui, |ui| self.draw_operation_center(ui));
         egui::CentralPanel::default().show(ui, |ui| {

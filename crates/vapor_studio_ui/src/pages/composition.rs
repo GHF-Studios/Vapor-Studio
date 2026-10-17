@@ -1,5 +1,7 @@
 use super::super::StudioApp;
-use super::super::components::design::{StatusTone, page_header, primary_button, status_text};
+use super::super::components::design::{
+    StatusTone, discard_confirmation, page_header, primary_button, status_text,
+};
 use eframe::egui;
 use std::path::PathBuf;
 use vapor_studio_core::SourceCompositionLink;
@@ -24,8 +26,14 @@ impl StudioApp {
             "Saving checks the selected content and updates its source manifest through Vapor.",
         );
         let composition_has_changes = self.authoring.composition_has_unsaved_changes();
+        let composition_role_change_pending =
+            self.authoring.pending_composition_role_change.is_some();
 
-        let source_query = self.authoring.composition_source_search.trim().to_lowercase();
+        let source_query = self
+            .authoring
+            .composition_source_search
+            .trim()
+            .to_lowercase();
         let source_match_count = self
             .catalog
             .sources
@@ -34,56 +42,61 @@ impl StudioApp {
             .count();
         ui.horizontal_wrapped(|ui| {
             ui.label("Source project");
-            ui.add_enabled_ui(!self.operation.running && !composition_has_changes, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.authoring.composition_source_search)
+            ui.add_enabled_ui(
+                !self.operation.running
+                    && !composition_has_changes
+                    && !composition_role_change_pending,
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(
+                                &mut self.authoring.composition_source_search,
+                            )
                             .desired_width(250.0)
                             .hint_text("Find a source project"),
-                    );
-                    if !self.authoring.composition_source_search.is_empty()
-                        && ui.small_button("Clear").clicked()
-                    {
-                        self.authoring.composition_source_search.clear();
-                    }
-                egui::ComboBox::from_id_salt("composition-source-project")
-                    .selected_text(if self.authoring.composition_edit_selector.is_empty() {
-                        "Select content".to_owned()
-                    } else {
-                        self.authoring.composition_edit_selector.clone()
-                    })
-                    .show_ui(ui, |ui| {
-                            for content in self
-                                .catalog
-                                .sources
-                                .iter()
-                                .filter(|content| source_content_matches_query(content, &source_query))
-                            {
-                            let selector = super::super::source_content_selector(content);
-                            if ui
-                                .selectable_label(
-                                    self.authoring.composition_edit_selector == selector,
-                                    format!("{selector} · {}", content.kind),
-                                )
-                                .clicked()
-                            {
-                                self.authoring.composition_edit_selector = selector;
-                                    self.authoring.composition_source_search.clear();
-                                self.authoring.composition_edit = None;
-                                self.authoring.composition_original_links = None;
-                                self.authoring.composition_link_candidate.clear();
-                                    self.authoring.composition_link_search.clear();
-                                    self.authoring.packagepack_engine_search.clear();
-                                    self.authoring.packagepack_game_search.clear();
-                            }
+                        );
+                        if !self.authoring.composition_source_search.is_empty()
+                            && ui.small_button("Clear").clicked()
+                        {
+                            self.authoring.composition_source_search.clear();
                         }
+                        egui::ComboBox::from_id_salt("composition-source-project")
+                            .selected_text(if self.authoring.composition_edit_selector.is_empty() {
+                                "Select content".to_owned()
+                            } else {
+                                self.authoring.composition_edit_selector.clone()
+                            })
+                            .show_ui(ui, |ui| {
+                                for content in self.catalog.sources.iter().filter(|content| {
+                                    source_content_matches_query(content, &source_query)
+                                }) {
+                                    let selector = super::super::source_content_selector(content);
+                                    if ui
+                                        .selectable_label(
+                                            self.authoring.composition_edit_selector == selector,
+                                            format!("{selector} · {}", content.kind),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.authoring.composition_edit_selector = selector;
+                                        self.authoring.composition_source_search.clear();
+                                        self.authoring.composition_edit = None;
+                                        self.authoring.composition_original_links = None;
+                                        self.authoring.composition_link_candidate.clear();
+                                        self.authoring.composition_link_search.clear();
+                                        self.authoring.packagepack_engine_search.clear();
+                                        self.authoring.packagepack_game_search.clear();
+                                    }
+                                }
+                            });
                     });
-            });
-            });
+                },
+            );
             if ui
                 .add_enabled(
                     !self.operation.running
                         && !self.has_unsaved_workspace_edits()
+                        && !composition_role_change_pending
                         && !self.authoring.composition_edit_selector.trim().is_empty(),
                     egui::Button::new("Load dependencies"),
                 )
@@ -123,7 +136,7 @@ impl StudioApp {
                             self.open_workspace_picker();
                         }
                         if ui.button("Create workspace").clicked() {
-                            self.section = super::super::Section::Create;
+                            self.activate_navigation_section(super::super::Section::Create);
                         }
                     });
                 } else if !self.workspace.unregistered_scan_completed {
@@ -137,7 +150,7 @@ impl StudioApp {
                     ui.label("Create content in this workspace or scan again after adding a role manifest.");
                     ui.horizontal(|ui| {
                         if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
-                            self.section = super::super::Section::Create;
+                            self.activate_navigation_section(super::super::Section::Create);
                         }
                         if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Scan again")).clicked() {
                             self.scan_unregistered_content_projects();
@@ -161,7 +174,7 @@ impl StudioApp {
             ui.label(format!("Editing {} · {}", composition.id, composition.kind));
             ui.small(format!("Source file: {}", composition.manifest.display()));
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
-                ui.add_enabled_ui(!operation_running, |ui| {
+                ui.add_enabled_ui(!operation_running && !composition_role_change_pending, |ui| {
                     ui.group(|ui| {
                         ui.heading("Playable content");
                         ui.label("Choose the Engine that runs this composition and, optionally, the Game it contains.");
@@ -173,6 +186,7 @@ impl StudioApp {
                             "Engine · required",
                             false,
                             &mut self.authoring.packagepack_engine_search,
+                            &mut self.authoring.pending_composition_role_change,
                         );
                         draw_packagepack_role_slot(
                             ui,
@@ -182,10 +196,12 @@ impl StudioApp {
                             "Game · optional",
                             true,
                             &mut self.authoring.packagepack_game_search,
+                            &mut self.authoring.pending_composition_role_change,
                         );
                         ui.small("Save validates the complete composition through Vapor before writing its manifest.");
                     });
-                });
+                },
+            );
             }
             egui::CollapsingHeader::new("Advanced dependency details")
                 .default_open(false)
@@ -194,53 +210,60 @@ impl StudioApp {
                     if composition.links.is_empty() {
                         ui.weak("No dependency edges are declared yet.");
                     }
-                    ui.add_enabled_ui(!operation_running, |ui| {
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
-                        egui::Grid::new("composition-edges")
-                            .striped(true)
-                            .show(ui, |ui| {
-                                ui.strong("Role");
-                                ui.strong("Content");
-                                ui.strong("Version requirement");
-                                ui.strong("Optional");
-                                ui.strong("Reason");
-                                ui.end_row();
-                                for (index, link) in composition.links.iter_mut().enumerate() {
-                                    ui.label(&link.relationship);
-                                    ui.label(&link.id);
-                                    let mut version = link.version.clone().unwrap_or_default();
-                                    if ui
-                                        .add(
-                                            egui::TextEdit::singleline(&mut version)
-                                                .desired_width(150.0)
-                                                .hint_text("any compatible version"),
-                                        )
-                                        .changed()
-                                    {
-                                            link.version =
-                                                (!version.trim().is_empty()).then_some(version);
-                                    }
-                                    ui.checkbox(&mut link.optional, "");
-                                    let mut reason = link.reason.clone().unwrap_or_default();
-                                    if ui
-                                        .add(
-                                            egui::TextEdit::singleline(&mut reason)
-                                                .desired_width(180.0)
-                                                .hint_text("Why is this included?"),
-                                        )
-                                        .changed()
-                                    {
-                                            link.reason =
-                                                (!reason.trim().is_empty()).then_some(reason);
-                                    }
-                                    if ui.small_button("Remove").clicked() {
-                                        remove_link = Some(index);
-                                    }
-                                    ui.end_row();
-                                }
+                    ui.add_enabled_ui(
+                        !operation_running && !composition_role_change_pending,
+                        |ui| {
+                            egui::ScrollArea::horizontal().show(ui, |ui| {
+                                egui::Grid::new("composition-edges")
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        ui.strong("Role");
+                                        ui.strong("Content");
+                                        ui.strong("Version requirement");
+                                        ui.strong("Optional");
+                                        ui.strong("Reason");
+                                        ui.end_row();
+                                        for (index, link) in
+                                            composition.links.iter_mut().enumerate()
+                                        {
+                                            ui.label(&link.relationship);
+                                            ui.label(&link.id);
+                                            let mut version =
+                                                link.version.clone().unwrap_or_default();
+                                            if ui
+                                                .add(
+                                                    egui::TextEdit::singleline(&mut version)
+                                                        .desired_width(150.0)
+                                                        .hint_text("any compatible version"),
+                                                )
+                                                .changed()
+                                            {
+                                                link.version =
+                                                    (!version.trim().is_empty()).then_some(version);
+                                            }
+                                            ui.checkbox(&mut link.optional, "");
+                                            let mut reason =
+                                                link.reason.clone().unwrap_or_default();
+                                            if ui
+                                                .add(
+                                                    egui::TextEdit::singleline(&mut reason)
+                                                        .desired_width(180.0)
+                                                        .hint_text("Why is this included?"),
+                                                )
+                                                .changed()
+                                            {
+                                                link.reason =
+                                                    (!reason.trim().is_empty()).then_some(reason);
+                                            }
+                                            if ui.small_button("Remove").clicked() {
+                                                remove_link = Some(index);
+                                            }
+                                            ui.end_row();
+                                        }
+                                    });
                             });
-                    });
-                    });
+                        },
+                    );
                 });
             if let Some(index) = remove_link {
                 composition.links.remove(index);
@@ -280,39 +303,45 @@ impl StudioApp {
                 });
             }
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(!operation_running, |ui| {
-                    egui::ComboBox::from_id_salt("composition-link-candidate")
-                        .selected_text(if self.authoring.composition_link_candidate.is_empty() {
-                            "Choose additional content".to_owned()
-                        } else {
-                            self.authoring.composition_link_candidate.clone()
-                        })
-                        .show_ui(ui, |ui| {
-                            for content in source_contents.iter().filter(|content| {
-                                is_additional_composition_dependency(content, composition)
-                                    && source_content_matches_query(content, &link_query)
-                            }) {
-                                let selector = super::super::source_content_selector(content);
-                                let label = format!(
-                                    "{selector} · {} · {}",
-                                    content.kind,
-                                    content.version.as_deref().unwrap_or("unversioned")
-                                );
-                                if ui
-                                    .selectable_label(
-                                        self.authoring.composition_link_candidate == selector,
-                                        label,
-                                    )
-                                    .clicked()
-                                {
-                                    self.authoring.composition_link_candidate = selector;
+                ui.add_enabled_ui(
+                    !operation_running && !composition_role_change_pending,
+                    |ui| {
+                        egui::ComboBox::from_id_salt("composition-link-candidate")
+                            .selected_text(
+                                if self.authoring.composition_link_candidate.is_empty() {
+                                    "Choose additional content".to_owned()
+                                } else {
+                                    self.authoring.composition_link_candidate.clone()
+                                },
+                            )
+                            .show_ui(ui, |ui| {
+                                for content in source_contents.iter().filter(|content| {
+                                    is_additional_composition_dependency(content, composition)
+                                        && source_content_matches_query(content, &link_query)
+                                }) {
+                                    let selector = super::super::source_content_selector(content);
+                                    let label = format!(
+                                        "{selector} · {} · {}",
+                                        content.kind,
+                                        content.version.as_deref().unwrap_or("unversioned")
+                                    );
+                                    if ui
+                                        .selectable_label(
+                                            self.authoring.composition_link_candidate == selector,
+                                            label,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.authoring.composition_link_candidate = selector;
+                                    }
                                 }
-                            }
-                    });
-                });
+                            });
+                    },
+                );
                 if ui
                     .add_enabled(
                         !self.operation.running
+                            && !composition_role_change_pending
                             && !self.authoring.composition_link_candidate.is_empty()
                             && source_contents.iter().any(|content| {
                                 is_additional_composition_dependency(content, composition)
@@ -378,22 +407,30 @@ impl StudioApp {
                 },
             );
             if !source_graph_saved {
-                ui.add_enabled_ui(!self.operation.running, |ui| {
-                    save_dependencies = primary_button(ui, "Save dependency changes").clicked();
-                });
-                discard_dependencies = ui
-                    .add_enabled(!self.operation.running, egui::Button::new("Discard draft"))
-                    .clicked();
+                ui.add_enabled_ui(
+                    !self.operation.running && !composition_role_change_pending,
+                    |ui| {
+                        save_dependencies = primary_button(ui, "Save dependency changes").clicked();
+                    },
+                );
+                if !self.authoring.composition_discard_confirmation_open {
+                    discard_dependencies = ui
+                        .add_enabled(
+                            !self.operation.running && !composition_role_change_pending,
+                            egui::Button::new("Discard draft"),
+                        )
+                        .clicked();
+                }
             }
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.horizontal_wrapped(|ui| {
                     let source_selector = composition.version.as_ref()
                         .map(|version| format!("{}@{version}", composition.id))
                         .unwrap_or_else(|| composition.id.clone());
-                    if ui.add_enabled(!self.operation.running && source_graph_saved, egui::Button::new("Preview availability")).clicked() {
+                    if ui.add_enabled(!self.operation.running && !composition_role_change_pending && source_graph_saved, egui::Button::new("Preview availability")).clicked() {
                         preview_source_selector = Some(source_selector);
                     }
-                    if ui.add_enabled(!self.operation.running && source_graph_saved, egui::Button::new("Use as active profile root"))
+                    if ui.add_enabled(!self.operation.running && !composition_role_change_pending && source_graph_saved, egui::Button::new("Use as active profile root"))
                         .on_disabled_hover_text("Save this composition before resolving it into a profile.")
                         .clicked()
                     {
@@ -404,7 +441,9 @@ impl StudioApp {
             }
             if ui
                 .add_enabled(
-                    !self.operation.running && source_graph_saved,
+                    !self.operation.running
+                        && !composition_role_change_pending
+                        && source_graph_saved,
                     egui::Button::new("Stage Workshop review"),
                 )
                 .on_disabled_hover_text(
@@ -424,11 +463,101 @@ impl StudioApp {
             ui.separator();
             ui.weak("Load a source content project to inspect and edit its dependencies. Cache and installed copies remain read-only here.");
         }
+        if let Some(change) = self.authoring.pending_composition_role_change.clone() {
+            let proposal_available = change.proposed.as_ref().is_none_or(|proposal| {
+                source_contents.iter().any(|content| {
+                    if content.id != proposal.id {
+                        return false;
+                    }
+                    let relationship =
+                        super::super::source_content_kind(&content.kind).and_then(|kind| {
+                            vapor_studio_core::source_dependency_relationship(
+                                vapor_core::ContentKind::Packagepack,
+                                kind,
+                            )
+                        });
+                    relationship == Some(proposal.relationship.as_str())
+                        && proposal.version.as_deref().is_none_or(|requirement| {
+                            requirement == "*"
+                                || content.version.as_deref().is_some_and(|version| {
+                                    requirement == version || requirement == format!("={version}")
+                                })
+                        })
+                })
+            });
+            let previous = change
+                .previous
+                .iter()
+                .map(|link| format!("{} · {}", link.relationship, link.id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let proposed = change.proposed.as_ref().map_or_else(
+                || "No Game".to_owned(),
+                |link| format!("{} · {}", link.relationship, link.id),
+            );
+            let role = if change.group == "engine-choice" {
+                "Engine"
+            } else {
+                "Game"
+            };
+            let removes_choice = change.proposed.is_none();
+            let title = if removes_choice {
+                format!("Remove the current {role} choice?")
+            } else {
+                format!("Replace the current {role} choice?")
+            };
+            let description = if proposal_available {
+                format!(
+                    "Change {previous} to {proposed}? Other dependency roles stay as they are. This updates the unsaved draft only; save the composition afterward to write the manifest."
+                )
+            } else {
+                format!(
+                    "{proposed} is no longer available at the reviewed version. Keep the current choice, refresh the workspace catalog, and choose it again."
+                )
+            };
+            if let Some(confirm) = super::super::components::design::confirmation_card(
+                ui,
+                &title,
+                &description,
+                if removes_choice {
+                    "Remove role choice"
+                } else {
+                    "Replace role choice"
+                },
+                "Keep current choice",
+                !self.operation.running && proposal_available,
+            ) {
+                if confirm {
+                    if let Some(composition) = self.authoring.composition_edit.as_mut() {
+                        composition.links.retain(|link| {
+                            packagepack_relationship_group(&link.relationship) != Some(change.group)
+                        });
+                        if let Some(proposed) = change.proposed {
+                            composition.links.push(proposed);
+                        }
+                    }
+                }
+                self.authoring.pending_composition_role_change = None;
+            }
+        }
         if save_dependencies {
             self.save_source_composition();
         }
         if discard_dependencies {
-            self.discard_source_composition_changes();
+            self.authoring.composition_discard_confirmation_open = true;
+        }
+        if self.authoring.composition_discard_confirmation_open {
+            if let Some(discard) = discard_confirmation(
+                ui,
+                "Discard dependency changes?",
+                "The current dependency selections will be restored from the saved source manifest.",
+            ) {
+                if discard {
+                    self.discard_source_composition_changes();
+                } else {
+                    self.authoring.composition_discard_confirmation_open = false;
+                }
+            }
         }
         if let Some(selector) = preview_source_selector {
             self.preview_source_composition(selector);
@@ -438,7 +567,7 @@ impl StudioApp {
         }
         if let Some(selector) = stage_source_selector {
             self.catalog.selected = Some(selector.clone());
-            self.section = super::super::Section::Discover;
+            self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
             self.stage_workshop_content(selector);
         }
         let selector = self.authoring.composition_edit.as_ref().map(|composition| {
@@ -493,10 +622,7 @@ fn is_additional_composition_dependency(
     }
 }
 
-fn source_content_matches_query(
-    content: &vapor_studio_core::SourceContent,
-    query: &str,
-) -> bool {
+fn source_content_matches_query(content: &vapor_studio_core::SourceContent, query: &str) -> bool {
     query.is_empty()
         || content.id.to_lowercase().contains(query)
         || content.kind.to_lowercase().contains(query)
@@ -524,6 +650,7 @@ fn draw_packagepack_role_slot(
     label: &str,
     optional: bool,
     search: &mut String,
+    pending_change: &mut Option<super::super::source_authoring::PendingCompositionRoleChange>,
 ) {
     let packagepack = vapor_core::ContentKind::Packagepack;
     let choices = sources
@@ -609,32 +736,35 @@ fn draw_packagepack_role_slot(
     };
 
     let query = search.trim().to_lowercase();
-    let matches_query = |(selector, kind, version, relationship): &(
-        String,
-        String,
-        Option<String>,
-        String,
-    )| {
-        query.is_empty()
-            || selector.to_lowercase().contains(&query)
-            || kind.to_lowercase().contains(&query)
-            || version
-                .as_deref()
-                .unwrap_or_default()
-                .to_lowercase()
-                .contains(&query)
-            || relationship.to_lowercase().contains(&query)
-    };
-    let matching_choices = choices.iter().filter(|choice| matches_query(choice)).count();
+    let matches_query =
+        |(selector, kind, version, relationship): &(String, String, Option<String>, String)| {
+            query.is_empty()
+                || selector.to_lowercase().contains(&query)
+                || kind.to_lowercase().contains(&query)
+                || version
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .contains(&query)
+                || relationship.to_lowercase().contains(&query)
+        };
+    let matching_choices = choices
+        .iter()
+        .filter(|choice| matches_query(choice))
+        .count();
 
     ui.horizontal_wrapped(|ui| {
         ui.vertical(|ui| {
-        ui.label(label);
+            ui.label(label);
             ui.horizontal_wrapped(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(search)
                         .desired_width(260.0)
-                        .hint_text(if optional { "Find a Game" } else { "Find an Engine" }),
+                        .hint_text(if optional {
+                            "Find a Game"
+                        } else {
+                            "Find an Engine"
+                        }),
                 );
                 if !search.is_empty() && ui.small_button("Clear").clicked() {
                     search.clear();
@@ -654,38 +784,66 @@ fn draw_packagepack_role_slot(
                 });
             }
         });
-        egui::ComboBox::from_id_salt(("packagepack-role", group))
-            .width(ui.available_width().min(340.0))
-            .selected_text(current_label)
-            .show_ui(ui, |ui| {
-                if optional {
-                    ui.selectable_value(&mut selected, PackagepackRoleSelection::Empty, "No Game");
-                }
-                for (selector, kind, version, _) in choices.iter().filter(|choice| matches_query(choice)) {
-                    ui.selectable_value(
-                        &mut selected,
-                        PackagepackRoleSelection::Choice(selector.clone()),
-                        packagepack_choice_label(selector, kind, version.as_deref()),
-                    );
-                }
-            });
+        ui.add_enabled_ui(pending_change.is_none(), |ui| {
+            egui::ComboBox::from_id_salt(("packagepack-role", group))
+                .width(ui.available_width().min(340.0))
+                .selected_text(current_label)
+                .show_ui(ui, |ui| {
+                    if optional {
+                        ui.selectable_value(
+                            &mut selected,
+                            PackagepackRoleSelection::Empty,
+                            "No Game",
+                        );
+                    }
+                    for (selector, kind, version, _) in
+                        choices.iter().filter(|choice| matches_query(choice))
+                    {
+                        ui.selectable_value(
+                            &mut selected,
+                            PackagepackRoleSelection::Choice(selector.clone()),
+                            packagepack_choice_label(selector, kind, version.as_deref()),
+                        );
+                    }
+                });
+        });
     });
 
     if selected != initial_selection {
-        links.retain(|link| packagepack_relationship_group(&link.relationship) != Some(group));
-        if let PackagepackRoleSelection::Choice(selector) = selected
+        let previous = links
+            .iter()
+            .filter(|link| packagepack_relationship_group(&link.relationship) == Some(group))
+            .cloned()
+            .collect::<Vec<_>>();
+        let proposed = if let PackagepackRoleSelection::Choice(selector) = selected
             && let Some((_, _, version, relationship)) =
                 choices.iter().find(|choice| choice.0 == selector)
         {
             let id = selector.split('@').next().unwrap_or(&selector).to_owned();
-            links.push(SourceCompositionLink {
+            Some(SourceCompositionLink {
                 id,
                 relationship: relationship.clone(),
                 optional: false,
                 version: version.as_ref().map(|version| format!("={version}")),
                 workshop_id: None,
                 reason: None,
-            });
+            })
+        } else {
+            None
+        };
+        if previous.is_empty() {
+            links.retain(|link| packagepack_relationship_group(&link.relationship) != Some(group));
+            if let Some(proposed) = proposed {
+                links.push(proposed);
+            }
+        } else {
+            *pending_change = Some(
+                super::super::source_authoring::PendingCompositionRoleChange {
+                    group,
+                    previous,
+                    proposed,
+                },
+            );
         }
     }
 

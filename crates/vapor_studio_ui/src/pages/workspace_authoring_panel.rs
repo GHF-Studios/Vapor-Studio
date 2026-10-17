@@ -1,4 +1,6 @@
 use super::super::StudioApp;
+use super::super::components::design::discard_confirmation;
+use super::super::source_authoring::PendingManifestDraftDiscard;
 use eframe::egui;
 
 #[derive(Clone, Copy)]
@@ -17,9 +19,12 @@ enum RuntimeOutputsAction {
 
 impl StudioApp {
     pub(super) fn draw_workspace_authoring_panel(&mut self, ui: &mut egui::Ui) {
+        let operation_running = self.operation.running;
+        let discard_pending = self.authoring.pending_manifest_discard.is_some();
         let mut workshop_action = None;
         if let Some(metadata) = self.authoring.workshop_metadata_edit.as_ref() {
-            ui.group(|ui| {
+            ui.add_enabled_ui(!operation_running && !discard_pending, |ui| {
+                ui.group(|ui| {
                 ui.heading(format!("Workshop metadata · {}", metadata.id));
                 ui.label("Edit the publication intent saved in this role manifest. This action does not upload to Steam.");
                 let mut changed = false;
@@ -65,35 +70,38 @@ impl StudioApp {
                 self.authoring.manifest_metadata_dirty |= changed;
                 ui.horizontal(|ui| {
                     if ui.add_enabled(
-                        !self.operation.running && !self.workspace.editor.has_dirty_documents() && self.authoring.manifest_metadata_dirty,
+                        !operation_running
+                            && !discard_pending
+                            && !self.workspace.editor.has_dirty_documents()
+                            && self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save Workshop metadata"),
                     ).clicked() {
                         workshop_action = Some(WorkshopMetadataAction::Save);
                     }
-                    if ui.add_enabled(!self.operation.running && self.authoring.manifest_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
+                    if ui.add_enabled(
+                        !operation_running && !discard_pending && self.authoring.manifest_metadata_dirty,
+                        egui::Button::new("Discard draft"),
+                    ).clicked() {
                         workshop_action = Some(WorkshopMetadataAction::Discard);
                     }
-                    if ui.add_enabled(!self.operation.running && !self.authoring.manifest_metadata_dirty, egui::Button::new("Close")).clicked() {
+                    if ui.add_enabled(
+                        !operation_running && !self.authoring.manifest_metadata_dirty && !discard_pending,
+                        egui::Button::new("Close"),
+                    ).clicked() {
                         workshop_action = Some(WorkshopMetadataAction::Close);
                     }
                     if self.authoring.manifest_metadata_dirty {
                         ui.colored_label(egui::Color32::YELLOW, "Unsaved metadata draft");
                     }
                 });
+                });
             });
         }
         match workshop_action {
             Some(WorkshopMetadataAction::Save) => self.save_source_workshop_metadata(),
             Some(WorkshopMetadataAction::Discard) => {
-                if let Some(policy) = self
-                    .authoring
-                    .workshop_metadata_edit
-                    .as_ref()
-                    .map(|metadata| metadata.policy.clone())
-                {
-                    self.set_workshop_metadata_fields(&policy);
-                    self.authoring.manifest_metadata_dirty = false;
-                }
+                self.authoring.pending_manifest_discard =
+                    Some(PendingManifestDraftDiscard::WorkshopMetadata);
             }
             Some(WorkshopMetadataAction::Close) => {
                 self.authoring.workshop_metadata_edit = None;
@@ -103,7 +111,8 @@ impl StudioApp {
 
         let mut outputs_action = None;
         if let Some(outputs) = self.authoring.runtime_outputs_edit.as_ref() {
-            ui.group(|ui| {
+            ui.add_enabled_ui(!operation_running && !discard_pending, |ui| {
+                ui.group(|ui| {
                 ui.heading(format!("Runtime outputs · {}", outputs.id));
                 ui.label("Declare Cargo build outputs copied into the deployed artifact's bin/ and lib/ directories. Enter one file name per line; paths are not accepted.");
                 ui.columns(2, |columns| {
@@ -125,33 +134,82 @@ impl StudioApp {
                 });
                 ui.horizontal(|ui| {
                     if ui.add_enabled(
-                        !self.operation.running && !self.workspace.editor.has_dirty_documents() && self.authoring.manifest_metadata_dirty,
+                        !operation_running
+                            && !discard_pending
+                            && !self.workspace.editor.has_dirty_documents()
+                            && self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save runtime outputs"),
                     ).clicked() {
                         outputs_action = Some(RuntimeOutputsAction::Save);
                     }
-                    if ui.add_enabled(!self.operation.running && self.authoring.manifest_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
+                    if ui.add_enabled(
+                        !operation_running && !discard_pending && self.authoring.manifest_metadata_dirty,
+                        egui::Button::new("Discard draft"),
+                    ).clicked() {
                         outputs_action = Some(RuntimeOutputsAction::Discard);
                     }
-                    if ui.add_enabled(!self.operation.running && !self.authoring.manifest_metadata_dirty, egui::Button::new("Close")).clicked() {
+                    if ui.add_enabled(
+                        !operation_running && !self.authoring.manifest_metadata_dirty && !discard_pending,
+                        egui::Button::new("Close"),
+                    ).clicked() {
                         outputs_action = Some(RuntimeOutputsAction::Close);
                     }
                     if self.authoring.manifest_metadata_dirty {
                         ui.colored_label(egui::Color32::YELLOW, "Unsaved runtime output changes");
                     }
                 });
+                });
             });
         }
         match outputs_action {
             Some(RuntimeOutputsAction::Save) => self.save_source_runtime_outputs(),
             Some(RuntimeOutputsAction::Discard) => {
-                if let Some(outputs) = self.authoring.runtime_outputs_edit.clone() {
-                    self.set_runtime_output_fields(&outputs);
-                    self.authoring.manifest_metadata_dirty = false;
-                }
+                self.authoring.pending_manifest_discard =
+                    Some(PendingManifestDraftDiscard::RuntimeOutputs);
             }
             Some(RuntimeOutputsAction::Close) => self.authoring.runtime_outputs_edit = None,
             None => {}
+        }
+
+        if let Some(pending) = self.authoring.pending_manifest_discard {
+            let (title, description) = match pending {
+                PendingManifestDraftDiscard::WorkshopMetadata => (
+                    "Discard unsaved Workshop metadata?",
+                    "The fields will return to the values from the saved source manifest.",
+                ),
+                PendingManifestDraftDiscard::RuntimeOutputs => (
+                    "Discard unsaved runtime-output changes?",
+                    "The executable and library lists will return to the saved source manifest.",
+                ),
+            };
+            let mut decision = None;
+            ui.add_enabled_ui(!operation_running, |ui| {
+                decision = discard_confirmation(ui, title, description);
+            });
+            if let Some(discard) = decision {
+                self.authoring.pending_manifest_discard = None;
+                if discard {
+                    match pending {
+                        PendingManifestDraftDiscard::WorkshopMetadata => {
+                            if let Some(policy) = self
+                                .authoring
+                                .workshop_metadata_edit
+                                .as_ref()
+                                .map(|metadata| metadata.policy.clone())
+                            {
+                                self.set_workshop_metadata_fields(&policy);
+                                self.authoring.manifest_metadata_dirty = false;
+                            }
+                        }
+                        PendingManifestDraftDiscard::RuntimeOutputs => {
+                            if let Some(outputs) = self.authoring.runtime_outputs_edit.clone() {
+                                self.set_runtime_output_fields(&outputs);
+                                self.authoring.manifest_metadata_dirty = false;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

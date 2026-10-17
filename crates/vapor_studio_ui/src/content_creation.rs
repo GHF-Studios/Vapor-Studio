@@ -16,6 +16,7 @@ impl StudioApp {
         self.invalidate_workshop_review();
         self.authoring.create.reset();
         self.workspace.editor.files = files;
+        self.workspace.editor.files_loaded = true;
         self.workspace.editor.rebuild_file_index();
         self.workspace.editor.selected_file = Some(manifest.clone());
         self.workspace.editor.files_open = true;
@@ -23,7 +24,7 @@ impl StudioApp {
             manifest.clone(),
             WorkspaceDocument::new(&manifest, contents),
         );
-        self.section = Section::Workspace;
+        self.activate_navigation_section(Section::Workspace);
         self.status = "Created content and opened its manifest.".to_owned();
     }
 

@@ -14,10 +14,12 @@ use vapor_studio_core::OperationKind;
 pub(super) struct WorkspaceEditorState {
     pub(super) new_file_path: String,
     pub(super) files: Vec<PathBuf>,
+    pub(super) files_loaded: bool,
     file_search_keys: Vec<String>,
     pub(super) file_tree: WorkspaceTreeNode,
     pub(super) file_filter: String,
     pub(super) selected_file: Option<PathBuf>,
+    pub(super) pending_reload_confirmation: Option<PathBuf>,
     pub(super) documents: BTreeMap<PathBuf, WorkspaceDocument>,
     pub(super) draft_recovery: Option<String>,
     pub(super) files_open: bool,
@@ -275,10 +277,12 @@ impl WorkspaceEditorState {
 
     pub(super) fn clear_context(&mut self) {
         self.files.clear();
+        self.files_loaded = false;
         self.file_search_keys.clear();
         self.file_tree = WorkspaceTreeNode::default();
         self.file_filter.clear();
         self.selected_file = None;
+        self.pending_reload_confirmation = None;
         self.documents.clear();
         self.files_open = false;
         self.new_file_path.clear();
@@ -298,6 +302,7 @@ impl StudioApp {
 
     pub(super) fn apply_workspace_files(&mut self, files: Vec<PathBuf>) {
         self.workspace.editor.files = files;
+        self.workspace.editor.files_loaded = true;
         self.workspace.editor.rebuild_file_index();
         let restored = self
             .workspace
@@ -317,6 +322,7 @@ impl StudioApp {
 
     pub(super) fn apply_workspace_file_created(&mut self, path: PathBuf) {
         self.invalidate_workshop_review();
+        self.workspace.editor.files_loaded = true;
         if !self.workspace.editor.files.contains(&path) {
             self.workspace.editor.files.push(path.clone());
             self.workspace.editor.files.sort();

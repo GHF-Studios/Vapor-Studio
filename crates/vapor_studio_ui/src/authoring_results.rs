@@ -6,6 +6,7 @@ impl StudioApp {
         &mut self,
         composition: vapor_studio_core::SourceComposition,
     ) {
+        self.authoring.pending_composition_role_change = None;
         self.authoring.composition_link_candidate.clear();
         self.authoring.composition_link_search.clear();
         self.authoring.packagepack_engine_search.clear();
@@ -32,6 +33,7 @@ impl StudioApp {
         composition: vapor_studio_core::SourceComposition,
     ) {
         self.invalidate_workshop_review();
+        self.authoring.pending_composition_role_change = None;
         self.authoring.composition_link_candidate.clear();
         self.authoring.composition_link_search.clear();
         self.authoring.packagepack_engine_search.clear();
@@ -55,6 +57,7 @@ impl StudioApp {
         self.authoring.workshop_metadata_edit = Some(metadata);
         self.authoring.runtime_outputs_edit = None;
         self.authoring.manifest_metadata_dirty = false;
+        self.authoring.pending_manifest_discard = None;
         self.status =
             "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell."
                 .to_owned();
@@ -68,6 +71,7 @@ impl StudioApp {
         self.set_workshop_metadata_fields(&metadata.policy);
         self.authoring.workshop_metadata_edit = Some(metadata.clone());
         self.authoring.manifest_metadata_dirty = false;
+        self.authoring.pending_manifest_discard = None;
         self.invalidate_profiles_for_source_content(&ContentIdentity {
             id: metadata.id.clone(),
             version: metadata.version.clone(),
@@ -84,6 +88,7 @@ impl StudioApp {
         self.authoring.runtime_outputs_edit = Some(outputs);
         self.authoring.workshop_metadata_edit = None;
         self.authoring.manifest_metadata_dirty = false;
+        self.authoring.pending_manifest_discard = None;
         self.status = "Loaded runtime output declarations. Edit the executable and library lists, then save through Vapor Shell.".to_owned();
     }
 
@@ -95,6 +100,7 @@ impl StudioApp {
         self.set_runtime_output_fields(&outputs);
         self.authoring.runtime_outputs_edit = Some(outputs.clone());
         self.authoring.manifest_metadata_dirty = false;
+        self.authoring.pending_manifest_discard = None;
         self.invalidate_profiles_for_source_content(&ContentIdentity {
             id: outputs.id.clone(),
             version: outputs.version.clone(),

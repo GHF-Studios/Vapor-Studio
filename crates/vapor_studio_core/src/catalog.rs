@@ -1,3 +1,4 @@
+use crate::ContentIdentity;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -6,7 +7,6 @@ use vapor_shell::{
     content,
     discovery::{EnvironmentPaths, InstallationPaths},
 };
-use crate::ContentIdentity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogLocationKind {
@@ -224,7 +224,8 @@ fn merge_entry(
         if existing.kind != incoming.kind {
             conflicts.push(("kind", existing.kind.clone(), incoming.kind.clone()));
         }
-        if let (Some(first), Some(next)) = (&existing.published_file_id, &incoming.published_file_id)
+        if let (Some(first), Some(next)) =
+            (&existing.published_file_id, &incoming.published_file_id)
             && first != next
         {
             conflicts.push(("PublishedFileId", first.clone(), next.clone()));
@@ -253,17 +254,15 @@ fn merge_entry(
         {
             conflicts.push(("content fingerprint", first.clone(), next.clone()));
         }
-        existing
-            .conflicts
-            .extend(conflicts.into_iter().map(
-                |(field, first_value, conflicting_value)| CatalogConflict {
-                    field: field.to_owned(),
-                    first_value,
-                    first_location: first_location.clone(),
-                    conflicting_value,
-                    conflicting_location: incoming_location.clone(),
-                },
-            ));
+        existing.conflicts.extend(conflicts.into_iter().map(
+            |(field, first_value, conflicting_value)| CatalogConflict {
+                field: field.to_owned(),
+                first_value,
+                first_location: first_location.clone(),
+                conflicting_value,
+                conflicting_location: incoming_location.clone(),
+            },
+        ));
         existing.conflicts.append(&mut incoming.conflicts);
         if existing.published_file_id.is_none() {
             existing.published_file_id = incoming.published_file_id.take();

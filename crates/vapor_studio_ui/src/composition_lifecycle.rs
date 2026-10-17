@@ -199,7 +199,8 @@ impl StudioApp {
                     artifacts,
                     graph_fingerprint,
                 };
-            self.status = format!("Installed composition verified. {checked} content items checked.");
+            self.status =
+                format!("Installed composition verified. {checked} content items checked.");
         } else {
             self.profile.items[self.profile.active_index].installation =
                 vapor_studio_core::InstallationState::NeedsRepair {

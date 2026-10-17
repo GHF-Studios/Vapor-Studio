@@ -1,6 +1,12 @@
-use super::{StudioApp, components::design::{ACCENT_FILL, StatusTone, status_text}};
+use super::{
+    StudioApp,
+    components::design::{ACCENT_FILL, StatusTone, status_text},
+};
 use eframe::egui;
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum DirectoryPickerPurpose {
@@ -10,7 +16,10 @@ pub(super) enum DirectoryPickerPurpose {
 
 pub(super) enum DirectoryPickerResult {
     Cancelled,
-    Selected { purpose: DirectoryPickerPurpose, path: PathBuf },
+    Selected {
+        purpose: DirectoryPickerPurpose,
+        path: PathBuf,
+    },
 }
 
 pub(super) struct DirectoryPicker {
@@ -75,7 +84,9 @@ impl DirectoryPicker {
             Ok(entries) => {
                 for entry in entries {
                     let Ok(entry) = entry else { continue };
-                    let Ok(kind) = entry.file_type() else { continue };
+                    let Ok(kind) = entry.file_type() else {
+                        continue;
+                    };
                     // Follow a directory symlink only after the user navigates into it.
                     // Navigation canonicalizes the target, so parent traversal stays bounded.
                     let is_directory = kind.is_dir()
@@ -246,13 +257,12 @@ fn home_directory() -> Option<PathBuf> {
 impl StudioApp {
     pub(super) fn open_workspace_picker(&mut self) {
         let draft = PathBuf::from(self.workspace.root_draft.trim());
-        let initial = if self.workspace.root.trim().is_empty()
-            && draft == self.workspace.fallback_root
-        {
-            PathBuf::new()
-        } else {
-            draft
-        };
+        let initial =
+            if self.workspace.root.trim().is_empty() && draft == self.workspace.fallback_root {
+                PathBuf::new()
+            } else {
+                draft
+            };
         self.directory_picker = Some(DirectoryPicker::new(
             DirectoryPickerPurpose::OpenWorkspace,
             &initial,

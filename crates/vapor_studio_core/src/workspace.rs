@@ -31,9 +31,9 @@ pub struct SourceWorkshopPolicy {
     pub change_note: Option<String>,
 }
 
-pub use vapor_shell::content::WorkshopPolicyDraft;
-pub use vapor_shell::content::SourceWorkshopMetadata;
 pub use vapor_shell::content::SourceRuntimeOutputs;
+pub use vapor_shell::content::SourceWorkshopMetadata;
+pub use vapor_shell::content::WorkshopPolicyDraft;
 
 pub use vapor_shell::content::{
     CompositionLink as SourceCompositionLink, SourceComposition,
@@ -171,7 +171,10 @@ pub fn discover_source_content(
                 .collect(),
             workshop: SourceWorkshopPolicy {
                 app_id: artifact.workshop().app_id(),
-                published_file_id: artifact.workshop().published_file_id().map(ToOwned::to_owned),
+                published_file_id: artifact
+                    .workshop()
+                    .published_file_id()
+                    .map(ToOwned::to_owned),
                 visibility: artifact.workshop().visibility().map(ToOwned::to_owned),
                 title: artifact.workshop().title().map(ToOwned::to_owned),
                 description: artifact.workshop().description().map(ToOwned::to_owned),
@@ -302,8 +305,8 @@ fn shell_content_kind(kind: vapor_core::ContentKind) -> Option<ShellContentKind>
 
 /// Add a validated authored Workspace to this Vapor Installation's known sources.
 pub fn remember_workspace(workspace_root: &Path) -> Result<Vec<PathBuf>, String> {
-    let installation = vapor_core::VaporInstallation::discover()
-        .map_err(|error| error.to_string())?;
+    let installation =
+        vapor_core::VaporInstallation::discover().map_err(|error| error.to_string())?;
     let state = vapor_core::remember_source(&installation, workspace_root)
         .map_err(|error| error.to_string())?;
     Ok(state.known)
@@ -329,9 +332,16 @@ pub fn unregister_workspace_content_project(
     id: &str,
 ) -> Result<(String, Vec<SourceContent>, ContentIdentity), String> {
     let before = discover_source_content(application_executable, workspace_root)?;
-    let identity = before.iter().find(|content| content.id == id)
-        .map(|content| ContentIdentity { id: content.id.clone(), version: content.version.clone() })
-        .ok_or_else(|| format!("content project is not currently discoverable in this Workspace: {id}"))?;
+    let identity = before
+        .iter()
+        .find(|content| content.id == id)
+        .map(|content| ContentIdentity {
+            id: content.id.clone(),
+            version: content.version.clone(),
+        })
+        .ok_or_else(|| {
+            format!("content project is not currently discoverable in this Workspace: {id}")
+        })?;
     let installation = InstallationPaths::from_application_executable(application_executable)?;
     let paths = EnvironmentPaths::from_installation_and_source_path(installation, workspace_root)?;
     let summary = content::unregister_source_project(&paths, id)?;

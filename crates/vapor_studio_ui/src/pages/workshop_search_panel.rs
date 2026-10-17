@@ -1,4 +1,5 @@
 use super::super::StudioApp;
+use super::super::components::design::empty_state;
 use eframe::egui;
 
 enum WorkshopSearchAction {
@@ -30,8 +31,22 @@ impl StudioApp {
                 .clicked();
         });
         if run_search && !self.operation.running {
-            self.workshop.page = 1;
             self.search_workshop();
+        }
+        if let Some((query, page)) = self.workshop.pending_search.as_ref() {
+            ui.horizontal_wrapped(|ui| {
+                ui.spinner();
+                ui.label(if query.is_empty() {
+                    format!("Searching all Workshop items · page {page}…")
+                } else {
+                    format!("Searching for ‘{query}’ · page {page}…")
+                });
+                if let Some(previous_query) = self.workshop.results_query.as_deref() {
+                    ui.weak(format!(
+                        "Previous results for ‘{previous_query}’ stay available until this search succeeds."
+                    ));
+                }
+            });
         }
         if !self.workshop.results.is_empty() {
             let page_count = self.workshop.total_results.div_ceil(50).max(1);
@@ -56,11 +71,9 @@ impl StudioApp {
                     )
                     .clicked();
                 if previous {
-                    self.workshop.page -= 1;
-                    self.search_workshop();
+                    self.search_workshop_page(self.workshop.page.saturating_sub(1));
                 } else if next {
-                    self.workshop.page += 1;
-                    self.search_workshop();
+                    self.search_workshop_page(self.workshop.page.saturating_add(1));
                 }
             });
             ui.horizontal_wrapped(|ui| {
@@ -82,9 +95,7 @@ impl StudioApp {
                 {
                     for item in &self.workshop.results {
                         if page_is_selected {
-                            self.workshop
-                                .selected_items
-                                .remove(&item.published_file_id);
+                            self.workshop.selected_items.remove(&item.published_file_id);
                         } else {
                             self.workshop
                                 .selected_items
@@ -163,6 +174,26 @@ impl StudioApp {
             }
         }
         if self.workshop.results.is_empty() {
+            if self.workshop.pending_search.is_some() {
+                ui.add_space(8.0);
+                ui.weak(
+                    "No previous results to show. The first page will appear here when this search completes.",
+                );
+            } else if self.workshop.results_query.is_none() {
+                empty_state(
+                    ui,
+                    "Find content in Steam Workshop",
+                    "Search public Workshop items, review their details, then subscribe or import them into Vapor's cache.",
+                    |ui| {
+                        if ui.button("Search Workshop").clicked() {
+                            run_search = true;
+                        }
+                    },
+                );
+                if run_search && !self.operation.running {
+                    self.search_workshop();
+                }
+            }
             return;
         }
 
@@ -387,7 +418,7 @@ impl StudioApp {
                 self.use_available_workshop_package_as_profile_root(&id);
             }
             Some(WorkshopSearchAction::ReviewProfile) => {
-                self.section = super::super::Section::Library;
+                self.activate_navigation_section(super::super::Section::Library);
                 self.preview_selected_composition();
             }
             Some(WorkshopSearchAction::ChangeSubscription(id, subscribe)) => {

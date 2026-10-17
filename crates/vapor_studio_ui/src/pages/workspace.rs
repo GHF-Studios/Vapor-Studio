@@ -56,10 +56,7 @@ impl StudioApp {
                 )
                 .clicked()
             {
-                self.workspace.editor.files_open = true;
-                if self.workspace.editor.files.is_empty() && !self.operation.running {
-                    self.refresh_workspace_files();
-                }
+                self.open_workspace_files();
             }
         });
         ui.separator();

@@ -135,10 +135,10 @@ impl StudioApp {
                     ui.label("Open a workspace to create or discover authored content, or browse Steam Workshop for existing packages.");
                     ui.horizontal(|ui| {
                         if ui.button("Open a workspace").clicked() {
-                            self.section = super::super::Section::Workspace;
+                            self.open_workspace_picker();
                         }
                         if ui.button("Create a workspace").clicked() {
-                            self.section = super::super::Section::Create;
+                            self.activate_navigation_section(super::super::Section::Create);
                         }
                         if ui.button("Browse Steam Workshop").clicked() {
                             self.catalog.discover_tab = DiscoverTab::Workshop;
@@ -149,7 +149,7 @@ impl StudioApp {
                     ui.label("Create a project in this workspace, or search Workshop to acquire content for the active profile.");
                     ui.horizontal(|ui| {
                         if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
-                            self.section = super::super::Section::Create;
+                            self.activate_navigation_section(super::super::Section::Create);
                         }
                         if ui.button("Browse Steam Workshop").clicked() {
                             self.catalog.discover_tab = DiscoverTab::Workshop;

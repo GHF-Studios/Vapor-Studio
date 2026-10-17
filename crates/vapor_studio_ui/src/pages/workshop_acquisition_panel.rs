@@ -9,29 +9,41 @@ enum AcquisitionAction {
 
 impl StudioApp {
     pub(super) fn draw_workshop_acquisition_panel(&mut self, ui: &mut egui::Ui) {
-        section_header(ui, "Recent imports", "These Workshop downloads were added to Vapor's local cache during this session. Browse all available content in Discover.");
-        egui::CollapsingHeader::new("Import by Workshop ID")
-            .show(ui, |ui| {
-                ui.label("Use this when you already know the item's numeric Workshop ID.");
-                ui.horizontal(|ui| {
-                    ui.add_enabled(
-                        !self.operation.running,
-                        egui::TextEdit::singleline(&mut self.workshop.published_file_id)
-                            .hint_text("Workshop item ID")
-                            .desired_width(220.0),
-                    );
-                    if ui
-                        .add_enabled(!self.operation.running, egui::Button::new("Import"))
-                        .clicked()
-                    {
-                        self.download_workshop_item();
-                    }
-                });
+        section_header(
+            ui,
+            "Recent imports",
+            "These Workshop downloads were added to Vapor's local cache during this session. Browse all available content in Discover.",
+        );
+        egui::CollapsingHeader::new("Import by Workshop ID").show(ui, |ui| {
+            ui.label("Use this when you already know the item's numeric Workshop ID.");
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    !self.operation.running,
+                    egui::TextEdit::singleline(&mut self.workshop.published_file_id)
+                        .hint_text("Workshop item ID")
+                        .desired_width(220.0),
+                );
+                if ui
+                    .add_enabled(!self.operation.running, egui::Button::new("Import"))
+                    .clicked()
+                {
+                    self.download_workshop_item();
+                }
+            });
         });
         if self.workshop.pending_acquisitions.is_empty() {
-            empty_state(ui, "No recent imports", "Items imported from Workshop are added to Vapor's local cache. Browse Discover to find cached and installed content.", |_| {});
+            empty_state(
+                ui,
+                "No recent imports",
+                "Items imported from Workshop are added to Vapor's local cache. Browse Discover to find cached and installed content.",
+                |_| {},
+            );
         } else {
-            section_header(ui, "Downloaded this session", "Cached items are available to dependency plans. Installing a composition into a play profile is a separate step.");
+            section_header(
+                ui,
+                "Downloaded this session",
+                "Cached items are available to dependency plans. Installing a composition into a play profile is a separate step.",
+            );
             let mut action = None;
             for acquisition in &self.workshop.pending_acquisitions {
                 ui.group(|ui| {
@@ -111,7 +123,7 @@ impl StudioApp {
                     self.use_workshop_as_profile_root(&id);
                 }
                 Some(AcquisitionAction::ReviewActiveProfile) => {
-                    self.section = super::super::Section::Library;
+                    self.activate_navigation_section(super::super::Section::Library);
                     self.preview_selected_composition();
                 }
                 None => {}

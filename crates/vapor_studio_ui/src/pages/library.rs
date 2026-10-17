@@ -1,22 +1,34 @@
 use super::super::StudioApp;
 use super::super::components::design::{page_header, section_header};
 use super::library_composition_panel::ProfileCompositionAction;
-use super::library_installation_panel::{
-    ProfileInstallationAction, ProfilePrimaryAction,
-};
+use super::library_installation_panel::{ProfileInstallationAction, ProfilePrimaryAction};
 use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_library(&mut self, ui: &mut egui::Ui) {
-        page_header(ui, "Play", "Play profiles", "Choose a composition, prepare its installation, and manage how it launches.");
+        page_header(
+            ui,
+            "Play",
+            "Play profiles",
+            "Choose a composition, prepare its installation, and manage how it launches.",
+        );
         let profile_index = self.profile.active_index;
-        let Some(profile_name) = self.profile.items.get(profile_index).map(|profile| profile.name.clone()) else {
+        let Some(profile_name) = self
+            .profile
+            .items
+            .get(profile_index)
+            .map(|profile| profile.name.clone())
+        else {
             return;
         };
         let mut composition_action = None;
         let mut installation_action = None;
         if ui.available_width() < 820.0 {
-            section_header(ui, "Launch profiles", "Each profile keeps its own content selection and launch arguments.");
+            section_header(
+                ui,
+                "Launch profiles",
+                "Each profile keeps its own content selection and launch arguments.",
+            );
             if ui
                 .add_enabled(
                     !self.operation.running && !self.has_unsaved_context_switch_edits(),
@@ -31,7 +43,11 @@ impl StudioApp {
             }
             self.draw_profile_selector_panel(ui);
             ui.separator();
-            section_header(ui, &profile_name, "Selected composition and local installation state.");
+            section_header(
+                ui,
+                &profile_name,
+                "Selected composition and local installation state.",
+            );
             self.draw_profile_management_panel(ui, &profile_name);
             {
                 let profile = &self.profile.items[profile_index];
@@ -69,17 +85,21 @@ impl StudioApp {
         if let Some(action) = composition_action {
             match action {
                 ProfileCompositionAction::BrowseContent => {
-                    self.section = super::super::Section::Discover;
+                    self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
                 }
                 ProfileCompositionAction::CreateContent => {
-                    self.section = super::super::Section::Create;
+                    self.activate_navigation_section(super::super::Section::Create);
                 }
                 ProfileCompositionAction::EditComposition(selector) => {
-                    self.authoring.composition_edit_selector = selector;
-                    self.authoring.composition_edit = None;
-                    self.authoring.composition_original_links = None;
-                    self.section = super::super::Section::Compose;
-                    self.load_source_composition();
+                    if self.authoring.pending_composition_role_change.is_some() {
+                        self.status = "Confirm or keep the pending Packagepack role choice before opening another composition.".to_owned();
+                    } else {
+                        self.authoring.composition_edit_selector = selector;
+                        self.authoring.composition_edit = None;
+                        self.authoring.composition_original_links = None;
+                        self.activate_navigation_section(super::super::Section::Compose);
+                        self.load_source_composition();
+                    }
                 }
                 ProfileCompositionAction::PreviewPlan => self.preview_selected_composition(),
                 ProfileCompositionAction::DownloadDependencies(ids) => {
@@ -118,7 +138,7 @@ impl StudioApp {
                     self.adopt_installed_profile_graph();
                 }
                 ProfileInstallationAction::DiscoverContent => {
-                    self.section = super::super::Section::Discover;
+                    self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
                     self.discover();
                 }
             }

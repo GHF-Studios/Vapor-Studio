@@ -55,7 +55,7 @@ impl StudioApp {
             version: acquisition.version.clone(),
         };
         if self.assign_profile_root(identity, None) {
-            self.section = Section::Library;
+            self.activate_navigation_section(Section::Library);
         }
     }
 
@@ -86,7 +86,7 @@ impl StudioApp {
             self.catalog.kind_filter =
                 Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
             self.catalog.search_query = published_file_id.to_owned();
-            self.section = Section::Discover;
+            self.open_discover_tab(super::catalog::DiscoverTab::Local);
             self.status = format!(
                 "Workshop item {published_file_id} has multiple local Packagepack versions. Choose the exact version in the catalog before assigning it."
             );
@@ -102,7 +102,7 @@ impl StudioApp {
             version: content.version,
         };
         if self.assign_profile_root(identity, workspace) {
-            self.section = Section::Library;
+            self.activate_navigation_section(Section::Library);
         }
     }
 
@@ -215,7 +215,7 @@ impl StudioApp {
             content_selector(&identity),
             self.profile.items[self.profile.active_index].name,
         );
-        self.section = Section::Library;
+        self.activate_navigation_section(Section::Library);
         true
     }
 

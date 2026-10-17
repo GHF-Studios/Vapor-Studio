@@ -22,11 +22,15 @@ pub(crate) fn draw_composition_preview(
         ui.weak("This is a read-only plan. It has not downloaded or installed anything.");
         for node in &preview.nodes {
             let source = match (node.source, node.already_installed) {
-                (CompositionPreviewSource::Workspace, true) => "Workspace source · already installed",
+                (CompositionPreviewSource::Workspace, true) => {
+                    "Workspace source · already installed"
+                }
                 (CompositionPreviewSource::Workspace, false) => "Workspace source",
                 (CompositionPreviewSource::Cache, true) => "Vapor cache · already installed",
                 (CompositionPreviewSource::Cache, false) => "Vapor cache",
-                (CompositionPreviewSource::Installed, _) => "Already installed · no source to update",
+                (CompositionPreviewSource::Installed, _) => {
+                    "Already installed · no source to update"
+                }
                 (CompositionPreviewSource::DownloadRequired, _) => "Workshop acquisition needed",
             };
             ui.horizontal(|ui| {
@@ -58,9 +62,12 @@ pub(crate) fn draw_composition_preview(
                     },
                 ));
             }
-            if let Some(published_file_id) = node.published_file_id.as_ref().filter(|_| {
-                node.source == CompositionPreviewSource::DownloadRequired
-            }) && !workshop_downloads.contains(published_file_id) {
+            if let Some(published_file_id) = node
+                .published_file_id
+                .as_ref()
+                .filter(|_| node.source == CompositionPreviewSource::DownloadRequired)
+                && !workshop_downloads.contains(published_file_id)
+            {
                 workshop_downloads.push(published_file_id.clone());
             }
         }

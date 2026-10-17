@@ -1,4 +1,5 @@
 use super::super::StudioApp;
+use super::super::components::design::confirmation_card;
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
@@ -12,12 +13,6 @@ enum SourceContentAction {
     Unregister(vapor_studio_core::SourceContent),
 }
 
-#[derive(Clone, Copy)]
-enum UnregistrationConfirmationAction {
-    Confirm,
-    Keep,
-}
-
 impl StudioApp {
     pub(super) fn draw_workspace_content_search(&mut self, ui: &mut egui::Ui) -> String {
         ui.horizontal_wrapped(|ui| {
@@ -26,9 +21,7 @@ impl StudioApp {
                     .desired_width(320.0)
                     .hint_text("Find a project by ID, role, or version"),
             );
-            if !self.workspace.content_search.is_empty()
-                && ui.small_button("Clear").clicked()
-            {
+            if !self.workspace.content_search.is_empty() && ui.small_button("Clear").clicked() {
                 self.workspace.content_search.clear();
             }
         });
@@ -60,7 +53,7 @@ impl StudioApp {
                         self.scan_unregistered_content_projects();
                     }
                     if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
-                        self.section = super::super::Section::Create;
+                        self.activate_navigation_section(super::super::Section::Create);
                     }
                     if self.workspace.unregistered_scan_completed
                         && ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Scan again")).clicked()
@@ -262,11 +255,15 @@ impl StudioApp {
                     self.open_workspace_file(path);
                 }
                 Some(SourceContentAction::EditDependencies(selector)) => {
-                    self.authoring.composition_edit_selector = selector;
-                    self.authoring.composition_edit = None;
-                    self.authoring.composition_original_links = None;
-                    self.section = super::super::Section::Compose;
-                    self.load_source_composition();
+                    if self.authoring.pending_composition_role_change.is_some() {
+                        self.status = "Confirm or keep the pending Packagepack role choice before opening another composition.".to_owned();
+                    } else {
+                        self.authoring.composition_edit_selector = selector;
+                        self.authoring.composition_edit = None;
+                        self.authoring.composition_original_links = None;
+                        self.activate_navigation_section(super::super::Section::Compose);
+                        self.load_source_composition();
+                    }
                 }
                 Some(SourceContentAction::UseAsProfileRoot(identity, workspace)) => {
                     self.assign_profile_root(identity, Some(workspace));
@@ -283,33 +280,26 @@ impl StudioApp {
                 None => {}
             }
         }
-        let mut unregistration_action = None;
+        let mut unregistration_confirmation = None;
         if let Some(project) = self.workspace.pending_unregistration.as_ref() {
-            ui.group(|ui| {
-                ui.heading(format!("Unregister {}?", project.id));
-                ui.label(format!(
-                    "Vapor will stop discovering this {} at {}. The project files and Cargo workspace membership will remain unchanged; you can adopt it again later.",
-                    project.kind,
-                    project.root.display(),
-                ));
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(
-                        !self.operation.running && !self.has_unsaved_workspace_edits(),
-                        egui::Button::new("Unregister from Vapor"),
-                    ).clicked() {
-                        unregistration_action = Some(UnregistrationConfirmationAction::Confirm);
-                    }
-                    if ui.add_enabled(!self.operation.running, egui::Button::new("Keep registered")).clicked() {
-                        unregistration_action = Some(UnregistrationConfirmationAction::Keep);
-                    }
-                });
-            });
+            let title = format!("Stop discovering {}?", project.id);
+            let description = format!(
+                "Vapor will stop discovering this {} at {}. The project files and Cargo workspace membership remain unchanged; you can adopt it again later.",
+                project.kind,
+                project.root.display(),
+            );
+            unregistration_confirmation = confirmation_card(
+                ui,
+                &title,
+                &description,
+                "Unregister from Vapor",
+                "Keep registered",
+                !self.operation.running && !self.has_unsaved_workspace_edits(),
+            );
         }
-        match unregistration_action {
-            Some(UnregistrationConfirmationAction::Confirm) => self.unregister_content_project(),
-            Some(UnregistrationConfirmationAction::Keep) => {
-                self.workspace.pending_unregistration = None;
-            }
+        match unregistration_confirmation {
+            Some(true) => self.unregister_content_project(),
+            Some(false) => self.workspace.pending_unregistration = None,
             None => {}
         }
     }
@@ -328,49 +318,55 @@ impl StudioApp {
                                 .path
                                 .to_string_lossy()
                                 .to_lowercase()
-                            .contains(query)
+                                .contains(query)
                     })
                     .collect::<Vec<_>>();
                 let has_candidates = !candidates.is_empty();
                 if !matching_candidates.is_empty() {
-                ui.heading(format!(
+                    ui.heading(format!(
                         "Ready to adopt · {} of {}",
                         matching_candidates.len(),
                         candidates.len()
-                ));
-                ui.weak("Adoption adds a valid project to Vapor discovery. It does not move files, publish anything, or change Cargo membership.");
-            }
-            let mut adoption_path = None;
+                    ));
+                    ui.weak("Adoption adds a valid project to Vapor discovery. It does not move files, publish anything, or change Cargo membership.");
+                }
+                let mut adoption_path = None;
                 for candidate in &matching_candidates {
-                let card_style = ui.style().clone();
-                egui::Frame::group(&card_style).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.strong(&candidate.id);
-                            ui.small(format!(
-                                "{} · {}",
-                                candidate.kind,
-                                candidate
-                                    .path
-                                    .strip_prefix(std::path::Path::new(self.workspace.root.trim()))
-                                    .unwrap_or(&candidate.path)
-                                    .display()
-                            ));
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add_enabled(
-                                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new("Adopt project"),
-                                )
-                                .clicked()
-                            {
-                                adoption_path = Some(candidate.path.clone());
-                            }
+                    let card_style = ui.style().clone();
+                    egui::Frame::group(&card_style).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.strong(&candidate.id);
+                                ui.small(format!(
+                                    "{} · {}",
+                                    candidate.kind,
+                                    candidate
+                                        .path
+                                        .strip_prefix(std::path::Path::new(
+                                            self.workspace.root.trim()
+                                        ))
+                                        .unwrap_or(&candidate.path)
+                                        .display()
+                                ));
+                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add_enabled(
+                                            !self.operation.running
+                                                && !self.has_unsaved_workspace_edits(),
+                                            egui::Button::new("Adopt project"),
+                                        )
+                                        .clicked()
+                                    {
+                                        adoption_path = Some(candidate.path.clone());
+                                    }
+                                },
+                            );
                         });
                     });
-                });
-            }
+                }
                 if has_candidates && matching_candidates.is_empty() {
                     ui.weak("No unregistered projects match this search.");
                 }

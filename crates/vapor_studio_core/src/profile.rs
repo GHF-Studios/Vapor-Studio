@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
@@ -63,7 +66,11 @@ pub fn fingerprint_resolved_graph(graph: &ResolvedCompositionGraph) -> Option<St
     canonical.push_str(&format!("engine={}\n", identity(&graph.effective_engine)));
     canonical.push_str(&format!(
         "game={}\n",
-        graph.effective_game.as_ref().map(identity).unwrap_or_default()
+        graph
+            .effective_game
+            .as_ref()
+            .map(identity)
+            .unwrap_or_default()
     ));
     let nodes: BTreeMap<_, _> = graph
         .nodes
@@ -203,8 +210,8 @@ fn canonical_resolved_nodes(
 #[cfg(test)]
 mod resolved_graph_tests {
     use super::{
-        ContentIdentity, InstallationState, ResolvedCompositionGraph,
-        ResolvedDependencyIdentity, ResolvedNodeIdentity, resolved_graph_matches,
+        ContentIdentity, InstallationState, ResolvedCompositionGraph, ResolvedDependencyIdentity,
+        ResolvedNodeIdentity, resolved_graph_matches,
     };
 
     fn identity(id: &str, version: &str) -> ContentIdentity {
@@ -280,7 +287,10 @@ mod resolved_graph_tests {
 
         let mut duplicate_binding = expected.clone();
         duplicate_binding.nodes[1].dependencies[1].binding = "engine".to_owned();
-        assert!(!resolved_graph_matches(&duplicate_binding, &duplicate_binding));
+        assert!(!resolved_graph_matches(
+            &duplicate_binding,
+            &duplicate_binding
+        ));
     }
 
     #[test]
@@ -313,10 +323,12 @@ mod resolved_graph_tests {
         }
         assert!(resolved_graph_matches(&legacy, &actual));
 
-        legacy.nodes[0].dependencies.push(ResolvedDependencyIdentity {
-            binding: "asset".to_owned(),
-            content: identity("org.asset", "1.0.0"),
-        });
+        legacy.nodes[0]
+            .dependencies
+            .push(ResolvedDependencyIdentity {
+                binding: "asset".to_owned(),
+                content: identity("org.asset", "1.0.0"),
+            });
         assert!(!resolved_graph_matches(&legacy, &actual));
     }
 }
@@ -456,9 +468,11 @@ pub fn rename_profile(
     if name.is_empty() {
         return Err("Enter a non-empty profile name.".to_owned());
     }
-    if profiles.iter().enumerate().any(|(other_index, other)| {
-        other_index != index && other.name.eq_ignore_ascii_case(name)
-    }) {
+    if profiles
+        .iter()
+        .enumerate()
+        .any(|(other_index, other)| other_index != index && other.name.eq_ignore_ascii_case(name))
+    {
         return Err("A profile with that name already exists.".to_owned());
     }
     profiles[index].name = name.to_owned();
