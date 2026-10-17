@@ -122,7 +122,7 @@ impl StudioApp {
         let mut discard_dependencies = false;
         let mut source_graph_saved = false;
         let operation_running = self.operation.running;
-        let source_contents = self.catalog.sources.clone();
+        let source_contents = &self.catalog.sources;
         if let Some(composition) = self.authoring.composition_edit.as_mut() {
             ui.separator();
             ui.label(format!("Editing {} · {}", composition.id, composition.kind));
@@ -320,14 +320,12 @@ impl StudioApp {
                 },
             );
             if !source_graph_saved {
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(!self.operation.running, |ui| {
-                        save_dependencies = primary_button(ui, "Save changes").clicked();
-                    });
-                    discard_dependencies = ui
-                        .add_enabled(!self.operation.running, egui::Button::new("Discard draft"))
-                        .clicked();
+                ui.add_enabled_ui(!self.operation.running, |ui| {
+                    save_dependencies = primary_button(ui, "Save dependency changes").clicked();
                 });
+                discard_dependencies = ui
+                    .add_enabled(!self.operation.running, egui::Button::new("Discard draft"))
+                    .clicked();
             }
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.horizontal_wrapped(|ui| {
