@@ -1,6 +1,5 @@
 use super::super::StudioApp;
 use super::super::components::design::{ACCENT, page_header};
-use super::super::directory_picker::{DirectoryPicker, DirectoryPickerPurpose};
 use eframe::egui;
 use std::path::Path;
 
@@ -17,10 +16,7 @@ impl StudioApp {
                         .desired_width(360.0)
                         .hint_text("Parent folder for the new workspace"));
                     if ui.button("Browse…").clicked() {
-                        self.directory_picker = Some(DirectoryPicker::new(
-                            DirectoryPickerPurpose::WorkspaceParent,
-                            Path::new(self.workspace.starter_path.trim()),
-                        ));
+                        self.open_workspace_parent_picker();
                     }
                 });
                 ui.horizontal(|ui| {
@@ -58,7 +54,7 @@ impl StudioApp {
                 ui.heading("Open a workspace to continue");
                 ui.label("Content projects belong to an authored workspace. Create the starter workspace above or open one you already have.");
                 if ui.button("Open existing workspace").clicked() {
-                    self.section = super::super::Section::Workspace;
+                    self.open_workspace_picker();
                 }
             });
             return;

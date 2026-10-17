@@ -1,13 +1,27 @@
 use super::super::StudioApp;
-use super::super::components::design::page_header;
+use super::super::components::design::{StatusTone, page_header, primary_button, status_text};
 use eframe::egui;
 use std::path::PathBuf;
 use vapor_studio_core::SourceCompositionLink;
+
+#[derive(Clone, PartialEq, Eq)]
+enum PackagepackRoleSelection {
+    Empty,
+    Choice(String),
+    Unpinned,
+    External,
+}
 
 impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
         page_header(ui, "Author", "Compose", "Build a content package by choosing its compatible projects and versions.");
         ui.weak("Saving validates the graph and writes the source manifest through Vapor.");
+        let composition_has_changes = self
+            .authoring
+            .composition_edit
+            .as_ref()
+            .zip(self.authoring.composition_original_links.as_ref())
+            .is_some_and(|(composition, original)| &composition.links != original);
 
         let source_projects = self
             .catalog
@@ -57,7 +71,7 @@ impl StudioApp {
             }
             if ui
                 .add_enabled(
-                    !self.operation.running && self.authoring.composition_edit.is_some(),
+                    !self.operation.running && composition_has_changes,
                     egui::Button::new("Save dependencies"),
                 )
                 .clicked()
@@ -81,7 +95,7 @@ impl StudioApp {
                     ui.label("Compositions connect authored Engine, Game, pack, and extension projects from one workspace.");
                     ui.horizontal(|ui| {
                         if ui.button("Open workspace").clicked() {
-                            self.section = super::super::Section::Workspace;
+                            self.open_workspace_picker();
                         }
                         if ui.button("Create workspace").clicked() {
                             self.section = super::super::Section::Create;
@@ -112,64 +126,92 @@ impl StudioApp {
         let mut use_profile_root = false;
         let mut preview_source_selector = None;
         let mut stage_source_selector = None;
+        let mut save_dependencies = false;
         let mut source_graph_saved = false;
         if let Some(composition) = self.authoring.composition_edit.as_mut() {
             ui.separator();
             ui.label(format!("Editing {} · {}", composition.id, composition.kind));
             ui.small(format!("Manifest: {}", composition.manifest.display()));
-            ui.label("Current edges");
-            if composition.links.is_empty() {
-                ui.weak("This project currently has no dependency edges. Vapor Shell enforces role-specific requirements when saving.");
+            if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
+                ui.group(|ui| {
+                    ui.heading("Playable content");
+                    ui.label("Choose the Engine that runs this composition and, optionally, the Game it contains.");
+                    draw_packagepack_role_slot(
+                        ui,
+                        &mut composition.links,
+                        &self.catalog.sources,
+                        "engine-choice",
+                        "Engine · required",
+                        false,
+                    );
+                    draw_packagepack_role_slot(
+                        ui,
+                        &mut composition.links,
+                        &self.catalog.sources,
+                        "game-choice",
+                        "Game · optional",
+                        true,
+                    );
+                    ui.small("Save validates the complete composition through Vapor before writing its manifest.");
+                });
             }
-            egui::ScrollArea::horizontal().show(ui, |ui| {
-                egui::Grid::new("composition-edges")
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.strong("Role");
-                        ui.strong("Content");
-                        ui.strong("Version requirement");
-                        ui.strong("Optional");
-                        ui.strong("Reason");
-                        ui.end_row();
-                        for (index, link) in composition.links.iter_mut().enumerate() {
-                            ui.label(&link.relationship);
-                            ui.label(&link.id);
-                            let mut version = link.version.clone().unwrap_or_default();
-                            if ui
-                                .add(
-                                    egui::TextEdit::singleline(&mut version)
-                                        .desired_width(150.0)
-                                        .hint_text("any compatible version"),
-                                )
-                                .changed()
-                            {
-                                link.version = (!version.trim().is_empty()).then_some(version);
-                            }
-                            ui.checkbox(&mut link.optional, "");
-                            let mut reason = link.reason.clone().unwrap_or_default();
-                            if ui
-                                .add(
-                                    egui::TextEdit::singleline(&mut reason)
-                                        .desired_width(180.0)
-                                        .hint_text("Why is this included?"),
-                                )
-                                .changed()
-                            {
-                                link.reason = (!reason.trim().is_empty()).then_some(reason);
-                            }
-                            if ui.small_button("Remove").clicked() {
-                                remove_link = Some(index);
-                            }
-                            ui.end_row();
-                        }
+            egui::CollapsingHeader::new("Advanced dependency details")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label("Review version requirements, optional edges, and reasons directly.");
+                    if composition.links.is_empty() {
+                        ui.weak("No dependency edges are declared yet.");
+                    }
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                        egui::Grid::new("composition-edges")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Role");
+                                ui.strong("Content");
+                                ui.strong("Version requirement");
+                                ui.strong("Optional");
+                                ui.strong("Reason");
+                                ui.end_row();
+                                for (index, link) in composition.links.iter_mut().enumerate() {
+                                    ui.label(&link.relationship);
+                                    ui.label(&link.id);
+                                    let mut version = link.version.clone().unwrap_or_default();
+                                    if ui
+                                        .add(
+                                            egui::TextEdit::singleline(&mut version)
+                                                .desired_width(150.0)
+                                                .hint_text("any compatible version"),
+                                        )
+                                        .changed()
+                                    {
+                                        link.version = (!version.trim().is_empty()).then_some(version);
+                                    }
+                                    ui.checkbox(&mut link.optional, "");
+                                    let mut reason = link.reason.clone().unwrap_or_default();
+                                    if ui
+                                        .add(
+                                            egui::TextEdit::singleline(&mut reason)
+                                                .desired_width(180.0)
+                                                .hint_text("Why is this included?"),
+                                        )
+                                        .changed()
+                                    {
+                                        link.reason = (!reason.trim().is_empty()).then_some(reason);
+                                    }
+                                    if ui.small_button("Remove").clicked() {
+                                        remove_link = Some(index);
+                                    }
+                                    ui.end_row();
+                                }
+                            });
                     });
-            });
+                });
             if let Some(index) = remove_link {
                 composition.links.remove(index);
             }
 
             ui.separator();
-            ui.label("Add a local workspace content edge");
+            ui.label("Add additional workspace content");
             let choices = self
                 .catalog
                 .sources
@@ -183,6 +225,11 @@ impl StudioApp {
                         (Some(parent), Some(child)) => {
                             vapor_studio_core::source_dependency_relationship(parent, child)
                                 .is_some()
+                                && !(parent == vapor_core::ContentKind::Packagepack
+                                    && vapor_studio_core::source_dependency_choice_group(
+                                        parent, child,
+                                    )
+                                    .is_some())
                         }
                         _ => false,
                     }
@@ -198,7 +245,7 @@ impl StudioApp {
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt("composition-link-candidate")
                     .selected_text(if self.authoring.composition_link_candidate.is_empty() {
-                        "Choose local content".to_owned()
+                        "Choose additional content".to_owned()
                     } else {
                         self.authoring.composition_link_candidate.clone()
                     })
@@ -222,7 +269,7 @@ impl StudioApp {
                             && choices.iter().any(|(selector, _, _)| {
                                 selector == &self.authoring.composition_link_candidate
                             }),
-                        egui::Button::new("Add edge"),
+                        egui::Button::new("Add content"),
                     )
                     .clicked()
                 {
@@ -260,6 +307,24 @@ impl StudioApp {
             });
             source_graph_saved =
                 self.authoring.composition_original_links.as_ref() == Some(&composition.links);
+            status_text(
+                ui,
+                if source_graph_saved {
+                    "Dependencies match the saved manifest"
+                } else {
+                    "Unsaved dependency changes"
+                },
+                if source_graph_saved {
+                    StatusTone::Positive
+                } else {
+                    StatusTone::Caution
+                },
+            );
+            if !source_graph_saved {
+                ui.add_enabled_ui(!self.operation.running, |ui| {
+                    save_dependencies = primary_button(ui, "Save dependency changes").clicked();
+                });
+            }
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.horizontal_wrapped(|ui| {
                     let source_selector = composition.version.as_ref()
@@ -298,6 +363,9 @@ impl StudioApp {
         } else {
             ui.separator();
             ui.weak("Load a source content project to inspect and edit its dependencies. Cache and installed copies remain read-only here.");
+        }
+        if save_dependencies {
+            self.save_source_composition();
         }
         if let Some(selector) = preview_source_selector {
             self.preview_source_composition(selector);
@@ -340,4 +408,157 @@ impl StudioApp {
             PathBuf::from(self.workspace.root.trim()).display()
         ));
     }
+}
+
+fn packagepack_relationship_group(relationship: &str) -> Option<&'static str> {
+    match relationship {
+        "engine" | "enginepack" => Some("engine-choice"),
+        "game" | "gamepack" => Some("game-choice"),
+        _ => None,
+    }
+}
+
+fn draw_packagepack_role_slot(
+    ui: &mut egui::Ui,
+    links: &mut Vec<SourceCompositionLink>,
+    sources: &[vapor_studio_core::SourceContent],
+    group: &'static str,
+    label: &str,
+    optional: bool,
+) {
+    let packagepack = vapor_core::ContentKind::Packagepack;
+    let choices = sources
+        .iter()
+        .filter_map(|content| {
+            let kind = super::super::source_content_kind(&content.kind)?;
+            if vapor_studio_core::source_dependency_choice_group(packagepack, kind)
+                != Some(group)
+            {
+                return None;
+            }
+            let relationship =
+                vapor_studio_core::source_dependency_relationship(packagepack, kind)?;
+            Some((
+                super::super::source_content_selector(content),
+                content.kind.clone(),
+                content.version.clone(),
+                relationship.to_owned(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let current_link = links
+        .iter()
+        .find(|link| packagepack_relationship_group(&link.relationship) == Some(group));
+    let current_choice = current_link.and_then(|link| {
+        choices
+            .iter()
+            .find(|(selector, _, version, _)| {
+                let id = selector.split('@').next().unwrap_or(selector);
+                if id != link.id {
+                    return false;
+                }
+                match (&link.version, version) {
+                    (None, None) => true,
+                    (Some(requirement), Some(version)) => {
+                        requirement == &format!("={version}") || requirement == version
+                    }
+                    _ => false,
+                }
+            })
+            .map(|(selector, _, _, _)| selector.clone())
+    });
+    let current_id_is_local = current_link.is_some_and(|link| {
+        choices.iter().any(|(selector, _, _, _)| {
+            selector.split('@').next().unwrap_or(selector) == link.id
+        })
+    });
+    let mut selected = current_link.map_or(PackagepackRoleSelection::Empty, |_| {
+        current_choice.map_or_else(
+            || {
+                if current_id_is_local
+                    && current_link.is_some_and(|link| {
+                        link.version.as_deref().is_none_or(|requirement| requirement == "*")
+                    })
+                {
+                    PackagepackRoleSelection::Unpinned
+                } else {
+                    PackagepackRoleSelection::External
+                }
+            },
+            PackagepackRoleSelection::Choice,
+        )
+    });
+    let initial_selection = selected.clone();
+    let current_label = match (&current_link, &selected) {
+        (Some(link), PackagepackRoleSelection::External) => format!(
+            "External content · {} · {}",
+            link.id,
+            link.version.as_deref().unwrap_or("any version"),
+        ),
+        (Some(link), PackagepackRoleSelection::Unpinned) => {
+            format!("Version not pinned · {}", link.id)
+        }
+        (Some(_), PackagepackRoleSelection::Choice(selector)) => choices
+            .iter()
+            .find(|choice| &choice.0 == selector)
+            .map(|choice| packagepack_choice_label(&choice.0, &choice.1, choice.2.as_deref()))
+            .unwrap_or_else(|| selector.clone()),
+        (Some(_), PackagepackRoleSelection::Empty) if optional => "No Game".to_owned(),
+        (Some(_), PackagepackRoleSelection::Empty) => "Choose an Engine".to_owned(),
+        (None, _) if optional => "No Game".to_owned(),
+        (None, _) => "Choose an Engine".to_owned(),
+    };
+
+    ui.horizontal_wrapped(|ui| {
+        ui.label(label);
+        egui::ComboBox::from_id_salt(("packagepack-role", group))
+            .width(340.0)
+            .selected_text(current_label)
+            .show_ui(ui, |ui| {
+                if optional {
+                    ui.selectable_value(
+                        &mut selected,
+                        PackagepackRoleSelection::Empty,
+                        "No Game",
+                    );
+                }
+                for (selector, kind, version, _) in &choices {
+                    ui.selectable_value(
+                        &mut selected,
+                        PackagepackRoleSelection::Choice(selector.clone()),
+                        packagepack_choice_label(selector, kind, version.as_deref()),
+                    );
+                }
+            });
+    });
+
+    if selected != initial_selection {
+        links.retain(|link| packagepack_relationship_group(&link.relationship) != Some(group));
+        if let PackagepackRoleSelection::Choice(selector) = selected
+            && let Some((_, _, version, relationship)) =
+                choices.iter().find(|choice| choice.0 == selector)
+        {
+            let id = selector.split('@').next().unwrap_or(&selector).to_owned();
+            links.push(SourceCompositionLink {
+                id,
+                relationship: relationship.clone(),
+                optional: false,
+                version: version.as_ref().map(|version| format!("={version}")),
+                workshop_id: None,
+                reason: None,
+            });
+        }
+    }
+
+    if choices.is_empty() && !optional {
+        ui.weak("No Engine or Enginepack is registered in this workspace yet. Create or adopt one first.");
+    }
+}
+
+fn packagepack_choice_label(selector: &str, kind: &str, version: Option<&str>) -> String {
+    format!(
+        "{} · {kind} · {}",
+        selector.split('@').next().unwrap_or(selector),
+        version.map_or_else(|| "unversioned".to_owned(), |value| format!("v{value}")),
+    )
 }

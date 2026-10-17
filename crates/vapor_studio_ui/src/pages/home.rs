@@ -94,7 +94,7 @@ impl StudioApp {
                         self.section = Section::Create;
                     }
                     if ui.button("Open a workspace").clicked() {
-                        self.section = Section::Workspace;
+                            self.open_workspace_picker();
                     }
                 } else {
                     let workspace_name = std::path::Path::new(&self.workspace.root)

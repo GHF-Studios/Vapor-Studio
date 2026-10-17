@@ -120,7 +120,11 @@ impl StudioApp {
                         .unwrap_or(&self.workspace.root)
                 };
                 if ui.button(workspace_label).on_hover_text(&self.workspace.root).clicked() {
-                    self.section = Section::Workspace;
+                    if self.workspace.root.trim().is_empty() {
+                        self.open_workspace_picker();
+                    } else {
+                        self.section = Section::Workspace;
+                    }
                 }
             }
             if show_profile_picker {
@@ -139,7 +143,20 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    self.profile.new_name = format!("Composition {}", self.profile.items.len() + 1);
+                    let mut number = self.profile.items.len() + 1;
+                    loop {
+                        let candidate = format!("Profile {number}");
+                        if !self
+                            .profile
+                            .items
+                            .iter()
+                            .any(|profile| profile.name.eq_ignore_ascii_case(&candidate))
+                        {
+                            self.profile.new_name = candidate;
+                            break;
+                        }
+                        number += 1;
+                    }
                     self.add_profile();
                 }
             }

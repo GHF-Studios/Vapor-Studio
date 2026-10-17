@@ -1,3 +1,4 @@
+use super::{StudioApp, components::design::{ACCENT_FILL, StatusTone, status_text}};
 use eframe::egui;
 use std::{fs, path::{Path, PathBuf}};
 
@@ -16,6 +17,7 @@ pub(super) struct DirectoryPicker {
     purpose: DirectoryPickerPurpose,
     path: PathBuf,
     path_draft: String,
+    folder_filter: String,
     directories: Vec<PathBuf>,
     overflow: bool,
     error: Option<String>,
@@ -33,12 +35,14 @@ impl DirectoryPicker {
                     .and_then(|parent| fs::canonicalize(parent).ok())
                     .filter(|path| path.is_dir())
             })
+            .or_else(home_directory)
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_default();
         let mut picker = Self {
             purpose,
             path: PathBuf::new(),
             path_draft: String::new(),
+            folder_filter: String::new(),
             directories: Vec::new(),
             overflow: false,
             error: None,
@@ -72,8 +76,12 @@ impl DirectoryPicker {
                 for entry in entries {
                     let Ok(entry) = entry else { continue };
                     let Ok(kind) = entry.file_type() else { continue };
-                    // Do not follow symlinks: the chooser is a bounded directory browser.
-                    if !kind.is_dir() {
+                    // Follow a directory symlink only after the user navigates into it.
+                    // Navigation canonicalizes the target, so parent traversal stays bounded.
+                    let is_directory = kind.is_dir()
+                        || (kind.is_symlink()
+                            && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir()));
+                    if !is_directory {
                         continue;
                     }
                     if directories.len() == 500 {
@@ -144,33 +152,49 @@ impl DirectoryPicker {
                 });
 
                 if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::LIGHT_RED, error);
+                    status_text(ui, error, StatusTone::Error);
                 }
                 let recognized_workspace = self.path.join("Workspace.vapor.toml").is_file();
                 if matches!(self.purpose, DirectoryPickerPurpose::OpenWorkspace) {
                     if recognized_workspace {
-                        ui.colored_label(egui::Color32::from_rgb(118, 207, 164), "Vapor workspace found here");
+                        status_text(ui, "Vapor workspace found here", StatusTone::Positive);
                     } else {
                         ui.weak("This folder does not contain a Vapor workspace manifest.");
                     }
                 }
                 ui.separator();
                 ui.label(egui::RichText::new(&self.path.display().to_string()).strong());
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.folder_filter)
+                        .hint_text("Filter folders in this location"),
+                );
                 egui::ScrollArea::vertical()
                     .max_height(300.0)
                     .show(ui, |ui| {
-                        if self.directories.is_empty() {
-                            ui.weak("No subfolders here.");
-                        }
+                        let filter = self.folder_filter.trim().to_lowercase();
+                        let mut visible_directories = 0;
                         let mut navigate_to = None;
                         for directory in &self.directories {
                             let name = directory
                                 .file_name()
                                 .unwrap_or_default()
                                 .to_string_lossy();
+                            if !filter.is_empty() && !name.to_lowercase().contains(&filter) {
+                                continue;
+                            }
+                            visible_directories += 1;
                             if ui.selectable_label(false, format!("›  {name}")).clicked() {
                                 navigate_to = Some(directory.clone());
                             }
+                        }
+                        if visible_directories == 0 {
+                            ui.weak(if filter.is_empty() {
+                                "No subfolders here."
+                            } else {
+                                "No folders match this filter."
+                            });
+                        } else {
+                            ui.small(format!("{visible_directories} folders shown"));
                         }
                         if self.overflow {
                             ui.weak("Showing the first 500 folders. Type a path above to narrow the view.");
@@ -196,7 +220,7 @@ impl DirectoryPicker {
                         DirectoryPickerPurpose::WorkspaceParent => "Choose this location",
                     };
                     if ui
-                        .add_enabled(can_select, egui::Button::new(label).fill(egui::Color32::from_rgb(34, 92, 116)))
+                        .add_enabled(can_select, egui::Button::new(label).fill(ACCENT_FILL))
                         .clicked()
                     {
                         result = Some(DirectoryPickerResult::Selected {
@@ -208,5 +232,29 @@ impl DirectoryPicker {
             });
         self.open = window_open;
         result.or_else(|| (!self.open).then_some(DirectoryPickerResult::Cancelled))
+    }
+}
+
+fn home_directory() -> Option<PathBuf> {
+    [std::env::var_os("USERPROFILE"), std::env::var_os("HOME")]
+        .into_iter()
+        .flatten()
+        .map(PathBuf::from)
+        .find(|path| path.is_dir())
+}
+
+impl StudioApp {
+    pub(super) fn open_workspace_picker(&mut self) {
+        self.directory_picker = Some(DirectoryPicker::new(
+            DirectoryPickerPurpose::OpenWorkspace,
+            Path::new(self.workspace.root_draft.trim()),
+        ));
+    }
+
+    pub(super) fn open_workspace_parent_picker(&mut self) {
+        self.directory_picker = Some(DirectoryPicker::new(
+            DirectoryPickerPurpose::WorkspaceParent,
+            Path::new(self.workspace.starter_path.trim()),
+        ));
     }
 }

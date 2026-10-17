@@ -1,5 +1,4 @@
 use super::super::StudioApp;
-use super::super::directory_picker::{DirectoryPicker, DirectoryPickerPurpose};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
@@ -31,10 +30,7 @@ impl StudioApp {
                         .add_enabled(!self.operation.running, egui::Button::new("Browse…"))
                         .clicked()
                     {
-                        self.directory_picker = Some(DirectoryPicker::new(
-                            DirectoryPickerPurpose::OpenWorkspace,
-                            Path::new(self.workspace.root_draft.trim()),
-                        ));
+                        self.open_workspace_picker();
                     }
                     if ui
                         .add_enabled(
