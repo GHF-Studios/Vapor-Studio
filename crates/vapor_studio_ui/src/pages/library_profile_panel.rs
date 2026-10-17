@@ -23,7 +23,7 @@ impl StudioApp {
                         egui::Button::selectable(selected, egui::RichText::new(name).strong()),
                     );
                     if response
-                        .on_disabled_hover_text("Save or discard workspace edits before switching profiles.")
+                        .on_disabled_hover_text("Save or discard workspace or composition edits before switching profiles.")
                         .clicked()
                     {
                         self.select_profile(index);

@@ -191,6 +191,13 @@ impl StudioApp {
     }
 
     pub(super) fn open_workspace_path_to(&mut self, path: PathBuf, landing_section: Section) {
+        if self.authoring.composition_has_unsaved_changes() {
+            self.workspace.root_draft = self.workspace.root.clone();
+            self.status =
+                "Save or discard composition dependency changes before changing workspaces."
+                    .to_owned();
+            return;
+        }
         if self.authoring.manifest_metadata_dirty {
             self.workspace.root_draft = self.workspace.root.clone();
             self.status =
@@ -243,6 +250,12 @@ impl StudioApp {
     }
 
     pub(super) fn require_saved_workspace(&mut self, action: &str) -> bool {
+        if self.authoring.composition_has_unsaved_changes() {
+            self.status = format!(
+                "Save or discard composition dependency changes before you {action}."
+            );
+            return false;
+        }
         if !self.has_unsaved_workspace_edits() {
             return true;
         }
@@ -257,7 +270,9 @@ impl StudioApp {
     }
 
     pub(super) fn has_unsaved_workspace_edits(&self) -> bool {
-        self.workspace.editor.has_dirty_documents() || self.authoring.manifest_metadata_dirty
+        self.workspace.editor.has_dirty_documents()
+            || self.authoring.manifest_metadata_dirty
+            || self.authoring.composition_has_unsaved_changes()
     }
 
     pub(super) fn require_open_workspace(&mut self, action: &str) -> bool {

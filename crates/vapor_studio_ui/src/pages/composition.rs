@@ -16,12 +16,7 @@ impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
         page_header(ui, "Author", "Compose", "Build a content package by choosing its compatible projects and versions.");
         ui.weak("Saving checks the selected content and updates its source manifest through Vapor.");
-        let composition_has_changes = self
-            .authoring
-            .composition_edit
-            .as_ref()
-            .zip(self.authoring.composition_original_links.as_ref())
-            .is_some_and(|(composition, original)| &composition.links != original);
+        let composition_has_changes = self.authoring.composition_has_unsaved_changes();
 
         let source_projects = self
             .catalog
@@ -37,27 +32,30 @@ impl StudioApp {
             .collect::<Vec<_>>();
         ui.horizontal(|ui| {
             ui.label("Source project");
-            egui::ComboBox::from_id_salt("composition-source-project")
-                .selected_text(if self.authoring.composition_edit_selector.is_empty() {
-                    "Select content".to_owned()
-                } else {
-                    self.authoring.composition_edit_selector.clone()
-                })
-                .show_ui(ui, |ui| {
-                    for (selector, kind, _) in &source_projects {
-                        if ui
-                            .selectable_label(
-                                self.authoring.composition_edit_selector == *selector,
-                                format!("{selector} · {kind}"),
-                            )
-                            .clicked()
-                        {
-                            self.authoring.composition_edit_selector = selector.clone();
-                            self.authoring.composition_edit = None;
-                            self.authoring.composition_original_links = None;
+            ui.add_enabled_ui(!self.operation.running && !composition_has_changes, |ui| {
+                egui::ComboBox::from_id_salt("composition-source-project")
+                    .selected_text(if self.authoring.composition_edit_selector.is_empty() {
+                        "Select content".to_owned()
+                    } else {
+                        self.authoring.composition_edit_selector.clone()
+                    })
+                    .show_ui(ui, |ui| {
+                        for (selector, kind, _) in &source_projects {
+                            if ui
+                                .selectable_label(
+                                    self.authoring.composition_edit_selector == *selector,
+                                    format!("{selector} · {kind}"),
+                                )
+                                .clicked()
+                            {
+                                self.authoring.composition_edit_selector = selector.clone();
+                                self.authoring.composition_edit = None;
+                                self.authoring.composition_original_links = None;
+                                self.authoring.composition_link_candidate.clear();
+                            }
                         }
-                    }
-                });
+                    });
+            });
             if ui
                 .add_enabled(
                     !self.operation.running
@@ -69,16 +67,10 @@ impl StudioApp {
             {
                 self.load_source_composition();
             }
-            if ui
-                .add_enabled(
-                    !self.operation.running && composition_has_changes,
-                    egui::Button::new("Save dependencies"),
-                )
-                .clicked()
-            {
-                self.save_source_composition();
-            }
         });
+        if composition_has_changes {
+            ui.weak("Save or discard this draft before loading another source project.");
+        }
 
         if source_projects.is_empty() {
             let candidates = self.workspace.unregistered_projects.candidates.len();
@@ -127,32 +119,37 @@ impl StudioApp {
         let mut preview_source_selector = None;
         let mut stage_source_selector = None;
         let mut save_dependencies = false;
+        let mut discard_dependencies = false;
         let mut source_graph_saved = false;
+        let operation_running = self.operation.running;
+        let source_contents = self.catalog.sources.clone();
         if let Some(composition) = self.authoring.composition_edit.as_mut() {
             ui.separator();
             ui.label(format!("Editing {} · {}", composition.id, composition.kind));
             ui.small(format!("Source file: {}", composition.manifest.display()));
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
-                ui.group(|ui| {
-                    ui.heading("Playable content");
-                    ui.label("Choose the Engine that runs this composition and, optionally, the Game it contains.");
-                    draw_packagepack_role_slot(
-                        ui,
-                        &mut composition.links,
-                        &self.catalog.sources,
-                        "engine-choice",
-                        "Engine · required",
-                        false,
-                    );
-                    draw_packagepack_role_slot(
-                        ui,
-                        &mut composition.links,
-                        &self.catalog.sources,
-                        "game-choice",
-                        "Game · optional",
-                        true,
-                    );
-                    ui.small("Save validates the complete composition through Vapor before writing its manifest.");
+                ui.add_enabled_ui(!operation_running, |ui| {
+                    ui.group(|ui| {
+                        ui.heading("Playable content");
+                        ui.label("Choose the Engine that runs this composition and, optionally, the Game it contains.");
+                        draw_packagepack_role_slot(
+                            ui,
+                            &mut composition.links,
+                            &source_contents,
+                            "engine-choice",
+                            "Engine · required",
+                            false,
+                        );
+                        draw_packagepack_role_slot(
+                            ui,
+                            &mut composition.links,
+                            &source_contents,
+                            "game-choice",
+                            "Game · optional",
+                            true,
+                        );
+                        ui.small("Save validates the complete composition through Vapor before writing its manifest.");
+                    });
                 });
             }
             egui::CollapsingHeader::new("Advanced dependency details")
@@ -162,6 +159,7 @@ impl StudioApp {
                     if composition.links.is_empty() {
                         ui.weak("No dependency edges are declared yet.");
                     }
+                    ui.add_enabled_ui(!operation_running, |ui| {
                     egui::ScrollArea::horizontal().show(ui, |ui| {
                         egui::Grid::new("composition-edges")
                             .striped(true)
@@ -205,6 +203,7 @@ impl StudioApp {
                                 }
                             });
                     });
+                    });
                 });
             if let Some(index) = remove_link {
                 composition.links.remove(index);
@@ -212,9 +211,7 @@ impl StudioApp {
 
             ui.separator();
             ui.label("Add additional workspace content");
-            let choices = self
-                .catalog
-                .sources
+            let choices = source_contents
                 .iter()
                 .filter(|content| content.id != composition.id)
                 .filter(|content| {
@@ -243,25 +240,27 @@ impl StudioApp {
                 })
                 .collect::<Vec<_>>();
             ui.horizontal(|ui| {
-                egui::ComboBox::from_id_salt("composition-link-candidate")
-                    .selected_text(if self.authoring.composition_link_candidate.is_empty() {
-                        "Choose additional content".to_owned()
-                    } else {
-                        self.authoring.composition_link_candidate.clone()
-                    })
-                    .show_ui(ui, |ui| {
-                        for (selector, kind, version) in &choices {
-                            let label = format!(
-                                "{selector} · {kind} · {}",
-                                version.as_deref().unwrap_or("unversioned")
-                            );
-                            ui.selectable_value(
-                                &mut self.authoring.composition_link_candidate,
-                                selector.clone(),
-                                label,
-                            );
-                        }
+                ui.add_enabled_ui(!operation_running, |ui| {
+                    egui::ComboBox::from_id_salt("composition-link-candidate")
+                        .selected_text(if self.authoring.composition_link_candidate.is_empty() {
+                            "Choose additional content".to_owned()
+                        } else {
+                            self.authoring.composition_link_candidate.clone()
+                        })
+                        .show_ui(ui, |ui| {
+                            for (selector, kind, version) in &choices {
+                                let label = format!(
+                                    "{selector} · {kind} · {}",
+                                    version.as_deref().unwrap_or("unversioned")
+                                );
+                                ui.selectable_value(
+                                    &mut self.authoring.composition_link_candidate,
+                                    selector.clone(),
+                                    label,
+                                );
+                            }
                     });
+                });
                 if ui
                     .add_enabled(
                         !self.operation.running
@@ -321,8 +320,13 @@ impl StudioApp {
                 },
             );
             if !source_graph_saved {
-                ui.add_enabled_ui(!self.operation.running, |ui| {
-                    save_dependencies = primary_button(ui, "Save dependency changes").clicked();
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(!self.operation.running, |ui| {
+                        save_dependencies = primary_button(ui, "Save changes").clicked();
+                    });
+                    discard_dependencies = ui
+                        .add_enabled(!self.operation.running, egui::Button::new("Discard draft"))
+                        .clicked();
                 });
             }
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
@@ -366,6 +370,9 @@ impl StudioApp {
         }
         if save_dependencies {
             self.save_source_composition();
+        }
+        if discard_dependencies {
+            self.discard_source_composition_changes();
         }
         if let Some(selector) = preview_source_selector {
             self.preview_source_composition(selector);

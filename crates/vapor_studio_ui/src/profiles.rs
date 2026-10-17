@@ -114,7 +114,7 @@ impl StudioApp {
         }
         if self.has_unsaved_workspace_edits() {
             self.status =
-                "Save or discard workspace file or manifest metadata edits before switching profiles.".to_owned();
+                "Save or discard workspace, composition, or manifest edits before switching profiles.".to_owned();
             return;
         }
         self.profile.active_index = index;
@@ -146,8 +146,10 @@ impl StudioApp {
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
     ) {
-        if self.authoring.manifest_metadata_dirty {
-            self.status = "Save or discard structured manifest edits before changing the profile composition.".to_owned();
+        if self.authoring.manifest_metadata_dirty
+            || self.authoring.composition_has_unsaved_changes()
+        {
+            self.status = "Save or discard dependency or structured manifest edits before changing the profile composition.".to_owned();
             return;
         }
         let current_workspace = self.profile.items[self.profile.active_index]
@@ -208,7 +210,7 @@ impl StudioApp {
 
     pub(super) fn add_profile(&mut self) {
         if self.has_unsaved_workspace_edits() {
-            self.status = "Save or discard workspace file or manifest metadata edits before creating a profile.".to_owned();
+            self.status = "Save or discard workspace, composition, or manifest edits before creating a profile.".to_owned();
             return;
         }
         let name = self.profile.new_name.trim();
@@ -274,7 +276,7 @@ impl StudioApp {
 
     pub(super) fn duplicate_active_profile(&mut self) {
         if self.operation.running || self.has_unsaved_workspace_edits() {
-            self.status = "Save or discard workspace file or manifest metadata edits before duplicating a profile.".to_owned();
+            self.status = "Save or discard workspace, composition, or manifest edits before duplicating a profile.".to_owned();
             return;
         }
         let source_name = self.profile.items[self.profile.active_index].name.clone();

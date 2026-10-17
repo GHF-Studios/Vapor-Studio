@@ -70,6 +70,13 @@ impl Default for AuthoringState {
 }
 
 impl AuthoringState {
+    pub(super) fn composition_has_unsaved_changes(&self) -> bool {
+        self.composition_edit
+            .as_ref()
+            .zip(self.composition_original_links.as_ref())
+            .is_some_and(|(composition, original)| &composition.links != original)
+    }
+
     pub(super) fn clear_selected_source(&mut self) {
         self.composition_edit_selector.clear();
         self.composition_edit = None;
@@ -88,6 +95,18 @@ impl AuthoringState {
 }
 
 impl StudioApp {
+    pub(super) fn discard_source_composition_changes(&mut self) {
+        let Some(original_links) = self.authoring.composition_original_links.clone() else {
+            return;
+        };
+        let Some(composition) = self.authoring.composition_edit.as_mut() else {
+            return;
+        };
+        composition.links = original_links;
+        self.authoring.composition_link_candidate.clear();
+        self.status = "Discarded unsaved dependency changes. The saved composition is unchanged.".to_owned();
+    }
+
     pub(super) fn load_source_composition(&mut self) {
         if !self.require_open_workspace("edit a source content dependency graph") {
             return;
@@ -117,7 +136,11 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_composition(&mut self) {
-        if !self.require_open_workspace("save a source content dependency graph") {
+        if self.authoring.manifest_metadata_dirty {
+            self.status = "Save or discard the open manifest metadata draft before saving dependency changes.".to_owned();
+            return;
+        }
+        if !self.require_open_workspace_for_authoring_save("save a source content composition") {
             return;
         }
         let Some(composition) = self.authoring.composition_edit.clone() else {
@@ -208,6 +231,10 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_runtime_outputs(&mut self) {
+        if self.authoring.composition_has_unsaved_changes() {
+            self.status = "Save or discard dependency changes before saving runtime outputs.".to_owned();
+            return;
+        }
         if !self.require_open_workspace_for_authoring_save("save runtime output declarations") {
             return;
         }
@@ -286,6 +313,10 @@ impl StudioApp {
     }
 
     pub(super) fn save_source_workshop_metadata(&mut self) {
+        if self.authoring.composition_has_unsaved_changes() {
+            self.status = "Save or discard dependency changes before saving Workshop metadata.".to_owned();
+            return;
+        }
         if !self.require_open_workspace_for_authoring_save("save Workshop metadata") {
             return;
         }
