@@ -5,19 +5,23 @@ use eframe::egui;
 impl StudioApp {
     pub(super) fn draw_workshop_acquisition_panel(&mut self, ui: &mut egui::Ui) {
         section_header(ui, "Recent imports", "These Workshop downloads were added to Vapor's local cache during this session. Browse all available content in Discover.");
-        ui.horizontal(|ui| {
-            ui.add_enabled(
-                !self.operation.running,
-                egui::TextEdit::singleline(&mut self.workshop.published_file_id)
-                    .hint_text("PublishedFileId")
-                    .desired_width(220.0),
-            );
-            if ui
-                .add_enabled(!self.operation.running, egui::Button::new("Download to cache"))
-                .clicked()
-            {
-                self.download_workshop_item();
-            }
+        egui::CollapsingHeader::new("Import by Workshop ID")
+            .show(ui, |ui| {
+                ui.label("Use this when you already know the item's numeric Workshop ID.");
+                ui.horizontal(|ui| {
+                    ui.add_enabled(
+                        !self.operation.running,
+                        egui::TextEdit::singleline(&mut self.workshop.published_file_id)
+                            .hint_text("Workshop item ID")
+                            .desired_width(220.0),
+                    );
+                    if ui
+                        .add_enabled(!self.operation.running, egui::Button::new("Import"))
+                        .clicked()
+                    {
+                        self.download_workshop_item();
+                    }
+                });
         });
         if self.workshop.pending_acquisitions.is_empty() {
             empty_state(ui, "No recent imports", "Items imported from Workshop are added to Vapor's local cache. Browse Discover to find cached and installed content.", |_| {});
@@ -35,11 +39,11 @@ impl StudioApp {
                             .unwrap_or_default(),
                         acquisition.kind
                     ));
-                    ui.small(format!(
-                        "{} · {}",
-                        acquisition.cache_root.display(),
-                        acquisition.fingerprint
-                    ));
+                    egui::CollapsingHeader::new("Cache and file details")
+                        .show(ui, |ui| {
+                            ui.small(format!("Cache folder · {}", acquisition.cache_root.display()));
+                            ui.small(format!("File fingerprint · {}", acquisition.fingerprint));
+                        });
                     if acquisition.kind == "packagepack" {
                         if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(),
                             egui::Button::new(format!(

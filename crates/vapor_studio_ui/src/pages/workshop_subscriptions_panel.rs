@@ -69,7 +69,6 @@ impl StudioApp {
                             }
                         }
                         ui.strong(title);
-                        ui.weak(format!("PublishedFileId {id}"));
                         if let Some(item) = &details {
                             let state = if item.downloading {
                                 "Downloading in Steam"
@@ -153,6 +152,9 @@ impl StudioApp {
                     if let Some(item) = details.as_ref() && !item.description.is_empty() {
                         ui.collapsing("Description", |ui| { ui.label(&item.description); });
                     }
+                    ui.collapsing("Workshop item ID", |ui| {
+                        ui.small(format!("PublishedFileId {id}"));
+                    });
                     if let Some(url) = details.as_ref().and_then(|item| item.preview_url.as_ref()) {
                         ui.hyperlink_to("Open Workshop item", url);
                     }

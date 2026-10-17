@@ -197,7 +197,6 @@ impl StudioApp {
                                 self.workshop.focused_result = Some(item.published_file_id.clone());
                             }
                         });
-                        ui.small(format!("Workshop item · {}", item.published_file_id));
                         ui.separator();
                     }
                 });
@@ -215,7 +214,9 @@ impl StudioApp {
             ).cloned();
             if let Some(item) = focused_item {
                 details.strong(&item.title);
-                details.small(format!("PublishedFileId {}", item.published_file_id));
+                details.collapsing("Workshop item ID", |ui| {
+                    ui.small(format!("PublishedFileId {}", item.published_file_id));
+                });
                 if !item.description.is_empty() {
                     details.add_space(8.0);
                     details.label(&item.description);
