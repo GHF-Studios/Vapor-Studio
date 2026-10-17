@@ -241,7 +241,6 @@ pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {
     })
 }
 
-#[derive(Clone)]
 pub(super) struct CatalogFilter {
     source: CatalogSourceFilter,
     kind: Option<String>,
@@ -331,14 +330,4 @@ impl CatalogFilter {
                 .to_lowercase()
                 .contains(&self.query)
     }
-}
-
-pub(super) fn catalog_matches_filters(
-    content: &vapor_studio_core::CatalogContent,
-    source_filter: CatalogSourceFilter,
-    kind_filter: Option<&str>,
-    query: &str,
-) -> bool {
-    CatalogFilter::new(source_filter, kind_filter.map(str::to_owned), query)
-        .matches_catalog(content)
 }

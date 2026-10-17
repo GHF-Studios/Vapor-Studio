@@ -13,15 +13,12 @@ impl StudioApp {
     pub(in crate::app) fn draw_content_detail(&mut self, ui: &mut egui::Ui) {
         let mut action = None;
         if let Some(identity) = self.catalog.selected.as_ref() {
-            if let Some(content) = self.catalog.items.iter().find(|content| {
-                super::super::catalog_content_selector_matches(content, identity)
-                    && super::super::catalog_matches_filters(
-                        content,
-                        self.catalog.source_filter,
-                        self.catalog.kind_filter.as_deref(),
-                        &self.catalog.search_query,
-                    )
-            }) {
+            if let Some(content) = self
+                .catalog
+                .items
+                .iter()
+                .find(|content| super::super::catalog_content_selector_matches(content, identity))
+            {
                 ui.heading("Content details");
                 ui.label(format!(
                     "{} · {} · {}",

@@ -169,10 +169,12 @@ impl StudioApp {
                 if quick_open_requested {
                     filter_response.request_focus();
                 }
-                let filter = self.workspace.editor.file_filter.trim().to_lowercase();
-                if !filter.is_empty() && ui.small_button("Clear").clicked() {
+                if !self.workspace.editor.file_filter.trim().is_empty()
+                    && ui.small_button("Clear").clicked()
+                {
                     self.workspace.editor.file_filter.clear();
                 }
+                let filter = self.workspace.editor.file_filter.trim().to_lowercase();
                 let filtered_count = self.workspace.editor.matching_file_count(&filter);
                 ui.small(format!(
                     "{} of {} files",

@@ -19,7 +19,23 @@ enum UnregistrationConfirmationAction {
 }
 
 impl StudioApp {
-    pub(super) fn draw_workspace_content_panel(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn draw_workspace_content_search(&mut self, ui: &mut egui::Ui) -> String {
+        ui.horizontal_wrapped(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.workspace.content_search)
+                    .desired_width(320.0)
+                    .hint_text("Find a project by ID, role, or version"),
+            );
+            if !self.workspace.content_search.is_empty()
+                && ui.small_button("Clear").clicked()
+            {
+                self.workspace.content_search.clear();
+            }
+        });
+        self.workspace.content_search.trim().to_lowercase()
+    }
+
+    pub(super) fn draw_workspace_content_panel(&mut self, ui: &mut egui::Ui, query: &str) {
         if self.catalog.sources.is_empty() {
             let card_style = ui.style().clone();
             egui::Frame::group(&card_style).show(ui, |ui| {
@@ -56,8 +72,20 @@ impl StudioApp {
         } else {
             ui.heading(format!("Content projects · {}", self.catalog.sources.len()));
             ui.label("Registered authored projects in this workspace. Select a role to validate, edit its dependencies, or manage its Workshop intent.");
+            let mut visible_projects = 0;
             let mut action = None;
-            for content in &self.catalog.sources {
+            for content in self.catalog.sources.iter().filter(|content| {
+                query.is_empty()
+                    || content.id.to_lowercase().contains(query)
+                    || content.kind.to_lowercase().contains(query)
+                    || content
+                        .version
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .contains(query)
+            }) {
+                visible_projects += 1;
                 ui.group(|ui| {
                         ui.horizontal(|ui| {
                             ui.strong(&content.id);
@@ -219,6 +247,13 @@ impl StudioApp {
                         });
                     });
             }
+            ui.small(format!(
+                "Showing {visible_projects} of {} registered projects",
+                self.catalog.sources.len()
+            ));
+            if visible_projects == 0 {
+                ui.weak("No registered content projects match this search.");
+            }
             match action {
                 Some(SourceContentAction::Validate(content)) => {
                     self.validate_source_project(&content);
@@ -279,18 +314,34 @@ impl StudioApp {
         }
     }
 
-    pub(super) fn draw_unregistered_projects_panel(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn draw_unregistered_projects_panel(&mut self, ui: &mut egui::Ui, query: &str) {
         if !self.workspace.root.trim().is_empty() {
-            let has_candidates = !self.workspace.unregistered_projects.candidates.is_empty();
-            if has_candidates {
+            let (has_candidates, adoption_path) = {
+                let candidates = &self.workspace.unregistered_projects.candidates;
+                let matching_candidates = candidates
+                    .iter()
+                    .filter(|candidate| {
+                        query.is_empty()
+                            || candidate.id.to_lowercase().contains(query)
+                            || candidate.kind.to_string().to_lowercase().contains(query)
+                            || candidate
+                                .path
+                                .to_string_lossy()
+                                .to_lowercase()
+                            .contains(query)
+                    })
+                    .collect::<Vec<_>>();
+                let has_candidates = !candidates.is_empty();
+                if !matching_candidates.is_empty() {
                 ui.heading(format!(
-                    "Ready to adopt · {}",
-                    self.workspace.unregistered_projects.candidates.len()
+                        "Ready to adopt · {} of {}",
+                        matching_candidates.len(),
+                        candidates.len()
                 ));
                 ui.weak("Adoption adds a valid project to Vapor discovery. It does not move files, publish anything, or change Cargo membership.");
             }
             let mut adoption_path = None;
-            for candidate in &self.workspace.unregistered_projects.candidates {
+                for candidate in &matching_candidates {
                 let card_style = ui.style().clone();
                 egui::Frame::group(&card_style).show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -320,6 +371,11 @@ impl StudioApp {
                     });
                 });
             }
+                if has_candidates && matching_candidates.is_empty() {
+                    ui.weak("No unregistered projects match this search.");
+                }
+                (has_candidates, adoption_path)
+            };
             if let Some(path) = adoption_path {
                 self.adopt_content_project(path);
             }

@@ -14,13 +14,38 @@ enum PackagepackRoleSelection {
 
 impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
-        page_header(ui, "Author", "Compose", "Build a content package by choosing its compatible projects and versions.");
-        ui.weak("Saving checks the selected content and updates its source manifest through Vapor.");
+        page_header(
+            ui,
+            "Author",
+            "Compose",
+            "Build a content package by choosing its compatible projects and versions.",
+        );
+        ui.weak(
+            "Saving checks the selected content and updates its source manifest through Vapor.",
+        );
         let composition_has_changes = self.authoring.composition_has_unsaved_changes();
 
-        ui.horizontal(|ui| {
+        let source_query = self.authoring.composition_source_search.trim().to_lowercase();
+        let source_match_count = self
+            .catalog
+            .sources
+            .iter()
+            .filter(|content| source_content_matches_query(content, &source_query))
+            .count();
+        ui.horizontal_wrapped(|ui| {
             ui.label("Source project");
             ui.add_enabled_ui(!self.operation.running && !composition_has_changes, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.authoring.composition_source_search)
+                            .desired_width(250.0)
+                            .hint_text("Find a source project"),
+                    );
+                    if !self.authoring.composition_source_search.is_empty()
+                        && ui.small_button("Clear").clicked()
+                    {
+                        self.authoring.composition_source_search.clear();
+                    }
                 egui::ComboBox::from_id_salt("composition-source-project")
                     .selected_text(if self.authoring.composition_edit_selector.is_empty() {
                         "Select content".to_owned()
@@ -28,7 +53,12 @@ impl StudioApp {
                         self.authoring.composition_edit_selector.clone()
                     })
                     .show_ui(ui, |ui| {
-                        for content in &self.catalog.sources {
+                            for content in self
+                                .catalog
+                                .sources
+                                .iter()
+                                .filter(|content| source_content_matches_query(content, &source_query))
+                            {
                             let selector = super::super::source_content_selector(content);
                             if ui
                                 .selectable_label(
@@ -38,12 +68,17 @@ impl StudioApp {
                                 .clicked()
                             {
                                 self.authoring.composition_edit_selector = selector;
+                                    self.authoring.composition_source_search.clear();
                                 self.authoring.composition_edit = None;
                                 self.authoring.composition_original_links = None;
                                 self.authoring.composition_link_candidate.clear();
+                                    self.authoring.composition_link_search.clear();
+                                    self.authoring.packagepack_engine_search.clear();
+                                    self.authoring.packagepack_game_search.clear();
                             }
                         }
                     });
+            });
             });
             if ui
                 .add_enabled(
@@ -57,6 +92,15 @@ impl StudioApp {
                 self.load_source_composition();
             }
         });
+        if !self.catalog.sources.is_empty() {
+            ui.small(format!(
+                "{source_match_count} source project{}",
+                if source_match_count == 1 { "" } else { "s" }
+            ));
+            if source_match_count == 0 {
+                ui.weak("No source projects match this search.");
+            }
+        }
         if composition_has_changes {
             ui.weak("Save or discard this draft before loading another source project.");
         }
@@ -128,6 +172,7 @@ impl StudioApp {
                             "engine-choice",
                             "Engine · required",
                             false,
+                            &mut self.authoring.packagepack_engine_search,
                         );
                         draw_packagepack_role_slot(
                             ui,
@@ -136,6 +181,7 @@ impl StudioApp {
                             "game-choice",
                             "Game · optional",
                             true,
+                            &mut self.authoring.packagepack_game_search,
                         );
                         ui.small("Save validates the complete composition through Vapor before writing its manifest.");
                     });
@@ -171,7 +217,8 @@ impl StudioApp {
                                         )
                                         .changed()
                                     {
-                                        link.version = (!version.trim().is_empty()).then_some(version);
+                                            link.version =
+                                                (!version.trim().is_empty()).then_some(version);
                                     }
                                     ui.checkbox(&mut link.optional, "");
                                     let mut reason = link.reason.clone().unwrap_or_default();
@@ -183,7 +230,8 @@ impl StudioApp {
                                         )
                                         .changed()
                                     {
-                                        link.reason = (!reason.trim().is_empty()).then_some(reason);
+                                            link.reason =
+                                                (!reason.trim().is_empty()).then_some(reason);
                                     }
                                     if ui.small_button("Remove").clicked() {
                                         remove_link = Some(index);
@@ -200,6 +248,37 @@ impl StudioApp {
 
             ui.separator();
             ui.label("Add additional workspace content");
+            ui.horizontal_wrapped(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.authoring.composition_link_search)
+                        .desired_width(320.0)
+                        .hint_text("Find compatible content by ID, role, or version"),
+                );
+                if !self.authoring.composition_link_search.is_empty()
+                    && ui.small_button("Clear").clicked()
+                {
+                    self.authoring.composition_link_search.clear();
+                }
+            });
+            let link_query = self.authoring.composition_link_search.trim().to_lowercase();
+            let compatible_candidates = source_contents
+                .iter()
+                .filter(|content| {
+                    is_additional_composition_dependency(content, composition)
+                        && source_content_matches_query(content, &link_query)
+                })
+                .count();
+            ui.small(format!(
+                "{compatible_candidates} compatible workspace project{}",
+                if compatible_candidates == 1 { "" } else { "s" }
+            ));
+            if compatible_candidates == 0 {
+                ui.weak(if link_query.is_empty() {
+                    "No additional content roles are compatible with this source."
+                } else {
+                    "No compatible workspace content matches this search."
+                });
+            }
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(!operation_running, |ui| {
                     egui::ComboBox::from_id_salt("composition-link-candidate")
@@ -211,6 +290,7 @@ impl StudioApp {
                         .show_ui(ui, |ui| {
                             for content in source_contents.iter().filter(|content| {
                                 is_additional_composition_dependency(content, composition)
+                                    && source_content_matches_query(content, &link_query)
                             }) {
                                 let selector = super::super::source_content_selector(content);
                                 let label = format!(
@@ -251,8 +331,7 @@ impl StudioApp {
                                 content,
                                 &self.authoring.composition_link_candidate,
                             )
-                    })
-                    {
+                    }) {
                         let id = content.id.clone();
                         let relationship = super::super::source_content_kind(&composition.kind)
                             .and_then(|parent| {
@@ -272,7 +351,10 @@ impl StudioApp {
                                 id,
                                 relationship: relationship.to_owned(),
                                 optional: false,
-                                version: content.version.as_ref().map(|version| format!("={version}")),
+                                version: content
+                                    .version
+                                    .as_ref()
+                                    .map(|version| format!("={version}")),
                                 workshop_id: None,
                                 reason: None,
                             });
@@ -411,6 +493,21 @@ fn is_additional_composition_dependency(
     }
 }
 
+fn source_content_matches_query(
+    content: &vapor_studio_core::SourceContent,
+    query: &str,
+) -> bool {
+    query.is_empty()
+        || content.id.to_lowercase().contains(query)
+        || content.kind.to_lowercase().contains(query)
+        || content
+            .version
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains(query)
+}
+
 fn packagepack_relationship_group(relationship: &str) -> Option<&'static str> {
     match relationship {
         "engine" | "enginepack" => Some("engine-choice"),
@@ -426,15 +523,14 @@ fn draw_packagepack_role_slot(
     group: &'static str,
     label: &str,
     optional: bool,
+    search: &mut String,
 ) {
     let packagepack = vapor_core::ContentKind::Packagepack;
     let choices = sources
         .iter()
         .filter_map(|content| {
             let kind = super::super::source_content_kind(&content.kind)?;
-            if vapor_studio_core::source_dependency_choice_group(packagepack, kind)
-                != Some(group)
-            {
+            if vapor_studio_core::source_dependency_choice_group(packagepack, kind) != Some(group) {
                 return None;
             }
             let relationship =
@@ -469,16 +565,18 @@ fn draw_packagepack_role_slot(
             .map(|(selector, _, _, _)| selector.clone())
     });
     let current_id_is_local = current_link.is_some_and(|link| {
-        choices.iter().any(|(selector, _, _, _)| {
-            selector.split('@').next().unwrap_or(selector) == link.id
-        })
+        choices
+            .iter()
+            .any(|(selector, _, _, _)| selector.split('@').next().unwrap_or(selector) == link.id)
     });
     let mut selected = current_link.map_or(PackagepackRoleSelection::Empty, |_| {
         current_choice.map_or_else(
             || {
                 if current_id_is_local
                     && current_link.is_some_and(|link| {
-                        link.version.as_deref().is_none_or(|requirement| requirement == "*")
+                        link.version
+                            .as_deref()
+                            .is_none_or(|requirement| requirement == "*")
                     })
                 {
                     PackagepackRoleSelection::Unpinned
@@ -510,20 +608,60 @@ fn draw_packagepack_role_slot(
         (None, _) => "Choose an Engine".to_owned(),
     };
 
+    let query = search.trim().to_lowercase();
+    let matches_query = |(selector, kind, version, relationship): &(
+        String,
+        String,
+        Option<String>,
+        String,
+    )| {
+        query.is_empty()
+            || selector.to_lowercase().contains(&query)
+            || kind.to_lowercase().contains(&query)
+            || version
+                .as_deref()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains(&query)
+            || relationship.to_lowercase().contains(&query)
+    };
+    let matching_choices = choices.iter().filter(|choice| matches_query(choice)).count();
+
     ui.horizontal_wrapped(|ui| {
+        ui.vertical(|ui| {
         ui.label(label);
+            ui.horizontal_wrapped(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(search)
+                        .desired_width(260.0)
+                        .hint_text(if optional { "Find a Game" } else { "Find an Engine" }),
+                );
+                if !search.is_empty() && ui.small_button("Clear").clicked() {
+                    search.clear();
+                }
+            });
+        });
+        ui.vertical(|ui| {
+            ui.small(format!(
+                "{matching_choices} matching project{}",
+                if matching_choices == 1 { "" } else { "s" }
+            ));
+            if matching_choices == 0 {
+                ui.weak(if query.is_empty() {
+                    "No compatible project is registered yet."
+                } else {
+                    "No compatible projects match this search."
+                });
+            }
+        });
         egui::ComboBox::from_id_salt(("packagepack-role", group))
-            .width(340.0)
+            .width(ui.available_width().min(340.0))
             .selected_text(current_label)
             .show_ui(ui, |ui| {
                 if optional {
-                    ui.selectable_value(
-                        &mut selected,
-                        PackagepackRoleSelection::Empty,
-                        "No Game",
-                    );
+                    ui.selectable_value(&mut selected, PackagepackRoleSelection::Empty, "No Game");
                 }
-                for (selector, kind, version, _) in &choices {
+                for (selector, kind, version, _) in choices.iter().filter(|choice| matches_query(choice)) {
                     ui.selectable_value(
                         &mut selected,
                         PackagepackRoleSelection::Choice(selector.clone()),

@@ -42,7 +42,7 @@ mod workspace_ops;
 use crate::navigation::Section;
 use catalog::{
     CatalogFilter, CatalogState, catalog_content_selector, catalog_content_selector_matches,
-    catalog_matches_filters, content_selector, source_content_kind, source_content_selector,
+    content_selector, source_content_kind, source_content_selector,
     source_content_selector_matches,
 };
 use composition_lifecycle::ProfileCompositionState;
@@ -70,6 +70,9 @@ pub struct StudioApp {
     operation: OperationState,
     diagnostics: vapor_devtools::app::DevtoolsApp,
     directory_picker: Option<DirectoryPicker>,
+    command_palette_open: bool,
+    command_palette_search: String,
+    command_palette_focus_search: bool,
 }
 
 impl StudioApp {
@@ -168,6 +171,9 @@ impl StudioApp {
             operation,
             diagnostics: vapor_devtools::connect(None),
             directory_picker: None,
+            command_palette_open: false,
+            command_palette_search: String::new(),
+            command_palette_focus_search: false,
         };
         app.refresh_registered_sources();
         if play_mode {

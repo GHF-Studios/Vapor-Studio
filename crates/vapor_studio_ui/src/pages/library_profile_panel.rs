@@ -53,7 +53,7 @@ impl StudioApp {
         profile_name: &str,
     ) {
         ui.group(|ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.strong("Profile settings");
                 ui.weak("Name and launch configuration");
             });

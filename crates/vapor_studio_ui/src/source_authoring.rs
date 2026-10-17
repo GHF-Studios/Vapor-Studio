@@ -6,9 +6,13 @@ use vapor_studio_core::{ContentIdentity, OperationKind};
 pub(super) struct AuthoringState {
     pub(super) create: CreateDraft,
     pub(super) composition_edit_selector: String,
+    pub(super) composition_source_search: String,
     pub(super) composition_edit: Option<vapor_studio_core::SourceComposition>,
     pub(super) composition_original_links: Option<Vec<vapor_studio_core::SourceCompositionLink>>,
     pub(super) composition_link_candidate: String,
+    pub(super) composition_link_search: String,
+    pub(super) packagepack_engine_search: String,
+    pub(super) packagepack_game_search: String,
     pub(super) workshop_metadata_edit: Option<vapor_studio_core::SourceWorkshopMetadata>,
     pub(super) manifest_metadata_dirty: bool,
     pub(super) runtime_outputs_edit: Option<vapor_studio_core::SourceRuntimeOutputs>,
@@ -64,9 +68,13 @@ impl Default for AuthoringState {
         Self {
             create: CreateDraft::default(),
             composition_edit_selector: String::new(),
+            composition_source_search: String::new(),
             composition_edit: None,
             composition_original_links: None,
             composition_link_candidate: String::new(),
+            composition_link_search: String::new(),
+            packagepack_engine_search: String::new(),
+            packagepack_game_search: String::new(),
             workshop_metadata_edit: None,
             manifest_metadata_dirty: false,
             runtime_outputs_edit: None,
@@ -93,9 +101,13 @@ impl AuthoringState {
 
     pub(super) fn clear_selected_source(&mut self) {
         self.composition_edit_selector.clear();
+        self.composition_source_search.clear();
         self.composition_edit = None;
         self.composition_original_links = None;
         self.composition_link_candidate.clear();
+        self.composition_link_search.clear();
+        self.packagepack_engine_search.clear();
+        self.packagepack_game_search.clear();
     }
 
     pub(super) fn clear_workspace_context(&mut self) {

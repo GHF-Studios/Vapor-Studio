@@ -29,6 +29,7 @@ pub(super) struct WorkspaceState {
     pub(super) registered_sources: Vec<PathBuf>,
     pub(super) active_source: Option<PathBuf>,
     pub(super) overview_panel: WorkspacePanel,
+    pub(super) content_search: String,
     pub(super) editor: WorkspaceEditorState,
 }
 
@@ -47,10 +48,12 @@ impl WorkspaceState {
             registered_sources: Vec::new(),
             active_source: None,
             overview_panel: WorkspacePanel::default(),
+            content_search: String::new(),
             editor: WorkspaceEditorState::default(),
         }
     }
     pub(super) fn clear_file_context(&mut self) {
+        self.content_search.clear();
         self.editor.clear_context();
     }
 }

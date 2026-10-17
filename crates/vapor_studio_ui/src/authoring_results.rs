@@ -6,6 +6,10 @@ impl StudioApp {
         &mut self,
         composition: vapor_studio_core::SourceComposition,
     ) {
+        self.authoring.composition_link_candidate.clear();
+        self.authoring.composition_link_search.clear();
+        self.authoring.packagepack_engine_search.clear();
+        self.authoring.packagepack_game_search.clear();
         self.authoring.composition_edit_selector = composition
             .version
             .as_deref()
@@ -28,6 +32,10 @@ impl StudioApp {
         composition: vapor_studio_core::SourceComposition,
     ) {
         self.invalidate_workshop_review();
+        self.authoring.composition_link_candidate.clear();
+        self.authoring.composition_link_search.clear();
+        self.authoring.packagepack_engine_search.clear();
+        self.authoring.packagepack_game_search.clear();
         let identity = ContentIdentity {
             id: composition.id.clone(),
             version: composition.version.clone(),
@@ -35,7 +43,8 @@ impl StudioApp {
         self.authoring.composition_original_links = Some(composition.links.clone());
         self.authoring.composition_edit = Some(composition);
         self.invalidate_profiles_for_source_content(&identity);
-        self.status = "Saved the composition. Studio is refreshing its content catalog and plan.".to_owned();
+        self.status =
+            "Saved the composition. Studio is refreshing its content catalog and plan.".to_owned();
     }
 
     pub(super) fn apply_source_workshop_loaded(

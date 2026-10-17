@@ -1,7 +1,7 @@
+use super::catalog::DiscoverTab;
 use super::operation_protocol::OperationResult;
 use super::{StudioApp, catalog_content_selector};
 use crate::navigation::CatalogSourceFilter;
-use super::catalog::DiscoverTab;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -34,6 +34,7 @@ pub(super) struct WorkshopState {
     pub(super) results_query: Option<String>,
     pub(super) subscriptions: std::collections::BTreeSet<String>,
     pub(super) subscriptions_loaded: bool,
+    pub(super) subscription_search_query: String,
     pub(super) subscription_details:
         std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
     pub(super) subscription_poll_interval: Duration,
@@ -59,6 +60,7 @@ impl Default for WorkshopState {
             results_query: None,
             subscriptions: Default::default(),
             subscriptions_loaded: false,
+            subscription_search_query: String::new(),
             subscription_details: Default::default(),
             subscription_poll_interval: WORKSHOP_PROGRESS_POLL_INTERVAL,
             next_subscription_poll: None,
@@ -93,8 +95,7 @@ impl StudioApp {
 
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
         self.catalog.items.iter().any(|content| {
-            super::catalog_content_selector_matches(content, selector)
-                && !content.is_unambiguous()
+            super::catalog_content_selector_matches(content, selector) && !content.is_unambiguous()
         })
     }
 
@@ -189,14 +190,13 @@ impl StudioApp {
         self.workshop.page = page.page;
         self.workshop.total_results = page.total_results;
         self.workshop.results = page.items;
-        if self
+        if self.workshop.focused_result.as_ref().is_none_or(|focused| {
+            !self
             .workshop
-            .focused_result
-            .as_ref()
-            .is_none_or(|focused| {
-                !self.workshop.results.iter().any(|item| &item.published_file_id == focused)
-            })
-        {
+                .results
+                .iter()
+                .any(|item| &item.published_file_id == focused)
+        }) {
             self.workshop.focused_result = self
                 .workshop
                 .results
