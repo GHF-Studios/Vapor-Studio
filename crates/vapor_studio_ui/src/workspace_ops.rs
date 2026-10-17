@@ -165,6 +165,7 @@ impl StudioApp {
         self.profile_composition.clear_context();
         self.invalidate_workshop_review();
         self.workspace.editor.files = workspace_files;
+        self.workspace.editor.rebuild_file_index();
         let restored_editor_drafts = self
             .workspace
             .editor
@@ -265,9 +266,8 @@ impl StudioApp {
 
     pub(super) fn require_saved_workspace(&mut self, action: &str) -> bool {
         if self.authoring.composition_has_unsaved_changes() {
-            self.status = format!(
-                "Save or discard composition dependency changes before you {action}."
-            );
+            self.status =
+                format!("Save or discard composition dependency changes before you {action}.");
             return false;
         }
         if !self.has_unsaved_workspace_edits() {

@@ -25,6 +25,7 @@ pub(super) struct AuthoringState {
 
 pub(super) struct CreateDraft {
     pub(super) details_open: bool,
+    pub(super) dependency_search: String,
     pub(super) content_id: String,
     pub(super) content_version: String,
     pub(super) content_kind: vapor_core::ContentKind,
@@ -42,6 +43,7 @@ impl Default for CreateDraft {
     fn default() -> Self {
         Self {
             details_open: false,
+            dependency_search: String::new(),
             content_id: String::new(),
             content_version: "0.1.0".to_owned(),
             content_kind: vapor_core::ContentKind::Packagepack,
@@ -98,6 +100,7 @@ impl AuthoringState {
 
     pub(super) fn clear_workspace_context(&mut self) {
         self.create.details_open = false;
+        self.create.dependency_search.clear();
         self.create.dependencies.clear();
         self.clear_selected_source();
         self.workshop_metadata_edit = None;
@@ -136,7 +139,8 @@ impl StudioApp {
         };
         composition.links = original_links;
         self.authoring.composition_link_candidate.clear();
-        self.status = "Discarded unsaved dependency changes. The saved composition is unchanged.".to_owned();
+        self.status =
+            "Discarded unsaved dependency changes. The saved composition is unchanged.".to_owned();
     }
 
     pub(super) fn load_source_composition(&mut self) {
@@ -268,7 +272,8 @@ impl StudioApp {
 
     pub(super) fn save_source_runtime_outputs(&mut self) {
         if self.authoring.composition_has_unsaved_changes() {
-            self.status = "Save or discard dependency changes before saving runtime outputs.".to_owned();
+            self.status =
+                "Save or discard dependency changes before saving runtime outputs.".to_owned();
             return;
         }
         if !self.require_open_workspace_for_authoring_save("save runtime output declarations") {
@@ -350,7 +355,8 @@ impl StudioApp {
 
     pub(super) fn save_source_workshop_metadata(&mut self) {
         if self.authoring.composition_has_unsaved_changes() {
-            self.status = "Save or discard dependency changes before saving Workshop metadata.".to_owned();
+            self.status =
+                "Save or discard dependency changes before saving Workshop metadata.".to_owned();
             return;
         }
         if !self.require_open_workspace_for_authoring_save("save Workshop metadata") {

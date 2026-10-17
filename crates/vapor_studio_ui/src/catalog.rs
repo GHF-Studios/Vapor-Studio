@@ -216,10 +216,12 @@ pub(crate) fn catalog_content_selector_matches(
 
 fn content_selector_matches(id: &str, version: Option<&str>, selector: &str) -> bool {
     match version {
-        Some(version) => selector
-            .strip_prefix(id)
-            .and_then(|remainder| remainder.strip_prefix('@'))
-            == Some(version),
+        Some(version) => {
+            selector
+                .strip_prefix(id)
+                .and_then(|remainder| remainder.strip_prefix('@'))
+                == Some(version)
+        }
         None => selector == id,
     }
 }
@@ -239,71 +241,104 @@ pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {
     })
 }
 
+#[derive(Clone)]
+pub(super) struct CatalogFilter {
+    source: CatalogSourceFilter,
+    kind: Option<String>,
+    query: String,
+}
+
+pub(super) fn catalog_location_label(
+    location: &vapor_studio_core::CatalogLocation,
+) -> &'static str {
+    match location.kind {
+        vapor_studio_core::CatalogLocationKind::Workspace => "Workspace",
+        vapor_studio_core::CatalogLocationKind::Cache => "Vapor cache",
+        vapor_studio_core::CatalogLocationKind::Installed if location.enabled => "Installed",
+        vapor_studio_core::CatalogLocationKind::Installed => "Installed · disabled",
+    }
+}
+
+impl CatalogFilter {
+    pub(super) fn new(source: CatalogSourceFilter, kind: Option<String>, query: &str) -> Self {
+        Self {
+            source,
+            kind,
+            query: query.trim().to_lowercase(),
+        }
+    }
+
+    pub(super) fn matches_catalog(&self, content: &vapor_studio_core::CatalogContent) -> bool {
+        let source_matches =
+            match self.source {
+                CatalogSourceFilter::All => true,
+                CatalogSourceFilter::Workspace => content.locations.iter().any(|location| {
+                    location.kind == vapor_studio_core::CatalogLocationKind::Workspace
+                }),
+                CatalogSourceFilter::Cache => content
+                    .locations
+                    .iter()
+                    .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Cache),
+                CatalogSourceFilter::Installed => content.locations.iter().any(|location| {
+                    location.kind == vapor_studio_core::CatalogLocationKind::Installed
+                }),
+                CatalogSourceFilter::Workshop => content.published_file_id.is_some(),
+            };
+        if !source_matches
+            || self
+                .kind
+                .as_deref()
+                .is_some_and(|kind| content.kind != kind)
+        {
+            return false;
+        }
+        self.query.is_empty()
+            || content.id.to_lowercase().contains(&self.query)
+            || content.kind.to_lowercase().contains(&self.query)
+            || content
+                .version
+                .as_deref()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains(&self.query)
+            || content
+                .published_file_id
+                .as_deref()
+                .unwrap_or_default()
+                .contains(&self.query)
+    }
+
+    pub(super) fn matches_workspace(
+        &self,
+        candidate: &vapor_studio_core::UnregisteredProjectCandidate,
+    ) -> bool {
+        if !matches!(
+            self.source,
+            CatalogSourceFilter::All | CatalogSourceFilter::Workspace
+        ) {
+            return false;
+        }
+        let kind = candidate.kind.to_string();
+        if self.kind.as_deref().is_some_and(|filter| filter != kind) {
+            return false;
+        }
+        self.query.is_empty()
+            || candidate.id.to_lowercase().contains(&self.query)
+            || kind.to_lowercase().contains(&self.query)
+            || candidate
+                .path
+                .to_string_lossy()
+                .to_lowercase()
+                .contains(&self.query)
+    }
+}
+
 pub(super) fn catalog_matches_filters(
     content: &vapor_studio_core::CatalogContent,
     source_filter: CatalogSourceFilter,
     kind_filter: Option<&str>,
     query: &str,
 ) -> bool {
-    let source_matches = match source_filter {
-        CatalogSourceFilter::All => true,
-        CatalogSourceFilter::Workspace => content
-            .locations
-            .iter()
-            .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace),
-        CatalogSourceFilter::Cache => content
-            .locations
-            .iter()
-            .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Cache),
-        CatalogSourceFilter::Installed => content
-            .locations
-            .iter()
-            .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Installed),
-        CatalogSourceFilter::Workshop => content.published_file_id.is_some(),
-    };
-    if !source_matches || kind_filter.is_some_and(|kind| content.kind != kind) {
-        return false;
-    }
-    let query = query.trim().to_lowercase();
-    query.is_empty()
-        || content.id.to_lowercase().contains(&query)
-        || content.kind.to_lowercase().contains(&query)
-        || content
-            .version
-            .as_deref()
-            .unwrap_or_default()
-            .to_lowercase()
-            .contains(&query)
-        || content
-            .published_file_id
-            .as_deref()
-            .unwrap_or_default()
-            .contains(&query)
-}
-
-pub(super) fn workspace_candidate_matches_filters(
-    candidate: &vapor_studio_core::UnregisteredProjectCandidate,
-    source_filter: CatalogSourceFilter,
-    kind_filter: Option<&str>,
-    query: &str,
-) -> bool {
-    if !matches!(
-        source_filter,
-        CatalogSourceFilter::All | CatalogSourceFilter::Workspace
-    ) {
-        return false;
-    }
-    let kind = candidate.kind.to_string();
-    if kind_filter.is_some_and(|filter| filter != kind) {
-        return false;
-    }
-    let query = query.trim().to_lowercase();
-    query.is_empty()
-        || candidate.id.to_lowercase().contains(&query)
-        || kind.to_lowercase().contains(&query)
-        || candidate
-            .path
-            .to_string_lossy()
-            .to_lowercase()
-            .contains(&query)
+    CatalogFilter::new(source_filter, kind_filter.map(str::to_owned), query)
+        .matches_catalog(content)
 }

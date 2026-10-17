@@ -1,12 +1,17 @@
 use super::super::catalog::DiscoverTab;
 use super::super::components::design::{empty_state, page_header, section_header};
-use super::super::{StudioApp, catalog_matches_filters};
+use super::super::{CatalogFilter, StudioApp};
 use crate::navigation::CatalogSourceFilter;
 use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_discover(&mut self, ui: &mut egui::Ui) {
-        page_header(ui, "Content", "Discover", "Browse content on this device or find packages in Steam Workshop.");
+        page_header(
+            ui,
+            "Content",
+            "Discover",
+            "Browse content on this device or find packages in Steam Workshop.",
+        );
         ui.horizontal(|ui| {
             ui.add(egui::Button::selectable(
                 self.catalog.discover_tab == DiscoverTab::Local,
@@ -67,22 +72,30 @@ impl StudioApp {
             {
                 self.discover();
             }
+            if (!self.catalog.search_query.trim().is_empty()
+                || self.catalog.source_filter != CatalogSourceFilter::All
+                || self.catalog.kind_filter.is_some())
+                && ui.button("Clear filters").clicked()
+            {
+                self.catalog.search_query.clear();
+                self.catalog.source_filter = CatalogSourceFilter::All;
+                self.catalog.kind_filter = None;
+            }
         });
+        let filter = CatalogFilter::new(
+            self.catalog.source_filter,
+            self.catalog.kind_filter.clone(),
+            &self.catalog.search_query,
+        );
         let selected_identity = self.catalog.selected.as_deref();
         let mut matching_catalog_items = 0;
         let mut selected_exists = false;
         let mut selected_is_visible = false;
         for content in &self.catalog.items {
-            let is_selected = selected_identity
-                .is_some_and(|identity| {
-                    super::super::catalog_content_selector_matches(content, identity)
-                });
-            let matches_filters = catalog_matches_filters(
-                content,
-                self.catalog.source_filter,
-                self.catalog.kind_filter.as_deref(),
-                &self.catalog.search_query,
-            );
+            let is_selected = selected_identity.is_some_and(|identity| {
+                super::super::catalog_content_selector_matches(content, identity)
+            });
+            let matches_filters = filter.matches_catalog(content);
             if matches_filters {
                 matching_catalog_items += 1;
             }
@@ -96,14 +109,7 @@ impl StudioApp {
             .unregistered_projects
             .candidates
             .iter()
-            .filter(|candidate| {
-                super::super::catalog::workspace_candidate_matches_filters(
-                    candidate,
-                    self.catalog.source_filter,
-                    self.catalog.kind_filter.as_deref(),
-                    &self.catalog.search_query,
-                )
-            })
+            .filter(|candidate| filter.matches_workspace(candidate))
             .count();
         ui.horizontal(|ui| {
             ui.weak(format!(
@@ -158,19 +164,27 @@ impl StudioApp {
         }
         let selected_is_hidden = selected_exists && !selected_is_visible;
         if ui.available_width() < 820.0 {
-            section_header(ui, "Available content", "Local sources and authored projects in the active workspace.");
-            self.draw_workspace_candidates(ui);
-            self.draw_catalog_list(ui);
+            section_header(
+                ui,
+                "Available content",
+                "Local sources and authored projects in the active workspace.",
+            );
+            self.draw_workspace_candidates(ui, &filter);
+            self.draw_catalog_list(ui, &filter);
             ui.separator();
-            section_header(ui, "Details", "Select a content version to review its source, dependencies, and available actions.");
+            section_header(
+                ui,
+                "Details",
+                "Select a content version to review its source, dependencies, and available actions.",
+            );
             self.draw_selected_content_detail(ui, selected_is_visible, selected_is_hidden);
         } else {
             ui.columns(2, |columns| {
                 columns[0].set_min_width(360.0);
                 section_header(&mut columns[0], "Available content", "Local sources and authored projects in the active workspace.");
                 egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
-                    self.draw_workspace_candidates(ui);
-                    self.draw_catalog_list(ui);
+                    self.draw_workspace_candidates(ui, &filter);
+                    self.draw_catalog_list(ui, &filter);
                 });
 
                 columns[1].set_min_width(360.0);
@@ -204,7 +218,9 @@ impl StudioApp {
             empty_state(
                 ui,
                 "Selected content is filtered out",
-                &format!("{selected} is still selected, but the current search or filters hide it."),
+                &format!(
+                    "{selected} is still selected, but the current search or filters hide it."
+                ),
                 |ui| {
                     if ui.button("Clear search and filters").clicked() {
                         self.catalog.search_query.clear();

@@ -16,6 +16,7 @@ impl StudioApp {
         self.invalidate_workshop_review();
         self.authoring.create.reset();
         self.workspace.editor.files = files;
+        self.workspace.editor.rebuild_file_index();
         self.workspace.editor.selected_file = Some(manifest.clone());
         self.workspace.editor.files_open = true;
         self.workspace.editor.documents.insert(
@@ -108,8 +109,8 @@ impl StudioApp {
             return;
         }
         if self.authoring.create.is_dirty() {
-            self.status = "Discard the Create draft before creating and opening a new workspace."
-                .to_owned();
+            self.status =
+                "Discard the Create draft before creating and opening a new workspace.".to_owned();
             return;
         }
         let location = PathBuf::from(self.workspace.starter_path.trim());
@@ -132,7 +133,9 @@ impl StudioApp {
                 .last()
                 .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
         {
-            self.status = "Workspace name must use lowercase letters, digits, and internal hyphens.".to_owned();
+            self.status =
+                "Workspace name must use lowercase letters, digits, and internal hyphens."
+                    .to_owned();
             return;
         }
         let destination = location.join(&name);

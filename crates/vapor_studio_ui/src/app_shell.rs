@@ -1,6 +1,6 @@
-use super::{Section, StudioApp};
 use super::components::design::{ACCENT, MUTED_TEXT};
 use super::directory_picker::{DirectoryPickerPurpose, DirectoryPickerResult};
+use super::{Section, StudioApp};
 use eframe::egui;
 use vapor_studio_core::{CURRENT_SCHEMA_VERSION, ProfileDocument};
 
@@ -25,9 +25,22 @@ impl StudioApp {
     }
 
     fn select_navigation_section(&mut self, ui: &mut egui::Ui, section: Section) {
+        let label = match section {
+            Section::Create if self.authoring.create.is_dirty() => "Create · draft",
+            Section::Workspace if self.has_unsaved_workspace_edits() => "Workspace · unsaved",
+            Section::Compose if self.authoring.composition_has_unsaved_changes() => {
+                "Compose · unsaved"
+            }
+            Section::Publish
+                if self.workshop.preview.is_some() || self.root_publishing.preview.is_some() =>
+            {
+                "Publish · review ready"
+            }
+            _ => section.label(),
+        };
         let response = ui.add_sized(
             [ui.available_width(), 32.0],
-            egui::Button::selectable(self.section == section, section.label()),
+            egui::Button::selectable(self.section == section, label),
         );
         if response.clicked() {
             self.section = section;
@@ -53,23 +66,48 @@ impl StudioApp {
         ui.add_space(14.0);
         self.select_navigation_section(ui, Section::Home);
         ui.add_space(12.0);
-        ui.label(egui::RichText::new("PLAY").small().strong().color(MUTED_TEXT));
+        ui.label(
+            egui::RichText::new("PLAY")
+                .small()
+                .strong()
+                .color(MUTED_TEXT),
+        );
         self.select_navigation_section(ui, Section::Library);
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("EXPLORE").small().strong().color(MUTED_TEXT));
+        ui.label(
+            egui::RichText::new("EXPLORE")
+                .small()
+                .strong()
+                .color(MUTED_TEXT),
+        );
         self.select_navigation_section(ui, Section::Discover);
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("CREATE").small().strong().color(MUTED_TEXT));
+        ui.label(
+            egui::RichText::new("CREATE")
+                .small()
+                .strong()
+                .color(MUTED_TEXT),
+        );
         self.select_navigation_section(ui, Section::Create);
         self.select_navigation_section(ui, Section::Workspace);
         self.select_navigation_section(ui, Section::Compose);
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("SHARE").small().strong().color(MUTED_TEXT));
+        ui.label(
+            egui::RichText::new("SHARE")
+                .small()
+                .strong()
+                .color(MUTED_TEXT),
+        );
         self.select_navigation_section(ui, Section::Publish);
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
             ui.small("Vapor Studio");
             self.select_navigation_section(ui, Section::Diagnostics);
-            ui.label(egui::RichText::new("TOOLS").small().strong().color(MUTED_TEXT));
+            ui.label(
+                egui::RichText::new("TOOLS")
+                    .small()
+                    .strong()
+                    .color(MUTED_TEXT),
+            );
             ui.separator();
             let workspace_name = if self.workspace.root.trim().is_empty() {
                 "No workspace open".to_owned()
@@ -82,7 +120,12 @@ impl StudioApp {
             };
             let style = ui.style().clone();
             egui::Frame::group(&style).show(ui, |ui| {
-                ui.label(egui::RichText::new("CURRENT WORKSPACE").small().strong().color(MUTED_TEXT));
+                ui.label(
+                    egui::RichText::new("CURRENT WORKSPACE")
+                        .small()
+                        .strong()
+                        .color(MUTED_TEXT),
+                );
                 ui.label(egui::RichText::new(workspace_name).strong());
                 if !self.workspace.root.trim().is_empty() {
                     ui.small(&self.workspace.root);
@@ -92,7 +135,14 @@ impl StudioApp {
                 } else if !self.workspace.root.trim().is_empty() {
                     ui.weak("Workspace open");
                 }
-                if ui.button(if self.workspace.root.trim().is_empty() { "Open workspace" } else { "Manage workspace" }).clicked() {
+                if ui
+                    .button(if self.workspace.root.trim().is_empty() {
+                        "Open workspace"
+                    } else {
+                        "Manage workspace"
+                    })
+                    .clicked()
+                {
                     self.section = Section::Workspace;
                 }
             });
@@ -175,9 +225,8 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_operation();
-        let quick_open_requested = ui.input(|input| {
-            input.modifiers.command && input.key_pressed(egui::Key::P)
-        });
+        let quick_open_requested =
+            ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::P));
         if quick_open_requested && !self.operation.running {
             self.section = Section::Workspace;
             if self.workspace.root.trim().is_empty() {

@@ -14,11 +14,112 @@ use vapor_studio_core::OperationKind;
 pub(super) struct WorkspaceEditorState {
     pub(super) new_file_path: String,
     pub(super) files: Vec<PathBuf>,
+    file_search_keys: Vec<String>,
+    pub(super) file_tree: WorkspaceTreeNode,
     pub(super) file_filter: String,
     pub(super) selected_file: Option<PathBuf>,
     pub(super) documents: BTreeMap<PathBuf, WorkspaceDocument>,
     pub(super) draft_recovery: Option<String>,
     pub(super) files_open: bool,
+}
+
+#[derive(Default)]
+pub(super) struct WorkspaceTreeNode {
+    pub(super) entries: BTreeMap<String, WorkspaceTreeChild>,
+}
+
+pub(super) enum WorkspaceTreeChild {
+    Directory(WorkspaceTreeNode),
+    File(usize),
+}
+
+impl WorkspaceTreeNode {
+    fn insert(&mut self, path: &Path, index: usize) {
+        let parts = path
+            .components()
+            .filter_map(|component| match component {
+                std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        self.insert_parts(&parts, index);
+    }
+
+    fn insert_parts(&mut self, parts: &[String], index: usize) {
+        let Some((name, rest)) = parts.split_first() else {
+            return;
+        };
+        if rest.is_empty() {
+            self.entries
+                .insert(name.clone(), WorkspaceTreeChild::File(index));
+            return;
+        }
+        let entry = self
+            .entries
+            .entry(name.clone())
+            .or_insert_with(|| WorkspaceTreeChild::Directory(Self::default()));
+        if let WorkspaceTreeChild::Directory(child) = entry {
+            child.insert_parts(rest, index);
+        }
+    }
+
+    pub(super) fn rebuild(files: &[PathBuf]) -> (Self, Vec<String>) {
+        let mut tree = Self::default();
+        let mut search_keys = Vec::with_capacity(files.len());
+        for (index, path) in files.iter().enumerate() {
+            search_keys.push(path.to_string_lossy().to_lowercase());
+            tree.insert(path, index);
+        }
+        (tree, search_keys)
+    }
+
+    pub(super) fn matching_file_count(&self, search_keys: &[String], filter: &str) -> usize {
+        self.entries
+            .values()
+            .map(|entry| match entry {
+                WorkspaceTreeChild::Directory(directory) => {
+                    directory.matching_file_count(search_keys, filter)
+                }
+                WorkspaceTreeChild::File(index) => usize::from(
+                    filter.is_empty()
+                        || search_keys
+                            .get(*index)
+                            .is_some_and(|key| key.contains(filter)),
+                ),
+            })
+            .sum()
+    }
+
+    pub(super) fn contains_matching_file(&self, search_keys: &[String], filter: &str) -> bool {
+        self.entries.values().any(|entry| match entry {
+            WorkspaceTreeChild::Directory(directory) => {
+                directory.contains_matching_file(search_keys, filter)
+            }
+            WorkspaceTreeChild::File(index) => {
+                filter.is_empty()
+                    || search_keys
+                        .get(*index)
+                        .is_some_and(|key| key.contains(filter))
+            }
+        })
+    }
+}
+
+impl WorkspaceEditorState {
+    pub(super) fn rebuild_file_index(&mut self) {
+        let (tree, search_keys) = WorkspaceTreeNode::rebuild(&self.files);
+        self.file_tree = tree;
+        self.file_search_keys = search_keys;
+    }
+
+    pub(super) fn file_search_keys(&self) -> &[String] {
+        &self.file_search_keys
+    }
+
+    pub(super) fn matching_file_count(&self, filter: &str) -> usize {
+        self.file_tree
+            .matching_file_count(&self.file_search_keys, filter)
+    }
 }
 
 #[derive(Clone)]
@@ -61,12 +162,12 @@ impl WorkspaceDocument {
         self.toml_diagnostic = (name == "Vapor.toml"
             || name.ends_with(".vapor.toml")
             || name == "Cargo.toml")
-        .then(|| {
-            self.contents
-                .parse::<toml::Value>()
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        });
+            .then(|| {
+                self.contents
+                    .parse::<toml::Value>()
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            });
     }
 
     pub(super) fn is_dirty(&self) -> bool {
@@ -174,6 +275,8 @@ impl WorkspaceEditorState {
 
     pub(super) fn clear_context(&mut self) {
         self.files.clear();
+        self.file_search_keys.clear();
+        self.file_tree = WorkspaceTreeNode::default();
         self.file_filter.clear();
         self.selected_file = None;
         self.documents.clear();
@@ -195,6 +298,7 @@ impl StudioApp {
 
     pub(super) fn apply_workspace_files(&mut self, files: Vec<PathBuf>) {
         self.workspace.editor.files = files;
+        self.workspace.editor.rebuild_file_index();
         let restored = self
             .workspace
             .editor
@@ -216,13 +320,14 @@ impl StudioApp {
         if !self.workspace.editor.files.contains(&path) {
             self.workspace.editor.files.push(path.clone());
             self.workspace.editor.files.sort();
+            self.workspace.editor.rebuild_file_index();
         }
         self.workspace.editor.selected_file = Some(path.clone());
         self.workspace.editor.files_open = true;
-        self.workspace.editor.documents.insert(
-            path.clone(),
-            WorkspaceDocument::new(&path, String::new()),
-        );
+        self.workspace
+            .editor
+            .documents
+            .insert(path.clone(), WorkspaceDocument::new(&path, String::new()));
         self.workspace.editor.new_file_path.clear();
         self.status = format!("Created {}.", path.display());
     }
@@ -230,10 +335,10 @@ impl StudioApp {
     pub(super) fn apply_workspace_file_opened(&mut self, path: PathBuf, contents: String) {
         self.workspace.editor.selected_file = Some(path.clone());
         self.workspace.editor.files_open = true;
-        self.workspace.editor.documents.insert(
-            path.clone(),
-            WorkspaceDocument::new(&path, contents),
-        );
+        self.workspace
+            .editor
+            .documents
+            .insert(path.clone(), WorkspaceDocument::new(&path, contents));
         self.status = "Opened workspace file.".to_owned();
     }
 

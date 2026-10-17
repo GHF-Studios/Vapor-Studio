@@ -1,16 +1,7 @@
 use super::super::StudioApp;
+use super::super::workspace_editor::{WorkspaceTreeChild, WorkspaceTreeNode};
 use eframe::egui;
-use std::{collections::BTreeMap, path::PathBuf};
-
-#[derive(Default)]
-struct WorkspaceTreeNode<'a> {
-    entries: BTreeMap<String, WorkspaceTreeChild<'a>>,
-}
-
-enum WorkspaceTreeChild<'a> {
-    Directory(WorkspaceTreeNode<'a>),
-    File(&'a std::path::Path),
-}
+use std::path::PathBuf;
 
 impl StudioApp {
     pub(super) fn draw_workspace_files_panel(&mut self, ui: &mut egui::Ui) {
@@ -20,9 +11,8 @@ impl StudioApp {
         let save_all_shortcut = ui.input(|input| {
             input.modifiers.command && input.modifiers.shift && input.key_pressed(egui::Key::S)
         });
-        let quick_open_requested = ui.input(|input| {
-            input.modifiers.command && input.key_pressed(egui::Key::P)
-        });
+        let quick_open_requested =
+            ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::P));
         let dirty_count = self
             .workspace
             .editor
@@ -180,27 +170,20 @@ impl StudioApp {
                     filter_response.request_focus();
                 }
                 let filter = self.workspace.editor.file_filter.trim().to_lowercase();
-                let filtered_files = self
-                    .workspace
-                    .editor
-                    .files
-                    .iter()
-                    .filter(|path| {
-                        filter.is_empty()
-                            || path.to_string_lossy().to_lowercase().contains(&filter)
-                    })
-                    .collect::<Vec<_>>();
+                if !filter.is_empty() && ui.small_button("Clear").clicked() {
+                    self.workspace.editor.file_filter.clear();
+                }
+                let filtered_count = self.workspace.editor.matching_file_count(&filter);
                 ui.small(format!(
                     "{} of {} files",
-                    filtered_files.len(),
+                    filtered_count,
                     self.workspace.editor.files.len()
                 ));
                 let enter_opens_match = filter_response.lost_focus()
                     && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                    && filtered_files.len() == 1;
-                let tree = workspace_tree(filtered_files.iter().map(|path| path.as_path()));
+                    && filtered_count == 1;
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    if tree.entries.is_empty() {
+                    if filtered_count == 0 {
                         ui.weak(if filter.is_empty() {
                             "No visible files in this workspace."
                         } else {
@@ -209,7 +192,10 @@ impl StudioApp {
                     } else {
                         draw_workspace_tree(
                             ui,
-                            &tree,
+                            &self.workspace.editor.file_tree,
+                            &self.workspace.editor.files,
+                            self.workspace.editor.file_search_keys(),
+                            &filter,
                             self.workspace.editor.selected_file.as_ref(),
                             !self.operation.running && !self.authoring.manifest_metadata_dirty,
                             &PathBuf::new(),
@@ -219,9 +205,15 @@ impl StudioApp {
                     }
                 });
                 if enter_opens_match {
-                    open_file = filtered_files
-                        .first()
-                        .map(|path| path.as_path().to_path_buf());
+                    open_file = self
+                        .workspace
+                        .editor
+                        .files
+                        .iter()
+                        .zip(self.workspace.editor.file_search_keys())
+                        .find_map(|(path, key)| {
+                            (filter.is_empty() || key.contains(&filter)).then(|| path.clone())
+                        });
                 }
             });
         if let Some(path) = open_file {
@@ -257,10 +249,13 @@ impl StudioApp {
                     ui.label(format!("{} file", workspace_file_kind(path)));
                     ui.label(format!(
                         "{} lines · {} characters",
-                        active_line_count,
-                        active_character_count
+                        active_line_count, active_character_count
                     ));
-                    ui.label(if active_dirty { "Unsaved changes" } else { "Saved" });
+                    ui.label(if active_dirty {
+                        "Unsaved changes"
+                    } else {
+                        "Saved"
+                    });
                     if let Some(diagnostic) = &diagnostic {
                         match diagnostic {
                             Ok(()) => {
@@ -313,46 +308,12 @@ impl StudioApp {
     }
 }
 
-fn workspace_tree<'a>(files: impl IntoIterator<Item = &'a std::path::Path>) -> WorkspaceTreeNode<'a> {
-    let mut root = WorkspaceTreeNode::default();
-    for file in files {
-        let components = file
-            .components()
-            .filter_map(|component| match component {
-                std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        insert_workspace_tree_entry(&mut root, &components, file);
-    }
-    root
-}
-
-fn insert_workspace_tree_entry<'a>(
-    node: &mut WorkspaceTreeNode<'a>,
-    parts: &[String],
-    path: &'a std::path::Path,
-) {
-    let Some((name, rest)) = parts.split_first() else {
-        return;
-    };
-    if rest.is_empty() {
-        node.entries
-            .insert(name.clone(), WorkspaceTreeChild::File(path));
-        return;
-    }
-    let entry = node
-        .entries
-        .entry(name.clone())
-        .or_insert_with(|| WorkspaceTreeChild::Directory(WorkspaceTreeNode::default()));
-    if let WorkspaceTreeChild::Directory(child) = entry {
-        insert_workspace_tree_entry(child, rest, path);
-    }
-}
-
 fn draw_workspace_tree(
     ui: &mut egui::Ui,
-    node: &WorkspaceTreeNode<'_>,
+    node: &WorkspaceTreeNode,
+    files: &[PathBuf],
+    search_keys: &[String],
+    filter: &str,
     selected: Option<&PathBuf>,
     enabled: bool,
     parent_path: &std::path::Path,
@@ -362,14 +323,20 @@ fn draw_workspace_tree(
     for (name, child) in &node.entries {
         match child {
             WorkspaceTreeChild::Directory(directory) => {
+                if !filter.is_empty() && !directory.contains_matching_file(search_keys, filter) {
+                    continue;
+                }
                 let directory_path = parent_path.join(name);
                 let _ = egui::CollapsingHeader::new(name)
-                    .id_salt(("workspace-tree", &directory_path))
-                    .default_open(depth == 0)
+                    .id_salt(("workspace-tree", &directory_path, !filter.is_empty()))
+                    .default_open(depth == 0 || !filter.is_empty())
                     .show(ui, |ui| {
                         draw_workspace_tree(
                             ui,
                             directory,
+                            files,
+                            search_keys,
+                            filter,
                             selected,
                             enabled,
                             &directory_path,
@@ -378,10 +345,23 @@ fn draw_workspace_tree(
                         )
                     });
             }
-            WorkspaceTreeChild::File(path) => {
+            WorkspaceTreeChild::File(index) => {
+                let Some(path) = files.get(*index) else {
+                    continue;
+                };
+                if !filter.is_empty()
+                    && !search_keys
+                        .get(*index)
+                        .is_some_and(|key| key.contains(filter))
+                {
+                    continue;
+                }
                 let response = ui.add_enabled(
                     enabled,
-                    egui::Button::selectable(selected.is_some_and(|selected| selected == *path), name),
+                    egui::Button::selectable(
+                        selected.is_some_and(|selected| selected == path),
+                        name,
+                    ),
                 );
                 if response.clicked() {
                     *open_file = Some(path.to_path_buf());

@@ -1,38 +1,48 @@
 use super::super::StudioApp;
-use super::super::content_selector;
 use super::super::components::design::{installation_status, status_text};
 use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_profile_selector_panel(&mut self, ui: &mut eframe::egui::Ui) {
+        let can_switch = !self.operation.running && !self.has_unsaved_context_switch_edits();
+        let card_style = ui.style().clone();
+        let mut requested_profile = None;
         egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
             for index in 0..self.profile.items.len() {
                 let profile = &self.profile.items[index];
-                let name = profile.name.clone();
-                let root = profile
-                    .root_package
-                    .as_ref()
-                    .map(content_selector)
-                    .unwrap_or_else(|| "No composition selected".to_owned());
                 let (status, tone) = installation_status(&profile.installation);
                 let selected = index == self.profile.active_index;
-                let style = ui.style().clone();
-                egui::Frame::group(&style).show(ui, |ui| {
+                egui::Frame::group(&card_style).show(ui, |ui| {
                     let response = ui.add_enabled(
-                        !self.operation.running && !self.has_unsaved_context_switch_edits(),
-                        egui::Button::selectable(selected, egui::RichText::new(name).strong()),
+                        can_switch,
+                        egui::Button::selectable(
+                            selected,
+                            egui::RichText::new(&profile.name).strong(),
+                        ),
                     );
                     if response
                         .on_disabled_hover_text("Discard the Create draft or save/discard workspace edits before switching profiles.")
                         .clicked()
                     {
-                        self.select_profile(index);
+                        requested_profile = Some(index);
                     }
-                    ui.label(root);
+                    if let Some(root) = &profile.root_package {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(&root.id);
+                            if let Some(version) = &root.version {
+                                ui.weak(version);
+                            }
+                        });
+                    } else {
+                        ui.weak("No composition selected");
+                    }
                     status_text(ui, status, tone);
                 });
             }
         });
+        if let Some(index) = requested_profile {
+            self.select_profile(index);
+        }
     }
 }
 

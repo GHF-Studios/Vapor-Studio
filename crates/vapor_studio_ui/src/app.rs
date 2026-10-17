@@ -41,7 +41,7 @@ mod workspace_ops;
 
 use crate::navigation::Section;
 use catalog::{
-    CatalogState, catalog_content_selector, catalog_content_selector_matches,
+    CatalogFilter, CatalogState, catalog_content_selector, catalog_content_selector_matches,
     catalog_matches_filters, content_selector, source_content_kind, source_content_selector,
     source_content_selector_matches,
 };
@@ -209,12 +209,15 @@ fn configure_studio_visuals(context: &egui::Context) {
     style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.interact_size.y = 30.0;
     style.spacing.indent = 18.0;
-    style.text_styles.insert(
-        egui::TextStyle::Heading,
-        egui::FontId::proportional(24.0),
-    );
-    style.text_styles.insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
-    style.text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Heading, egui::FontId::proportional(24.0));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
     context.set_style_of(egui::Theme::Dark, style);
     context.set_visuals(visuals);
 }

@@ -13,20 +13,15 @@ impl StudioApp {
     pub(in crate::app) fn draw_content_detail(&mut self, ui: &mut egui::Ui) {
         let mut action = None;
         if let Some(identity) = self.catalog.selected.as_ref() {
-            if let Some(content) = self
-                .catalog
-                .items
-                .iter()
-                .find(|content| {
-                    super::super::catalog_content_selector_matches(content, identity)
-                        && super::super::catalog_matches_filters(
-                            content,
-                            self.catalog.source_filter,
-                            self.catalog.kind_filter.as_deref(),
-                            &self.catalog.search_query,
-                        )
-                })
-            {
+            if let Some(content) = self.catalog.items.iter().find(|content| {
+                super::super::catalog_content_selector_matches(content, identity)
+                    && super::super::catalog_matches_filters(
+                        content,
+                        self.catalog.source_filter,
+                        self.catalog.kind_filter.as_deref(),
+                        &self.catalog.search_query,
+                    )
+            }) {
                 ui.heading("Content details");
                 ui.label(format!(
                     "{} · {} · {}",
@@ -36,51 +31,31 @@ impl StudioApp {
                 ));
                 if !content.is_unambiguous() {
                     ui.colored_label(egui::Color32::YELLOW, "Local copies disagree. Review the source details before using or publishing this content.");
-                    egui::CollapsingHeader::new("Conflicting source details")
-                        .show(ui, |ui| {
-                            for conflict in &content.conflicts {
-                                ui.small(format!(
-                                    "{} differs: '{}' at {} · '{}' at {}",
-                                    conflict.field,
-                                    conflict.first_value,
-                                    conflict.first_location.display(),
-                                    conflict.conflicting_value,
-                                    conflict.conflicting_location.display(),
-                                ));
-                            }
-                        });
-                }
-                let available_sources = content
-                    .locations
-                    .iter()
-                    .map(|location| match location.kind {
-                        vapor_studio_core::CatalogLocationKind::Workspace => "Workspace",
-                        vapor_studio_core::CatalogLocationKind::Cache => "Vapor cache",
-                        vapor_studio_core::CatalogLocationKind::Installed if location.enabled => {
-                            "Installed"
+                    egui::CollapsingHeader::new("Conflicting source details").show(ui, |ui| {
+                        for conflict in &content.conflicts {
+                            ui.small(format!(
+                                "{} differs: '{}' at {} · '{}' at {}",
+                                conflict.field,
+                                conflict.first_value,
+                                conflict.first_location.display(),
+                                conflict.conflicting_value,
+                                conflict.conflicting_location.display(),
+                            ));
                         }
-                        vapor_studio_core::CatalogLocationKind::Installed => "Installed · disabled",
-                    })
-                    .collect::<std::collections::BTreeSet<_>>();
-                ui.label(format!(
-                    "Available from · {}",
-                    available_sources.into_iter().collect::<Vec<_>>().join(", ")
-                ));
-                egui::CollapsingHeader::new("File locations and integrity details")
-                    .show(ui, |ui| {
+                    });
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.weak("Available from");
+                    for location in &content.locations {
+                        ui.small(super::super::catalog::catalog_location_label(location));
+                    }
+                });
+                egui::CollapsingHeader::new("File locations and integrity details").show(
+                    ui,
+                    |ui| {
                         for location in &content.locations {
-                            let source = match location.kind {
-                                vapor_studio_core::CatalogLocationKind::Workspace => "Workspace",
-                                vapor_studio_core::CatalogLocationKind::Cache => "Vapor cache",
-                                vapor_studio_core::CatalogLocationKind::Installed
-                                    if location.enabled =>
-                                {
-                                    "Installed"
-                                }
-                                vapor_studio_core::CatalogLocationKind::Installed => {
-                                    "Installed · disabled"
-                                }
-                            };
+                            let source =
+                                super::super::catalog::catalog_location_label(location);
                             ui.label(format!(
                                 "{source}{} · {}",
                                 location
@@ -98,7 +73,8 @@ impl StudioApp {
                                     .unwrap_or("not recorded for this source")
                             ));
                         }
-                    });
+                    },
+                );
                 egui::CollapsingHeader::new(format!(
                     "Dependencies · {}",
                     content.dependencies.len()
@@ -113,11 +89,8 @@ impl StudioApp {
                         }
                     }
                 });
-                let is_authored_here = self
-                    .catalog
-                    .sources
-                    .iter()
-                    .any(|source| {
+                let is_authored_here =
+                    self.catalog.sources.iter().any(|source| {
                         super::super::source_content_selector_matches(source, identity)
                     });
                 if is_authored_here {
@@ -128,15 +101,11 @@ impl StudioApp {
                         action = Some(ContentDetailAction::StageWorkshop(identity.clone()));
                     }
                 }
-                let preview = self
-                    .workshop
-                    .preview
-                    .as_ref()
-                    .filter(|preview| {
-                        is_authored_here
-                            && preview.id == content.id
-                            && preview.version.as_deref() == content.version.as_deref()
-                    });
+                let preview = self.workshop.preview.as_ref().filter(|preview| {
+                    is_authored_here
+                        && preview.id == content.id
+                        && preview.version.as_deref() == content.version.as_deref()
+                });
                 if let Some(preview) = preview {
                     ui.group(|ui| {
                         ui.heading("Workshop package staged");
@@ -162,12 +131,12 @@ impl StudioApp {
                     let profile_root = self.profile.items[self.profile.active_index]
                         .root_package
                         .as_ref();
-                    if profile_root.is_some_and(|root| {
+                    let selected_for_profile = profile_root.is_some_and(|root| {
                         root.id == content.id && root.version == content.version
-                    }) {
+                    });
+                    if selected_for_profile {
                         ui.strong("Selected for this profile");
-                    }
-                    if ui
+                    } else if ui
                         .add_enabled(
                             !self.operation.running
                                 && !self.has_unsaved_workspace_edits()
