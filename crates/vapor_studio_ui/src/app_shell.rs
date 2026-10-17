@@ -154,6 +154,20 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_operation();
+        let quick_open_requested = ui.input(|input| {
+            input.modifiers.command && input.key_pressed(egui::Key::P)
+        });
+        if quick_open_requested && !self.operation.running {
+            self.section = Section::Workspace;
+            if self.workspace.root.trim().is_empty() {
+                self.workspace.editor.files_open = false;
+            } else {
+                self.workspace.editor.files_open = true;
+                if self.workspace.editor.files.is_empty() {
+                    self.refresh_workspace_files();
+                }
+            }
+        }
         egui::Panel::left("studio-navigation")
             .resizable(false)
             .default_size(220.0)

@@ -14,6 +14,29 @@ enum WorkspaceTreeChild {
 
 impl StudioApp {
     pub(super) fn draw_workspace_files_panel(&mut self, ui: &mut egui::Ui) {
+        let save_shortcut = ui.input(|input| {
+            input.modifiers.command && input.key_pressed(egui::Key::S) && !input.modifiers.shift
+        });
+        let save_all_shortcut = ui.input(|input| {
+            input.modifiers.command && input.modifiers.shift && input.key_pressed(egui::Key::S)
+        });
+        let quick_open_requested = ui.input(|input| {
+            input.modifiers.command && input.key_pressed(egui::Key::P)
+        });
+        let dirty_count = self
+            .workspace
+            .editor
+            .documents
+            .values()
+            .filter(|document| document.is_dirty())
+            .count();
+        if !self.operation.running && !self.authoring.manifest_metadata_dirty {
+            if save_all_shortcut && dirty_count > 0 {
+                self.save_all_workspace_files();
+            } else if save_shortcut && self.workspace.editor.active_document_is_dirty() {
+                self.save_workspace_file();
+            }
+        }
         ui.horizontal(|ui| {
             ui.label("Workspace files");
             ui.weak(&self.workspace.root);
@@ -37,7 +60,7 @@ impl StudioApp {
             }
         });
         ui.weak("Creates a new text file inside this workspace, making missing parent folders as needed; existing files are never overwritten.");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.heading("Files");
             if ui
                 .add_enabled(
@@ -58,6 +81,7 @@ impl StudioApp {
                         && !self.authoring.manifest_metadata_dirty,
                     egui::Button::new("Save"),
                 )
+                .on_hover_text("Save the current file (Ctrl/Cmd+S).")
                 .clicked()
             {
                 self.save_workspace_file();
@@ -77,13 +101,6 @@ impl StudioApp {
             if self.workspace.editor.active_document_is_dirty() {
                 ui.colored_label(egui::Color32::YELLOW, "Unsaved");
             }
-            let dirty_count = self
-                .workspace
-                .editor
-                .documents
-                .values()
-                .filter(|document| document.is_dirty())
-                .count();
             if ui
                 .add_enabled(
                     !self.operation.running
@@ -91,6 +108,7 @@ impl StudioApp {
                         && !self.authoring.manifest_metadata_dirty,
                     egui::Button::new(format!("Save all ({dirty_count})")),
                 )
+                .on_hover_text("Save every open file (Ctrl/Cmd+Shift+S).")
                 .clicked()
             {
                 self.save_all_workspace_files();
@@ -158,8 +176,11 @@ impl StudioApp {
                 ui.heading("Project");
                 let filter_response = ui.add(
                     egui::TextEdit::singleline(&mut self.workspace.editor.file_filter)
-                        .hint_text("Find file by name or path"),
+                        .hint_text("Find file by name or path · Ctrl/Cmd+P"),
                 );
+                if quick_open_requested {
+                    filter_response.request_focus();
+                }
                 let filter = self.workspace.editor.file_filter.trim().to_lowercase();
                 filtered_files = self
                     .workspace

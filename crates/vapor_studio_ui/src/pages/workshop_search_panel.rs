@@ -141,12 +141,15 @@ impl StudioApp {
             return;
         }
 
-        ui.columns(2, |columns| {
-            columns[0].set_min_width(320.0);
-            columns[0].heading("Items");
-            egui::ScrollArea::vertical()
-                .id_salt("workshop-search-results")
-                .show(&mut columns[0], |ui| {
+        let narrow_layout = ui.available_width() < 820.0;
+        ui.columns(if narrow_layout { 1 } else { 2 }, |columns| {
+            {
+                let list = &mut columns[0];
+                list.set_min_width(if narrow_layout { 1.0 } else { 320.0 });
+                list.heading("Items");
+                egui::ScrollArea::vertical()
+                    .id_salt("workshop-search-results")
+                    .show(list, |ui| {
                     for item in &self.workshop.results {
                         ui.horizontal(|ui| {
                             let mut selected = self
@@ -181,27 +184,34 @@ impl StudioApp {
                         ui.separator();
                     }
                 });
+            }
 
-            columns[1].heading("Item details");
+            let details = if narrow_layout {
+                columns[0].separator();
+                &mut columns[0]
+            } else {
+                &mut columns[1]
+            };
+            details.heading("Item details");
             let focused_item = self.workshop.results.iter().find(|item|
                 self.workshop.focused_result.as_deref() == Some(item.published_file_id.as_str())
             ).cloned();
             if let Some(item) = focused_item {
-                columns[1].strong(&item.title);
-                columns[1].small(format!("PublishedFileId {}", item.published_file_id));
+                details.strong(&item.title);
+                details.small(format!("PublishedFileId {}", item.published_file_id));
                 if !item.description.is_empty() {
-                    columns[1].add_space(8.0);
-                    columns[1].label(&item.description);
+                    details.add_space(8.0);
+                    details.label(&item.description);
                 }
                 let subscribed = self.workshop.subscriptions.contains(&item.published_file_id);
-                columns[1].weak(if !self.workshop.subscriptions_loaded {
+                details.weak(if !self.workshop.subscriptions_loaded {
                     "Steam subscription status has not been loaded."
                 } else if subscribed {
                     "Subscribed through Steam"
                 } else {
                     "Not subscribed through Steam"
                 });
-                columns[1].separator();
+                details.separator();
                 let locally_available = self.catalog.items.iter().any(|content| {
                     content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
                 });
@@ -215,7 +225,7 @@ impl StudioApp {
                     .is_some();
                 if !locally_available {
                     let mut clicked = false;
-                    columns[1].add_enabled_ui(!self.operation.running, |ui| {
+                    details.add_enabled_ui(!self.operation.running, |ui| {
                         clicked = super::super::components::design::primary_button(
                             ui,
                             "Import to Vapor cache",
@@ -227,9 +237,9 @@ impl StudioApp {
                         self.download_workshop_item();
                     }
                 } else if available_packagepack {
-                    columns[1].label("Available in local content");
+                    details.label("Available in local content");
                     let mut clicked = false;
-                    columns[1].add_enabled_ui(
+                    details.add_enabled_ui(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                         |ui| {
                             clicked = super::super::components::design::primary_button(
@@ -243,9 +253,9 @@ impl StudioApp {
                         self.use_available_workshop_package_as_profile_root(&item.published_file_id);
                     }
                 } else if can_review_profile {
-                    columns[1].label("Available in local content");
+                    details.label("Available in local content");
                     let mut clicked = false;
-                    columns[1].add_enabled_ui(
+                    details.add_enabled_ui(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                         |ui| {
                             clicked = super::super::components::design::primary_button(
@@ -260,9 +270,9 @@ impl StudioApp {
                         self.preview_selected_composition();
                     }
                 } else {
-                    columns[1].label("Available in local content");
+                    details.label("Available in local content");
                 }
-                columns[1].horizontal_wrapped(|ui| {
+                details.horizontal_wrapped(|ui| {
                     if ui
                         .add_enabled(
                             !self.operation.running,
@@ -294,7 +304,7 @@ impl StudioApp {
                     }
                 });
             } else {
-                columns[1].weak("Select a Workshop item to review its description, subscription, and import options.");
+                details.weak("Select a Workshop item to review its description, subscription, and import options.");
             }
         });
     }
