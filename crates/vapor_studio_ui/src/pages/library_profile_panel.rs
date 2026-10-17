@@ -19,11 +19,11 @@ impl StudioApp {
                 let style = ui.style().clone();
                 egui::Frame::group(&style).show(ui, |ui| {
                     let response = ui.add_enabled(
-                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        !self.operation.running && !self.has_unsaved_context_switch_edits(),
                         egui::Button::selectable(selected, egui::RichText::new(name).strong()),
                     );
                     if response
-                        .on_disabled_hover_text("Save or discard workspace or composition edits before switching profiles.")
+                        .on_disabled_hover_text("Discard the Create draft or save/discard workspace edits before switching profiles.")
                         .clicked()
                     {
                         self.select_profile(index);
@@ -63,7 +63,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running
-                            && !self.has_unsaved_workspace_edits()
+                            && !self.has_unsaved_context_switch_edits()
                             && self.profile.items.len() > 1,
                         egui::Button::new("Remove profile"),
                     )

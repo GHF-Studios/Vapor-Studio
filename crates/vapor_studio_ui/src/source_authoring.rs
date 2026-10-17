@@ -77,6 +77,35 @@ impl AuthoringState {
             .is_some_and(|(composition, original)| &composition.links != original)
     }
 
+    pub(super) fn create_draft_is_dirty(&self) -> bool {
+        !self.draft_content_id.is_empty()
+            || self.draft_content_version != "0.1.0"
+            || self.draft_content_kind != vapor_core::ContentKind::Packagepack
+            || !self.draft_dependencies.is_empty()
+            || !self.draft_workshop_app_id.is_empty()
+            || !self.draft_workshop_published_file_id.is_empty()
+            || !self.draft_workshop_visibility.is_empty()
+            || !self.draft_workshop_title.is_empty()
+            || !self.draft_workshop_description.is_empty()
+            || !self.draft_workshop_tags.is_empty()
+            || !self.draft_workshop_change_note.is_empty()
+    }
+
+    pub(super) fn reset_create_draft(&mut self) {
+        self.create_details_open = false;
+        self.draft_content_id.clear();
+        self.draft_content_version = "0.1.0".to_owned();
+        self.draft_content_kind = vapor_core::ContentKind::Packagepack;
+        self.draft_dependencies.clear();
+        self.draft_workshop_app_id.clear();
+        self.draft_workshop_published_file_id.clear();
+        self.draft_workshop_visibility.clear();
+        self.draft_workshop_title.clear();
+        self.draft_workshop_description.clear();
+        self.draft_workshop_tags.clear();
+        self.draft_workshop_change_note.clear();
+    }
+
     pub(super) fn clear_selected_source(&mut self) {
         self.composition_edit_selector.clear();
         self.composition_edit = None;
@@ -93,6 +122,7 @@ impl AuthoringState {
         self.manifest_metadata_dirty = false;
     }
 }
+
 
 impl StudioApp {
     pub(super) fn discard_source_composition_changes(&mut self) {
@@ -418,7 +448,8 @@ impl StudioApp {
             id: composition.id.clone(),
             version: composition.version.clone(),
         };
-        self.assign_profile_root(root, Some(PathBuf::from(self.workspace.root.trim())));
-        self.preview_selected_composition();
+        if self.assign_profile_root(root, Some(PathBuf::from(self.workspace.root.trim()))) {
+            self.preview_selected_composition();
+        }
     }
 }

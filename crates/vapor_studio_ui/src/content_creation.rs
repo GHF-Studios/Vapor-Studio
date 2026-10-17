@@ -14,7 +14,7 @@ impl StudioApp {
         files: Vec<PathBuf>,
     ) {
         self.invalidate_workshop_review();
-        self.authoring.create_details_open = false;
+        self.authoring.reset_create_draft();
         self.workspace.editor.files = files;
         self.workspace.editor.selected_file = Some(manifest.clone());
         self.workspace.editor.files_open = true;
@@ -107,6 +107,11 @@ impl StudioApp {
 
     pub(super) fn create_starter_workspace(&mut self) {
         if !self.require_saved_workspace("create and open a starter workspace") {
+            return;
+        }
+        if self.authoring.create_draft_is_dirty() {
+            self.status = "Discard the Create draft before creating and opening a new workspace."
+                .to_owned();
             return;
         }
         let location = PathBuf::from(self.workspace.starter_path.trim());

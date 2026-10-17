@@ -125,6 +125,13 @@ impl StudioApp {
     }
 
     pub(super) fn activate_workspace(&mut self, selection: WorkspaceOpenSnapshot) {
+        if self.authoring.create_draft_is_dirty() {
+            self.workspace.root_draft = self.workspace.root.clone();
+            self.status =
+                "The workspace was read, but not opened: discard the Create draft before switching workspaces."
+                    .to_owned();
+            return;
+        }
         let WorkspaceOpenSnapshot {
             root,
             landing_section,
@@ -191,6 +198,13 @@ impl StudioApp {
     }
 
     pub(super) fn open_workspace_path_to(&mut self, path: PathBuf, landing_section: Section) {
+        if self.authoring.create_draft_is_dirty() {
+            self.workspace.root_draft = self.workspace.root.clone();
+            self.status =
+                "Finish creating this content or discard its Create draft before changing workspaces."
+                    .to_owned();
+            return;
+        }
         if self.authoring.composition_has_unsaved_changes() {
             self.workspace.root_draft = self.workspace.root.clone();
             self.status =
@@ -273,6 +287,10 @@ impl StudioApp {
         self.workspace.editor.has_dirty_documents()
             || self.authoring.manifest_metadata_dirty
             || self.authoring.composition_has_unsaved_changes()
+    }
+
+    pub(super) fn has_unsaved_context_switch_edits(&self) -> bool {
+        self.has_unsaved_workspace_edits() || self.authoring.create_draft_is_dirty()
     }
 
     pub(super) fn require_open_workspace(&mut self, action: &str) -> bool {

@@ -54,8 +54,9 @@ impl StudioApp {
             id: acquisition.id.clone(),
             version: acquisition.version.clone(),
         };
-        self.assign_profile_root(identity, None);
-        self.section = Section::Library;
+        if self.assign_profile_root(identity, None) {
+            self.section = Section::Library;
+        }
     }
 
     pub(super) fn use_available_workshop_package_as_profile_root(
@@ -100,8 +101,9 @@ impl StudioApp {
             id: content.id,
             version: content.version,
         };
-        self.assign_profile_root(identity, workspace);
-        self.section = Section::Library;
+        if self.assign_profile_root(identity, workspace) {
+            self.section = Section::Library;
+        }
     }
 
     pub(super) fn select_profile(&mut self, index: usize) {
@@ -112,9 +114,9 @@ impl StudioApp {
             self.status = "Finish the current operation before switching profiles.".to_owned();
             return;
         }
-        if self.has_unsaved_workspace_edits() {
+        if self.has_unsaved_context_switch_edits() {
             self.status =
-                "Save or discard workspace, composition, or manifest edits before switching profiles.".to_owned();
+                "Discard the Create draft or save or discard workspace, composition, or manifest edits before switching profiles.".to_owned();
             return;
         }
         self.profile.active_index = index;
@@ -145,17 +147,22 @@ impl StudioApp {
         &mut self,
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
-    ) {
+    ) -> bool {
         if self.authoring.manifest_metadata_dirty
             || self.authoring.composition_has_unsaved_changes()
         {
             self.status = "Save or discard dependency or structured manifest edits before changing the profile composition.".to_owned();
-            return;
+            return false;
         }
         let current_workspace = self.profile.items[self.profile.active_index]
             .workspace
             .as_ref()
             .map(|association| association.root.clone());
+        let workspace_changed = current_workspace != workspace;
+        if workspace_changed && self.authoring.create_draft_is_dirty() {
+            self.status = "Finish creating this content or discard its Create draft before changing the profile workspace.".to_owned();
+            return false;
+        }
         if self
             .catalog
             .items
@@ -166,7 +173,7 @@ impl StudioApp {
                 "Cannot select {}: its local workspace, cache, or installed records disagree. Review the catalog conflicts first.",
                 content_selector(&identity)
             );
-            return;
+            return false;
         }
         if self.workspace.editor.has_dirty_documents()
             && current_workspace.as_deref() != workspace.as_deref()
@@ -174,9 +181,8 @@ impl StudioApp {
             self.status =
                 "Save or discard workspace edits before assigning content from another workspace."
                     .to_owned();
-            return;
+            return false;
         }
-        let workspace_changed = current_workspace != workspace;
         let profile = &mut self.profile.items[self.profile.active_index];
         profile.root_package = Some(identity.clone());
         profile.workspace = workspace.clone().map(|root| WorkspaceAssociation { root });
@@ -206,11 +212,12 @@ impl StudioApp {
             self.profile.items[self.profile.active_index].name,
         );
         self.section = Section::Library;
+        true
     }
 
     pub(super) fn add_profile(&mut self) {
-        if self.has_unsaved_workspace_edits() {
-            self.status = "Save or discard workspace, composition, or manifest edits before creating a profile.".to_owned();
+        if self.has_unsaved_context_switch_edits() {
+            self.status = "Discard the Create draft or save or discard workspace, composition, or manifest edits before creating a profile.".to_owned();
             return;
         }
         let name = self.profile.new_name.trim();
@@ -253,7 +260,7 @@ impl StudioApp {
     }
 
     pub(super) fn remove_active_profile(&mut self) {
-        if self.operation.running || self.has_unsaved_workspace_edits() {
+        if self.operation.running || self.has_unsaved_context_switch_edits() {
             self.status =
                 "Finish or discard the current operation and edits before removing a profile."
                     .to_owned();
@@ -275,8 +282,8 @@ impl StudioApp {
     }
 
     pub(super) fn duplicate_active_profile(&mut self) {
-        if self.operation.running || self.has_unsaved_workspace_edits() {
-            self.status = "Save or discard workspace, composition, or manifest edits before duplicating a profile.".to_owned();
+        if self.operation.running || self.has_unsaved_context_switch_edits() {
+            self.status = "Discard the Create draft or save or discard workspace, composition, or manifest edits before duplicating a profile.".to_owned();
             return;
         }
         let source_name = self.profile.items[self.profile.active_index].name.clone();

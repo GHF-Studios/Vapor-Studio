@@ -87,7 +87,7 @@ impl StudioApp {
                 if !self.workspace.root.trim().is_empty() {
                     ui.small(&self.workspace.root);
                 }
-                if self.has_unsaved_workspace_edits() {
+                if self.has_unsaved_context_switch_edits() {
                     ui.colored_label(egui::Color32::from_rgb(242, 193, 91), "Unsaved edits");
                 } else if !self.workspace.root.trim().is_empty() {
                     ui.weak("Workspace open");
@@ -138,7 +138,7 @@ impl StudioApp {
             if show_profile_create {
                 if ui
                     .add_enabled(
-                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        !self.operation.running && !self.has_unsaved_context_switch_edits(),
                         egui::Button::new("+ Profile"),
                     )
                     .clicked()

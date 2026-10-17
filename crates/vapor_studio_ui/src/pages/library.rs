@@ -12,7 +12,7 @@ impl StudioApp {
             section_header(ui, "Launch profiles", "Each profile keeps its own content selection and launch arguments.");
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                    !self.operation.running && !self.has_unsaved_context_switch_edits(),
                     egui::Button::new("Duplicate selected profile"),
                 )
                 .clicked()
@@ -33,10 +33,10 @@ impl StudioApp {
             section_header(&mut columns[0], "Launch profiles", "Each profile keeps its own content selection and launch arguments.");
             if columns[0]
                 .add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                    !self.operation.running && !self.has_unsaved_context_switch_edits(),
                     egui::Button::new("Duplicate selected profile"),
                 )
-                .on_disabled_hover_text("Save or discard workspace edits before duplicating a profile.")
+                .on_disabled_hover_text("Discard the Create draft or save/discard workspace edits before duplicating a profile.")
                 .clicked()
             {
                 self.duplicate_active_profile();

@@ -5,7 +5,18 @@ use std::path::Path;
 
 impl StudioApp {
     pub(in crate::app) fn draw_create(&mut self, ui: &mut egui::Ui) {
+        let operation_running = self.operation.running;
+        ui.add_enabled_ui(!operation_running, |ui| self.draw_create_content(ui));
+    }
+
+    fn draw_create_content(&mut self, ui: &mut egui::Ui) {
         page_header(ui, "Author", "Create", "Start a content project from a template, then add its identity and required relationships.");
+        if self.authoring.create_draft_is_dirty()
+            && ui.button("Discard current content draft").clicked()
+        {
+            self.authoring.reset_create_draft();
+            self.status = "Discarded the new content project draft.".to_owned();
+        }
         egui::CollapsingHeader::new("Start from a complete playable workspace")
             .default_open(self.workspace.root.trim().is_empty())
             .show(ui, |ui| {
@@ -37,11 +48,11 @@ impl StudioApp {
                 }
                 if ui.add_enabled(
                     !self.operation.running
-                        && !self.has_unsaved_workspace_edits()
+                        && !self.has_unsaved_context_switch_edits()
                         && !self.workspace.starter_path.trim().is_empty(),
                     egui::Button::new("Create and open starter workspace"),
                 )
-                    .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts before creating and opening another workspace.")
+                    .on_disabled_hover_text("Discard the Create draft or save/discard workspace edits before opening another workspace.")
                     .clicked()
                 {
                     self.create_starter_workspace();
@@ -96,8 +107,13 @@ impl StudioApp {
                                     [ui.available_width(), 34.0],
                                     egui::Button::selectable(selected, egui::RichText::new(*title).strong()),
                                 ).clicked() && !selected {
+                                    let cleared_dependencies =
+                                        !self.authoring.draft_dependencies.is_empty();
                                     self.authoring.draft_content_kind = *kind;
                                     self.authoring.draft_dependencies.clear();
+                                    if cleared_dependencies {
+                                        self.status = "Changed the content template and cleared its dependency selections.".to_owned();
+                                    }
                                 }
                                 ui.small(*description);
                             });
@@ -250,6 +266,19 @@ impl StudioApp {
             .default_open(true)
             .show(ui, |ui| {
                 ui.weak(role_constraints);
+                ui.horizontal(|ui| {
+                    ui.label("Selected dependencies");
+                    if ui
+                        .add_enabled(
+                            !self.authoring.draft_dependencies.is_empty(),
+                            egui::Button::new("Clear selection"),
+                        )
+                        .clicked()
+                    {
+                        self.authoring.draft_dependencies.clear();
+                        self.status = "Cleared the new content project's dependency selections.".to_owned();
+                    }
+                });
                 if self.catalog.sources.is_empty() {
                     ui.weak("Refresh workspace content to choose dependencies.");
                 }
