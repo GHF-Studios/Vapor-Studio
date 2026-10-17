@@ -245,9 +245,17 @@ fn home_directory() -> Option<PathBuf> {
 
 impl StudioApp {
     pub(super) fn open_workspace_picker(&mut self) {
+        let draft = PathBuf::from(self.workspace.root_draft.trim());
+        let initial = if self.workspace.root.trim().is_empty()
+            && draft == self.workspace.fallback_root
+        {
+            PathBuf::new()
+        } else {
+            draft
+        };
         self.directory_picker = Some(DirectoryPicker::new(
             DirectoryPickerPurpose::OpenWorkspace,
-            Path::new(self.workspace.root_draft.trim()),
+            &initial,
         ));
     }
 
