@@ -137,6 +137,15 @@ impl StudioApp {
                     });
                 }
                 if content.kind == vapor_core::ContentKind::Packagepack.as_str() {
+                    let content_workspace = content
+                        .locations
+                        .iter()
+                        .any(|location| {
+                            location.kind == vapor_studio_core::CatalogLocationKind::Workspace
+                        })
+                        .then(|| std::path::PathBuf::from(self.workspace.root.trim()));
+                    let create_draft_blocks_assignment = self
+                        .profile_root_change_blocked_by_create_draft(content_workspace.as_deref());
                     let profile_root = self.profile.items[self.profile.active_index]
                         .root_package
                         .as_ref();
@@ -149,25 +158,22 @@ impl StudioApp {
                         .add_enabled(
                             !self.operation.running
                                 && !self.has_unsaved_workspace_edits()
+                                && !create_draft_blocks_assignment
                                 && content.is_unambiguous(),
                             egui::Button::new("Use this version for the active profile"),
                         )
-                        .on_disabled_hover_text(if content.is_unambiguous() {
-                            "Save workspace edits before changing the active profile's source workspace."
-                        } else {
+                        .on_disabled_hover_text(if !content.is_unambiguous() {
                             "Resolve the identity conflict before selecting this content."
+                        } else if create_draft_blocks_assignment {
+                            "Discard the Create draft before changing the active profile's workspace."
+                        } else if self.has_unsaved_workspace_edits() {
+                            "Save or discard workspace edits before changing the active profile's source workspace."
+                        } else {
+                            "Finish the current operation before changing the active profile."
                         })
                         .clicked()
                     {
-                        let workspace = content
-                            .locations
-                            .iter()
-                            .any(|location| {
-                                location.kind
-                                    == vapor_studio_core::CatalogLocationKind::Workspace
-                            })
-                            .then(|| std::path::PathBuf::from(self.workspace.root.trim()));
-                        self.assign_profile_root(content.identity(), workspace);
+                        self.assign_profile_root(content.identity(), content_workspace);
                     }
                 }
             }

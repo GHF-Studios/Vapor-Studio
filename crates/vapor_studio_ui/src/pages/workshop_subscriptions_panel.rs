@@ -104,14 +104,25 @@ impl StudioApp {
                                         == vapor_core::ContentKind::Packagepack.as_str()
                                     && content.is_unambiguous()
                             });
+                            let create_draft_blocks_assignment = self
+                                .workshop_root_change_blocked_by_create_draft(&id);
                             if available_packagepack && !local_conflict
                                 && ui.add_enabled(
-                                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                    !self.operation.running
+                                        && !self.has_unsaved_workspace_edits()
+                                        && !create_draft_blocks_assignment,
                                     egui::Button::new(format!(
                                         "Set {} root",
                                         self.profile.items[self.profile.active_index].name
                                     )),
                                 )
+                                .on_disabled_hover_text(if create_draft_blocks_assignment {
+                                    "Discard the Create draft before changing the profile to this item's workspace."
+                                } else if self.has_unsaved_workspace_edits() {
+                                    "Save or discard workspace edits before changing the active profile."
+                                } else {
+                                    "Finish the current operation before changing the active profile."
+                                })
                                 .clicked()
                             {
                                 self.use_available_workshop_package_as_profile_root(&id);

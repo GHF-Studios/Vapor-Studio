@@ -244,6 +244,8 @@ impl StudioApp {
                         && content.kind == vapor_core::ContentKind::Packagepack.as_str()
                         && content.is_unambiguous()
                 });
+                let create_draft_blocks_assignment = self
+                    .workshop_root_change_blocked_by_create_draft(&item.published_file_id);
                 let included_in_active_profile = local_identities.iter().any(|identity| {
                     self.profile.items[self.profile.active_index]
                         .resolved_graph
@@ -275,7 +277,9 @@ impl StudioApp {
                     details.label("Available in local content");
                     let mut clicked = false;
                     details.add_enabled_ui(
-                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        !self.operation.running
+                            && !self.has_unsaved_workspace_edits()
+                            && !create_draft_blocks_assignment,
                         |ui| {
                             clicked = super::super::components::design::primary_button(
                                 ui,
@@ -283,7 +287,15 @@ impl StudioApp {
                             )
                             .clicked();
                         },
-                    );
+                    )
+                    .response
+                    .on_disabled_hover_text(if create_draft_blocks_assignment {
+                        "Discard the Create draft before changing the profile to this item's workspace."
+                    } else if self.has_unsaved_workspace_edits() {
+                        "Save or discard workspace edits before changing the active profile."
+                    } else {
+                        "Finish the current operation before changing the active profile."
+                    });
                     if clicked {
                         self.use_available_workshop_package_as_profile_root(&item.published_file_id);
                     }

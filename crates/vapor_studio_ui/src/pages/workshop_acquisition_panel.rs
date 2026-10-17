@@ -51,12 +51,20 @@ impl StudioApp {
                             ));
                         });
                     if acquisition.kind == "packagepack" {
-                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(),
+                        let create_draft_blocks_assignment = self
+                            .profile_root_change_blocked_by_create_draft(None);
+                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && !create_draft_blocks_assignment,
                             egui::Button::new(format!(
                                 "Use as {} root",
                                 self.profile.items[self.profile.active_index].name
                             )))
-                            .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts before changing the profile's workspace.")
+                            .on_disabled_hover_text(if create_draft_blocks_assignment {
+                                "Discard the Create draft before changing this profile to cached content."
+                            } else if self.has_unsaved_workspace_edits() {
+                                "Save or discard workspace file and structured metadata drafts before changing the profile's workspace."
+                            } else {
+                                "Finish the current operation before changing the profile."
+                            })
                             .clicked()
                         {
                             self.use_workshop_as_profile_root(&acquisition.id);

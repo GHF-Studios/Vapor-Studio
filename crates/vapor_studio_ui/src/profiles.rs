@@ -1,6 +1,6 @@
 use super::{StudioApp, catalog_content_selector, content_selector};
 use crate::navigation::{CatalogSourceFilter, Section};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use vapor_studio_core::{ContentIdentity, WorkspaceAssociation};
 
 pub(super) struct ProfileState {
@@ -163,7 +163,7 @@ impl StudioApp {
             .as_ref()
             .map(|association| association.root.clone());
         let workspace_changed = current_workspace != workspace;
-        if workspace_changed && self.authoring.create.is_dirty() {
+        if self.profile_root_change_blocked_by_create_draft(workspace.as_deref()) {
             self.status = "Finish creating this content or discard its Create draft before changing the profile workspace.".to_owned();
             return false;
         }
@@ -217,6 +217,43 @@ impl StudioApp {
         );
         self.section = Section::Library;
         true
+    }
+
+    pub(super) fn profile_root_change_blocked_by_create_draft(
+        &self,
+        candidate_workspace: Option<&Path>,
+    ) -> bool {
+        let current_workspace = self.profile.items[self.profile.active_index]
+            .workspace
+            .as_ref()
+            .map(|association| association.root.as_path());
+        self.authoring.create.is_dirty() && current_workspace != candidate_workspace
+    }
+
+    pub(super) fn workshop_root_change_blocked_by_create_draft(
+        &self,
+        published_file_id: &str,
+    ) -> bool {
+        let matches = self
+            .catalog
+            .items
+            .iter()
+            .filter(|content| {
+                content.published_file_id.as_deref() == Some(published_file_id)
+                    && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                    && content.is_unambiguous()
+            })
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return false;
+        }
+        let content = matches[0];
+        let workspace = content
+            .locations
+            .iter()
+            .find(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
+            .map(|location| location.root.as_path());
+        self.profile_root_change_blocked_by_create_draft(workspace)
     }
 
     pub(super) fn add_profile(&mut self) {
