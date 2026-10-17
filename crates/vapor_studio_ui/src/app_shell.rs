@@ -1,15 +1,27 @@
+use super::catalog::DiscoverTab;
 use super::components::design::{ACCENT, MUTED_TEXT};
 use super::directory_picker::{DirectoryPickerPurpose, DirectoryPickerResult};
+use super::workshop::WorkshopTab;
 use super::{Section, StudioApp};
 use eframe::egui;
 use vapor_studio_core::{CURRENT_SCHEMA_VERSION, ProfileDocument};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum CommandPaletteAction {
     Navigate(Section),
+    Workshop(WorkshopTab),
+    ValidateWorkspace,
+    WorkspaceOperation(vapor_core::DevelopmentOperation),
     OpenWorkspace,
     OpenWorkspaceFiles,
     RefreshLocalContent,
+}
+
+fn command_palette_entry_matches(title: &str, keywords: &str, query: &str) -> bool {
+    let title = title.to_lowercase();
+    query
+        .split_whitespace()
+        .all(|term| title.contains(term) || keywords.contains(term))
 }
 
 impl StudioApp {
@@ -77,6 +89,7 @@ impl StudioApp {
         self.command_palette_open = true;
         self.command_palette_search.clear();
         self.command_palette_focus_search = true;
+        self.command_palette_selected_index = 0;
     }
 
     fn draw_navigation(&mut self, ui: &mut egui::Ui) {
@@ -259,6 +272,15 @@ impl StudioApp {
             ("Home", "launcher start profiles", CommandPaletteAction::Navigate(Section::Home)),
             ("Profiles", "library play install update", CommandPaletteAction::Navigate(Section::Library)),
             ("Discover", "local content catalog workshop browse", CommandPaletteAction::Navigate(Section::Discover)),
+            ("Browse Steam Workshop", "search acquire browse remote", CommandPaletteAction::Workshop(WorkshopTab::Browse)),
+            ("Workshop subscriptions", "subscribed download unsubscribe installed", CommandPaletteAction::Workshop(WorkshopTab::Subscriptions)),
+            ("Recent Workshop imports", "cache imported acquisition", CommandPaletteAction::Workshop(WorkshopTab::Imports)),
+            ("Validate workspace content", "manifest references", CommandPaletteAction::ValidateWorkspace),
+            ("Format workspace", "fmt rust source", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Fmt)),
+            ("Check workspace", "compiler type check", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Check)),
+            ("Test workspace", "tests verification", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Test)),
+            ("Build workspace", "compile executable", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Build)),
+            ("Clean workspace", "remove derived artifacts", CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Clean)),
             ("Create content", "new project template author", CommandPaletteAction::Navigate(Section::Create)),
             ("Workspace", "source projects files build", CommandPaletteAction::Navigate(Section::Workspace)),
             ("Compose", "packagepack dependencies graph", CommandPaletteAction::Navigate(Section::Compose)),
@@ -291,49 +313,84 @@ impl StudioApp {
                     response.request_focus();
                     request_focus = false;
                 }
+                        ui.weak("↑ / ↓ move · Enter open · Esc close");
                 let query = self.command_palette_search.trim().to_lowercase();
+                if response.changed() {
+                    self.command_palette_selected_index = 0;
+                }
                 let enter_pressed = response.has_focus()
                     && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                let move_down = response.has_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::ArrowDown));
+                let move_up = response.has_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::ArrowUp));
                 let escape_pressed = ui.input(|input| input.key_pressed(egui::Key::Escape));
                 let can_switch_workspace = !self.operation.running
                     && !self.has_unsaved_context_switch_edits();
                 let can_refresh = !self.operation.running
                     && !self.has_unsaved_workspace_edits();
+                let can_run_workspace_action = can_refresh
+                    && !self.workspace.root.trim().is_empty();
                 let enabled = |action: CommandPaletteAction| match action {
-                    CommandPaletteAction::Navigate(_) => true,
+                    CommandPaletteAction::Navigate(_) | CommandPaletteAction::Workshop(_) => true,
+                    CommandPaletteAction::ValidateWorkspace
+                    | CommandPaletteAction::WorkspaceOperation(_) => can_run_workspace_action,
                     CommandPaletteAction::OpenWorkspace => can_switch_workspace,
                     CommandPaletteAction::OpenWorkspaceFiles => {
                         !self.operation.running && !self.workspace.root.trim().is_empty()
                     }
                     CommandPaletteAction::RefreshLocalContent => can_refresh,
                 };
-                let first_action = entries.iter().find_map(|(title, terms, action)| {
-                    (enabled(*action)
-                        && (query.is_empty()
-                            || title.to_lowercase().contains(&query)
-                            || terms.contains(&query)))
-                    .then_some(*action)
-                });
+                let matching_entries = entries
+                    .iter()
+                    .filter(|(title, terms, _)| {
+                        command_palette_entry_matches(title, terms, &query)
+                    })
+                    .collect::<Vec<_>>();
+                let enabled_entries = matching_entries
+                    .iter()
+                    .filter(|(_, _, action)| enabled(*action))
+                    .collect::<Vec<_>>();
+                if !enabled_entries.is_empty() {
+                    let last_index = enabled_entries.len() - 1;
+                    if move_down {
+                        self.command_palette_selected_index =
+                            (self.command_palette_selected_index + 1) % enabled_entries.len();
+                    } else if move_up {
+                        self.command_palette_selected_index = if self.command_palette_selected_index == 0 {
+                            last_index
+                        } else {
+                            self.command_palette_selected_index - 1
+                        };
+                    } else {
+                        self.command_palette_selected_index =
+                            self.command_palette_selected_index.min(last_index);
+                    }
+                } else {
+                    self.command_palette_selected_index = 0;
+                }
+                let selected_action = enabled_entries
+                    .get(self.command_palette_selected_index)
+                    .map(|(_, _, action)| *action);
                 let mut match_count = 0;
                 egui::ScrollArea::vertical()
                     .max_height(340.0)
                     .show(ui, |ui| {
-                        for (title, terms, action) in entries {
-                            if !query.is_empty()
-                                && !title.to_lowercase().contains(&query)
-                                && !terms.contains(&query)
-                            {
-                                continue;
-                            }
+                        for (title, _terms, action) in matching_entries {
                             match_count += 1;
+                            let is_selected = enabled(*action) && selected_action == Some(*action);
                             let response = ui.add_enabled(
-                                enabled(action),
-                                egui::Button::new(title).min_size(egui::vec2(ui.available_width(), 32.0)),
+                                enabled(*action),
+                                egui::Button::selectable(
+                                    is_selected,
+                                    *title,
+                                )
+                                .min_size(egui::vec2(ui.available_width(), 32.0)),
                             );
                             if response.clicked() {
-                                requested_action = Some(action);
+                                requested_action = Some(*action);
                             }
-                            if !enabled(action) {
+                            if !enabled(*action) {
                                 response.on_hover_text("Finish the current operation or save/discard edits first.");
                             }
                         }
@@ -342,7 +399,7 @@ impl StudioApp {
                     ui.weak("No pages or actions match this search.");
                 }
                 if enter_pressed {
-                    requested_action = first_action;
+                    requested_action = selected_action;
                 }
                 if escape_pressed {
                     close_requested = true;
@@ -358,6 +415,15 @@ impl StudioApp {
         match requested_action {
             Some(CommandPaletteAction::Navigate(section)) => {
                 self.activate_navigation_section(section);
+            }
+            Some(CommandPaletteAction::Workshop(tab)) => {
+                self.catalog.discover_tab = DiscoverTab::Workshop;
+                self.workshop.tab = tab;
+                self.activate_navigation_section(Section::Discover);
+            }
+            Some(CommandPaletteAction::ValidateWorkspace) => self.validate_workspace_source(),
+            Some(CommandPaletteAction::WorkspaceOperation(operation)) => {
+                self.run_operation(operation);
             }
             Some(CommandPaletteAction::OpenWorkspace) => self.open_workspace_picker(),
             Some(CommandPaletteAction::OpenWorkspaceFiles) => {

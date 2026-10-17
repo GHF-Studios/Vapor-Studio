@@ -73,6 +73,7 @@ pub struct StudioApp {
     command_palette_open: bool,
     command_palette_search: String,
     command_palette_focus_search: bool,
+    command_palette_selected_index: usize,
 }
 
 impl StudioApp {
@@ -174,6 +175,7 @@ impl StudioApp {
             command_palette_open: false,
             command_palette_search: String::new(),
             command_palette_focus_search: false,
+            command_palette_selected_index: 0,
         };
         app.refresh_registered_sources();
         if play_mode {
