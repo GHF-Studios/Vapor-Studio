@@ -4,18 +4,7 @@ use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, OperationKind};
 
 pub(super) struct AuthoringState {
-    pub(super) create_details_open: bool,
-    pub(super) draft_content_id: String,
-    pub(super) draft_content_version: String,
-    pub(super) draft_content_kind: vapor_core::ContentKind,
-    pub(super) draft_dependencies: Vec<String>,
-    pub(super) draft_workshop_app_id: String,
-    pub(super) draft_workshop_published_file_id: String,
-    pub(super) draft_workshop_visibility: String,
-    pub(super) draft_workshop_title: String,
-    pub(super) draft_workshop_description: String,
-    pub(super) draft_workshop_tags: String,
-    pub(super) draft_workshop_change_note: String,
+    pub(super) create: CreateDraft,
     pub(super) composition_edit_selector: String,
     pub(super) composition_edit: Option<vapor_studio_core::SourceComposition>,
     pub(super) composition_original_links: Option<Vec<vapor_studio_core::SourceCompositionLink>>,
@@ -34,21 +23,44 @@ pub(super) struct AuthoringState {
     pub(super) workshop_metadata_change_note: String,
 }
 
+pub(super) struct CreateDraft {
+    pub(super) details_open: bool,
+    pub(super) content_id: String,
+    pub(super) content_version: String,
+    pub(super) content_kind: vapor_core::ContentKind,
+    pub(super) dependencies: Vec<String>,
+    pub(super) workshop_app_id: String,
+    pub(super) workshop_published_file_id: String,
+    pub(super) workshop_visibility: String,
+    pub(super) workshop_title: String,
+    pub(super) workshop_description: String,
+    pub(super) workshop_tags: String,
+    pub(super) workshop_change_note: String,
+}
+
+impl Default for CreateDraft {
+    fn default() -> Self {
+        Self {
+            details_open: false,
+            content_id: String::new(),
+            content_version: "0.1.0".to_owned(),
+            content_kind: vapor_core::ContentKind::Packagepack,
+            dependencies: Vec::new(),
+            workshop_app_id: String::new(),
+            workshop_published_file_id: String::new(),
+            workshop_visibility: String::new(),
+            workshop_title: String::new(),
+            workshop_description: String::new(),
+            workshop_tags: String::new(),
+            workshop_change_note: String::new(),
+        }
+    }
+}
+
 impl Default for AuthoringState {
     fn default() -> Self {
         Self {
-            create_details_open: false,
-            draft_content_id: String::new(),
-            draft_content_version: "0.1.0".to_owned(),
-            draft_content_kind: vapor_core::ContentKind::Packagepack,
-            draft_dependencies: Vec::new(),
-            draft_workshop_app_id: String::new(),
-            draft_workshop_published_file_id: String::new(),
-            draft_workshop_visibility: String::new(),
-            draft_workshop_title: String::new(),
-            draft_workshop_description: String::new(),
-            draft_workshop_tags: String::new(),
-            draft_workshop_change_note: String::new(),
+            create: CreateDraft::default(),
             composition_edit_selector: String::new(),
             composition_edit: None,
             composition_original_links: None,
@@ -77,35 +89,6 @@ impl AuthoringState {
             .is_some_and(|(composition, original)| &composition.links != original)
     }
 
-    pub(super) fn create_draft_is_dirty(&self) -> bool {
-        !self.draft_content_id.is_empty()
-            || self.draft_content_version != "0.1.0"
-            || self.draft_content_kind != vapor_core::ContentKind::Packagepack
-            || !self.draft_dependencies.is_empty()
-            || !self.draft_workshop_app_id.is_empty()
-            || !self.draft_workshop_published_file_id.is_empty()
-            || !self.draft_workshop_visibility.is_empty()
-            || !self.draft_workshop_title.is_empty()
-            || !self.draft_workshop_description.is_empty()
-            || !self.draft_workshop_tags.is_empty()
-            || !self.draft_workshop_change_note.is_empty()
-    }
-
-    pub(super) fn reset_create_draft(&mut self) {
-        self.create_details_open = false;
-        self.draft_content_id.clear();
-        self.draft_content_version = "0.1.0".to_owned();
-        self.draft_content_kind = vapor_core::ContentKind::Packagepack;
-        self.draft_dependencies.clear();
-        self.draft_workshop_app_id.clear();
-        self.draft_workshop_published_file_id.clear();
-        self.draft_workshop_visibility.clear();
-        self.draft_workshop_title.clear();
-        self.draft_workshop_description.clear();
-        self.draft_workshop_tags.clear();
-        self.draft_workshop_change_note.clear();
-    }
-
     pub(super) fn clear_selected_source(&mut self) {
         self.composition_edit_selector.clear();
         self.composition_edit = None;
@@ -114,8 +97,8 @@ impl AuthoringState {
     }
 
     pub(super) fn clear_workspace_context(&mut self) {
-        self.create_details_open = false;
-        self.draft_dependencies.clear();
+        self.create.details_open = false;
+        self.create.dependencies.clear();
         self.clear_selected_source();
         self.workshop_metadata_edit = None;
         self.runtime_outputs_edit = None;
@@ -123,6 +106,25 @@ impl AuthoringState {
     }
 }
 
+impl CreateDraft {
+    pub(super) fn is_dirty(&self) -> bool {
+        !self.content_id.is_empty()
+            || self.content_version != "0.1.0"
+            || self.content_kind != vapor_core::ContentKind::Packagepack
+            || !self.dependencies.is_empty()
+            || !self.workshop_app_id.is_empty()
+            || !self.workshop_published_file_id.is_empty()
+            || !self.workshop_visibility.is_empty()
+            || !self.workshop_title.is_empty()
+            || !self.workshop_description.is_empty()
+            || !self.workshop_tags.is_empty()
+            || !self.workshop_change_note.is_empty()
+    }
+
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
 
 impl StudioApp {
     pub(super) fn discard_source_composition_changes(&mut self) {

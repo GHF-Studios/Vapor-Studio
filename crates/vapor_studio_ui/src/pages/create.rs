@@ -11,10 +11,10 @@ impl StudioApp {
 
     fn draw_create_content(&mut self, ui: &mut egui::Ui) {
         page_header(ui, "Author", "Create", "Start a content project from a template, then add its identity and required relationships.");
-        if self.authoring.create_draft_is_dirty()
+        if self.authoring.create.is_dirty()
             && ui.button("Discard current content draft").clicked()
         {
-            self.authoring.reset_create_draft();
+            self.authoring.create.reset();
             self.status = "Discarded the new content project draft.".to_owned();
         }
         egui::CollapsingHeader::new("Start from a complete playable workspace")
@@ -78,7 +78,7 @@ impl StudioApp {
             }
         });
 
-        if !self.authoring.create_details_open {
+        if !self.authoring.create.details_open {
             ui.group(|ui| {
                 ui.label(egui::RichText::new("STEP 1 OF 2 · TEMPLATE").small().strong().color(ACCENT));
                 ui.heading("Choose a content template");
@@ -102,15 +102,15 @@ impl StudioApp {
                             egui::Frame::group(&card_style).show(ui, |ui| {
                                 ui.set_min_width(175.0);
                                 ui.set_max_width(220.0);
-                                let selected = self.authoring.draft_content_kind == *kind;
+                                let selected = self.authoring.create.content_kind == *kind;
                                 if ui.add_sized(
                                     [ui.available_width(), 34.0],
                                     egui::Button::selectable(selected, egui::RichText::new(*title).strong()),
                                 ).clicked() && !selected {
                                     let cleared_dependencies =
-                                        !self.authoring.draft_dependencies.is_empty();
-                                    self.authoring.draft_content_kind = *kind;
-                                    self.authoring.draft_dependencies.clear();
+                                        !self.authoring.create.dependencies.is_empty();
+                                    self.authoring.create.content_kind = *kind;
+                                    self.authoring.create.dependencies.clear();
                                     if cleared_dependencies {
                                         self.status = "Changed the content template and cleared its dependency selections.".to_owned();
                                     }
@@ -120,7 +120,7 @@ impl StudioApp {
                         }
                     });
                 }
-                let description = match self.authoring.draft_content_kind {
+                let description = match self.authoring.create.content_kind {
                     vapor_core::ContentKind::Packagepack => "A launchable composition that selects an Engine and optional Game.",
                     vapor_core::ContentKind::Enginepack => "A reusable Engine composition with its required Engine implementation.",
                     vapor_core::ContentKind::Gamepack => "A reusable Game composition with its required Game implementation.",
@@ -136,7 +136,7 @@ impl StudioApp {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     if ui.add_enabled(!self.operation.running, egui::Button::new("Continue")).clicked() {
-                        self.authoring.create_details_open = true;
+                        self.authoring.create.details_open = true;
                     }
                     if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Refresh workspace content")).clicked() {
                         self.discover();
@@ -148,14 +148,14 @@ impl StudioApp {
 
         ui.horizontal(|ui| {
             if ui.small_button("← Templates").clicked() {
-                self.authoring.create_details_open = false;
+                self.authoring.create.details_open = false;
             }
             ui.label(egui::RichText::new("STEP 2 OF 2 · DETAILS").small().strong().color(ACCENT));
-            ui.heading(format!("New {} project", self.authoring.draft_content_kind));
+            ui.heading(format!("New {} project", self.authoring.create.content_kind));
         });
         ui.label("Set identity and required dependencies. Workshop details are optional and can be added later.");
         ui.separator();
-        let role_constraints = match self.authoring.draft_content_kind {
+        let role_constraints = match self.authoring.create.content_kind {
             vapor_core::ContentKind::Packagepack => {
                 "Choose exactly one Engine or Enginepack; optionally choose at most one Game or Gamepack."
             }
@@ -164,7 +164,7 @@ impl StudioApp {
             vapor_core::ContentKind::Gamepack => "Choose exactly one Game.",
             _ => "Dependencies are checked against this role's supported content kinds.",
         };
-        let source_shape = match self.authoring.draft_content_kind {
+        let source_shape = match self.authoring.create.content_kind {
             vapor_core::ContentKind::Packagepack
             | vapor_core::ContentKind::Enginepack
             | vapor_core::ContentKind::Gamepack
@@ -185,17 +185,18 @@ impl StudioApp {
             }
         };
         let required_role_group = vapor_studio_core::source_required_dependency_choice_group(
-            self.authoring.draft_content_kind,
+            self.authoring.create.content_kind,
         );
         let required_role_selected = required_role_group.is_none_or(|required_group| {
             self.catalog.sources.iter().any(|content| {
                 self.authoring
-                    .draft_dependencies
+                    .create
+                    .dependencies
                     .iter()
                     .any(|selected| selected == &super::super::source_content_selector(content))
                     && super::super::source_content_kind(&content.kind).is_some_and(|kind| {
                         vapor_studio_core::source_dependency_choice_group(
-                            self.authoring.draft_content_kind,
+                            self.authoring.create.content_kind,
                             kind,
                         ) == Some(required_group)
                     })
@@ -207,10 +208,10 @@ impl StudioApp {
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
                 ui.label("Content ID");
-                ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_content_id).desired_width(320.0));
+                ui.add(egui::TextEdit::singleline(&mut self.authoring.create.content_id).desired_width(320.0));
                 ui.end_row();
                 ui.label("Version");
-                ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_content_version).desired_width(180.0));
+                ui.add(egui::TextEdit::singleline(&mut self.authoring.create.content_version).desired_width(180.0));
                 ui.end_row();
             });
         egui::CollapsingHeader::new("Workshop publication metadata · optional")
@@ -222,44 +223,44 @@ impl StudioApp {
                     .spacing([12.0, 8.0])
                     .show(ui, |ui| {
                         ui.label("Steam AppID");
-                        ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_workshop_app_id).desired_width(180.0));
+                        ui.add(egui::TextEdit::singleline(&mut self.authoring.create.workshop_app_id).desired_width(180.0));
                         ui.end_row();
                         ui.label("PublishedFileId");
-                        ui.add(egui::TextEdit::singleline(&mut self.authoring.draft_workshop_published_file_id).desired_width(320.0));
+                        ui.add(egui::TextEdit::singleline(&mut self.authoring.create.workshop_published_file_id).desired_width(320.0));
                         ui.end_row();
                     });
                 ui.horizontal(|ui| {
                     ui.label("Visibility");
                     egui::ComboBox::from_id_salt("new-content-workshop-visibility")
-                        .selected_text(if self.authoring.draft_workshop_visibility.is_empty() {
+                        .selected_text(if self.authoring.create.workshop_visibility.is_empty() {
                             "Not set"
                         } else {
-                            &self.authoring.draft_workshop_visibility
+                            &self.authoring.create.workshop_visibility
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.authoring.draft_workshop_visibility, String::new(), "Not set");
+                            ui.selectable_value(&mut self.authoring.create.workshop_visibility, String::new(), "Not set");
                             for visibility in ["private", "friends-only", "public"] {
                                 ui.selectable_value(
-                                    &mut self.authoring.draft_workshop_visibility,
+                                    &mut self.authoring.create.workshop_visibility,
                                     visibility.to_owned(),
                                     visibility,
                                 );
                             }
                         });
                     ui.label("Title");
-                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_title);
+                    ui.text_edit_singleline(&mut self.authoring.create.workshop_title);
                 });
                 ui.label("Description");
                 ui.add(
-                    egui::TextEdit::multiline(&mut self.authoring.draft_workshop_description)
+                    egui::TextEdit::multiline(&mut self.authoring.create.workshop_description)
                         .desired_rows(3)
                         .desired_width(f32::INFINITY),
                 );
                 ui.horizontal(|ui| {
                     ui.label("Tags · comma separated");
-                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_tags);
+                    ui.text_edit_singleline(&mut self.authoring.create.workshop_tags);
                     ui.label("Change note");
-                    ui.text_edit_singleline(&mut self.authoring.draft_workshop_change_note);
+                    ui.text_edit_singleline(&mut self.authoring.create.workshop_change_note);
                 });
             });
         egui::CollapsingHeader::new("Dependencies")
@@ -267,15 +268,18 @@ impl StudioApp {
             .show(ui, |ui| {
                 ui.weak(role_constraints);
                 ui.horizontal(|ui| {
-                    ui.label("Selected dependencies");
+                    ui.label(format!(
+                        "Selected dependencies · {}",
+                        self.authoring.create.dependencies.len()
+                    ));
                     if ui
                         .add_enabled(
-                            !self.authoring.draft_dependencies.is_empty(),
+                            !self.authoring.create.dependencies.is_empty(),
                             egui::Button::new("Clear selection"),
                         )
                         .clicked()
                     {
-                        self.authoring.draft_dependencies.clear();
+                        self.authoring.create.dependencies.clear();
                         self.status = "Cleared the new content project's dependency selections.".to_owned();
                     }
                 });
@@ -287,18 +291,18 @@ impl StudioApp {
                 let id = super::super::source_content_selector(content);
                 let child_kind = super::super::source_content_kind(&content.kind);
                 let allowed = child_kind.is_some_and(|kind| {
-                    vapor_studio_core::source_dependency_allowed(self.authoring.draft_content_kind, kind)
+                    vapor_studio_core::source_dependency_allowed(self.authoring.create.content_kind, kind)
                 });
                 if !allowed {
                     continue;
                 }
                 let role_group = child_kind.and_then(|kind| {
                     vapor_studio_core::source_dependency_choice_group(
-                        self.authoring.draft_content_kind,
+                        self.authoring.create.content_kind,
                         kind,
                     )
                 });
-                let mut included = self.authoring.draft_dependencies.iter().any(|value| value == &id);
+                let mut included = self.authoring.create.dependencies.iter().any(|value| value == &id);
                 let choice_help = if role_group.is_some() {
                     "This occupies one exclusive role slot. Selecting it replaces the current choice for that slot."
                 } else {
@@ -332,13 +336,14 @@ impl StudioApp {
                                         return false;
                                     };
                                     let candidate_group = vapor_studio_core::source_dependency_choice_group(
-                                        self.authoring.draft_content_kind,
+                                        self.authoring.create.content_kind,
                                         candidate_kind,
                                     );
                                     candidate_group == Some(role_group)
                                         && self
                                             .authoring
-                                            .draft_dependencies
+                                            .create
+                                            .dependencies
                                             .iter()
                                             .any(|selected| selected == &candidate_id)
                                 })
@@ -346,13 +351,13 @@ impl StudioApp {
                                     super::super::source_content_selector(candidate).to_owned()
                                 })
                                 .collect::<Vec<_>>();
-                            self.authoring.draft_dependencies.retain(|value| {
+                            self.authoring.create.dependencies.retain(|value| {
                                 !old_role_choices.iter().any(|old| old == value)
                             });
                         }
-                        self.authoring.draft_dependencies.push(id.to_owned());
+                        self.authoring.create.dependencies.push(id.to_owned());
                     } else {
-                        self.authoring.draft_dependencies.retain(|value| value != &id);
+                        self.authoring.create.dependencies.retain(|value| value != &id);
                     }
                 }
             }

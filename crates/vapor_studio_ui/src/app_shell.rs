@@ -141,6 +141,9 @@ impl StudioApp {
                         !self.operation.running && !self.has_unsaved_context_switch_edits(),
                         egui::Button::new("+ Profile"),
                     )
+                    .on_disabled_hover_text(
+                        "Discard the Create draft or save/discard workspace edits before creating a profile.",
+                    )
                     .clicked()
                 {
                     let mut number = self.profile.items.len() + 1;

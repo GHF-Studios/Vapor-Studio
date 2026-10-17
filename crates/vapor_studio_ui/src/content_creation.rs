@@ -14,7 +14,7 @@ impl StudioApp {
         files: Vec<PathBuf>,
     ) {
         self.invalidate_workshop_review();
-        self.authoring.reset_create_draft();
+        self.authoring.create.reset();
         self.workspace.editor.files = files;
         self.workspace.editor.selected_file = Some(manifest.clone());
         self.workspace.editor.files_open = true;
@@ -41,10 +41,10 @@ impl StudioApp {
                 return;
             }
         };
-        let id = self.authoring.draft_content_id.trim().to_owned();
-        let version = self.authoring.draft_content_version.trim().to_owned();
-        let selected = self.authoring.draft_dependencies.clone();
-        let app_id = match self.authoring.draft_workshop_app_id.trim() {
+        let id = self.authoring.create.content_id.trim().to_owned();
+        let version = self.authoring.create.content_version.trim().to_owned();
+        let selected = self.authoring.create.dependencies.clone();
+        let app_id = match self.authoring.create.workshop_app_id.trim() {
             "" => None,
             value => match value.parse::<u32>() {
                 Ok(value) if value > 0 => Some(value),
@@ -60,21 +60,22 @@ impl StudioApp {
         };
         let workshop = vapor_studio_core::WorkshopPolicyDraft {
             app_id,
-            published_file_id: non_empty(&self.authoring.draft_workshop_published_file_id),
-            visibility: non_empty(&self.authoring.draft_workshop_visibility),
-            title: non_empty(&self.authoring.draft_workshop_title),
-            description: non_empty(&self.authoring.draft_workshop_description),
+            published_file_id: non_empty(&self.authoring.create.workshop_published_file_id),
+            visibility: non_empty(&self.authoring.create.workshop_visibility),
+            title: non_empty(&self.authoring.create.workshop_title),
+            description: non_empty(&self.authoring.create.workshop_description),
             tags: self
                 .authoring
-                .draft_workshop_tags
+                .create
+                .workshop_tags
                 .split(',')
                 .map(str::trim)
                 .filter(|tag| !tag.is_empty())
                 .map(ToOwned::to_owned)
                 .collect(),
-            change_note: non_empty(&self.authoring.draft_workshop_change_note),
+            change_note: non_empty(&self.authoring.create.workshop_change_note),
         };
-        let kind = self.authoring.draft_content_kind;
+        let kind = self.authoring.create.content_kind;
         self.spawn(OperationKind::CreateContent, move |_context| {
             let result = vapor_studio_core::create_content_workspace_with_workshop(
                 &executable,
@@ -109,7 +110,7 @@ impl StudioApp {
         if !self.require_saved_workspace("create and open a starter workspace") {
             return;
         }
-        if self.authoring.create_draft_is_dirty() {
+        if self.authoring.create.is_dirty() {
             self.status = "Discard the Create draft before creating and opening a new workspace."
                 .to_owned();
             return;

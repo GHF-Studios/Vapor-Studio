@@ -163,7 +163,7 @@ impl StudioApp {
             .as_ref()
             .map(|association| association.root.clone());
         let workspace_changed = current_workspace != workspace;
-        if workspace_changed && self.authoring.create_draft_is_dirty() {
+        if workspace_changed && self.authoring.create.is_dirty() {
             self.status = "Finish creating this content or discard its Create draft before changing the profile workspace.".to_owned();
             return false;
         }

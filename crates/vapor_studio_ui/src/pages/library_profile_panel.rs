@@ -67,6 +67,9 @@ impl StudioApp {
                             && self.profile.items.len() > 1,
                         egui::Button::new("Remove profile"),
                     )
+                    .on_disabled_hover_text(
+                        "Discard the Create draft or save/discard workspace edits before removing this profile.",
+                    )
                     .clicked()
                 {
                     self.profile.confirm_removal = true;

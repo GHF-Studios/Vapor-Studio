@@ -19,7 +19,7 @@ impl StudioApp {
                     if ui.button("Browse available content").clicked() {
                         self.section = super::super::Section::Discover;
                     }
-                    let resume_draft = self.authoring.create_draft_is_dirty();
+                    let resume_draft = self.authoring.create.is_dirty();
                     if ui
                         .button(if resume_draft {
                             "Continue content draft"

@@ -15,6 +15,9 @@ impl StudioApp {
                     !self.operation.running && !self.has_unsaved_context_switch_edits(),
                     egui::Button::new("Duplicate selected profile"),
                 )
+                .on_disabled_hover_text(
+                    "Discard the Create draft or save/discard workspace edits before duplicating a profile.",
+                )
                 .clicked()
             {
                 self.duplicate_active_profile();
