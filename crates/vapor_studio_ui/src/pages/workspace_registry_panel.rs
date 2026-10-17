@@ -1,4 +1,5 @@
 use super::super::StudioApp;
+use super::super::directory_picker::{DirectoryPicker, DirectoryPickerPurpose};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
@@ -19,15 +20,27 @@ impl StudioApp {
                 }
                 ui.add_space(8.0);
                 ui.label("Open a Vapor workspace");
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.add_enabled(
                         !self.operation.running,
                         egui::TextEdit::singleline(&mut self.workspace.root_draft)
-                            .desired_width(f32::INFINITY)
+                            .desired_width(360.0)
                             .hint_text("Path to a Vapor workspace"),
                     );
                     if ui
-                        .add_enabled(!self.operation.running, egui::Button::new("Open"))
+                        .add_enabled(!self.operation.running, egui::Button::new("Browse…"))
+                        .clicked()
+                    {
+                        self.directory_picker = Some(DirectoryPicker::new(
+                            DirectoryPickerPurpose::OpenWorkspace,
+                            Path::new(self.workspace.root_draft.trim()),
+                        ));
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.operation.running && !self.workspace.root_draft.trim().is_empty(),
+                            egui::Button::new("Open"),
+                        )
                         .clicked()
                     {
                         self.open_workspace_path(PathBuf::from(self.workspace.root_draft.trim()));

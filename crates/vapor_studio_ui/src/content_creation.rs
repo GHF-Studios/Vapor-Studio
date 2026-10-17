@@ -109,13 +109,30 @@ impl StudioApp {
         if !self.require_saved_workspace("create and open a starter workspace") {
             return;
         }
-        let destination = PathBuf::from(self.workspace.starter_path.trim());
-        if destination.as_os_str().is_empty() {
-            self.status = "Choose an empty folder for the new starter workspace.".to_owned();
+        let location = PathBuf::from(self.workspace.starter_path.trim());
+        if location.as_os_str().is_empty() {
+            self.status = "Choose a parent folder for the new starter workspace.".to_owned();
             return;
         }
         let organization = self.workspace.starter_organization.trim().to_owned();
         let name = self.workspace.starter_name.trim().to_owned();
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            || !name
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+            || !name
+                .bytes()
+                .last()
+                .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        {
+            self.status = "Workspace name must use lowercase letters, digits, and internal hyphens.".to_owned();
+            return;
+        }
+        let destination = location.join(&name);
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {

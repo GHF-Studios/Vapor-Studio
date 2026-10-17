@@ -10,6 +10,8 @@ mod components;
 mod composition_lifecycle;
 #[path = "content_creation.rs"]
 mod content_creation;
+#[path = "directory_picker.rs"]
+mod directory_picker;
 #[path = "operation_center.rs"]
 mod operation_center;
 #[path = "operation_protocol.rs"]
@@ -43,6 +45,7 @@ use catalog::{
     source_content_kind, source_content_selector,
 };
 use composition_lifecycle::ProfileCompositionState;
+use directory_picker::DirectoryPicker;
 use eframe::egui;
 use operations::OperationState;
 use profiles::ProfileState;
@@ -65,6 +68,7 @@ pub struct StudioApp {
     status: String,
     operation: OperationState,
     diagnostics: vapor_devtools::app::DevtoolsApp,
+    directory_picker: Option<DirectoryPicker>,
 }
 
 impl StudioApp {
@@ -162,6 +166,7 @@ impl StudioApp {
             status: "Choose a workspace or discover content in this folder.".to_owned(),
             operation,
             diagnostics: vapor_devtools::connect(None),
+            directory_picker: None,
         };
         app.refresh_registered_sources();
         if play_mode {

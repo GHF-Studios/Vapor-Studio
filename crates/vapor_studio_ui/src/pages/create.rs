@@ -1,6 +1,8 @@
 use super::super::StudioApp;
 use super::super::components::design::{ACCENT, page_header};
+use super::super::directory_picker::{DirectoryPicker, DirectoryPickerPurpose};
 use eframe::egui;
+use std::path::Path;
 
 impl StudioApp {
     pub(in crate::app) fn draw_create(&mut self, ui: &mut egui::Ui) {
@@ -9,9 +11,17 @@ impl StudioApp {
             .default_open(self.workspace.root.trim().is_empty())
             .show(ui, |ui| {
                 ui.label("Scaffold an Engine, Game, Packagepack, Cargo projects, and workspace manifests.");
-                ui.horizontal(|ui| {
-                    ui.label("New folder");
-                    ui.text_edit_singleline(&mut self.workspace.starter_path);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Location");
+                    ui.add(egui::TextEdit::singleline(&mut self.workspace.starter_path)
+                        .desired_width(360.0)
+                        .hint_text("Parent folder for the new workspace"));
+                    if ui.button("Browse…").clicked() {
+                        self.directory_picker = Some(DirectoryPicker::new(
+                            DirectoryPickerPurpose::WorkspaceParent,
+                            Path::new(self.workspace.starter_path.trim()),
+                        ));
+                    }
                 });
                 ui.horizontal(|ui| {
                     ui.label("Organization");
@@ -19,13 +29,28 @@ impl StudioApp {
                     ui.label("Workspace name");
                     ui.text_edit_singleline(&mut self.workspace.starter_name);
                 });
-                if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create and open starter workspace"))
+                if !self.workspace.starter_path.trim().is_empty()
+                    && !self.workspace.starter_name.trim().is_empty()
+                {
+                    ui.small(format!(
+                        "New workspace folder · {}",
+                        Path::new(self.workspace.starter_path.trim())
+                            .join(self.workspace.starter_name.trim())
+                            .display()
+                    ));
+                }
+                if ui.add_enabled(
+                    !self.operation.running
+                        && !self.has_unsaved_workspace_edits()
+                        && !self.workspace.starter_path.trim().is_empty(),
+                    egui::Button::new("Create and open starter workspace"),
+                )
                     .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts before creating and opening another workspace.")
                     .clicked()
                 {
                     self.create_starter_workspace();
                 }
-                ui.weak("The destination must be empty. Its package metadata uses this Vapor installation's Steam AppID.");
+                ui.weak("Studio creates a new folder named after the workspace inside this location. Its package metadata uses this Vapor installation's Steam AppID.");
             });
 
         if self.workspace.root.trim().is_empty() {

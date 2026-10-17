@@ -1,5 +1,6 @@
 use super::{Section, StudioApp};
 use super::components::design::{ACCENT, MUTED_TEXT};
+use super::directory_picker::{DirectoryPickerPurpose, DirectoryPickerResult};
 use eframe::egui;
 use vapor_studio_core::{CURRENT_SCHEMA_VERSION, ProfileDocument};
 
@@ -196,6 +197,24 @@ impl eframe::App for StudioApp {
                     });
             }
         });
+        let picker_result = self
+            .directory_picker
+            .as_mut()
+            .and_then(|picker| picker.show(ui.ctx()));
+        if let Some(result) = picker_result {
+            self.directory_picker = None;
+            if let DirectoryPickerResult::Selected { purpose, path } = result {
+                match purpose {
+                    DirectoryPickerPurpose::OpenWorkspace => {
+                        self.workspace.root_draft = path.display().to_string();
+                        self.open_workspace_path(path);
+                    }
+                    DirectoryPickerPurpose::WorkspaceParent => {
+                        self.workspace.starter_path = path.display().to_string();
+                    }
+                }
+            }
+        }
         if self.operation.running {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
