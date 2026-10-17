@@ -3,13 +3,13 @@ use eframe::egui;
 use std::{collections::BTreeMap, path::PathBuf};
 
 #[derive(Default)]
-struct WorkspaceTreeNode {
-    entries: BTreeMap<String, WorkspaceTreeChild>,
+struct WorkspaceTreeNode<'a> {
+    entries: BTreeMap<String, WorkspaceTreeChild<'a>>,
 }
 
-enum WorkspaceTreeChild {
-    Directory(WorkspaceTreeNode),
-    File(PathBuf),
+enum WorkspaceTreeChild<'a> {
+    Directory(WorkspaceTreeNode<'a>),
+    File(&'a std::path::Path),
 }
 
 impl StudioApp {
@@ -166,8 +166,6 @@ impl StudioApp {
             self.close_workspace_document(&path);
         }
         let mut open_file = None;
-        let mut enter_opens_match = false;
-        let mut filtered_files = Vec::new();
         egui::Panel::left("workspace-project-tree")
             .resizable(true)
             .default_size(270.0)
@@ -182,7 +180,7 @@ impl StudioApp {
                     filter_response.request_focus();
                 }
                 let filter = self.workspace.editor.file_filter.trim().to_lowercase();
-                filtered_files = self
+                let filtered_files = self
                     .workspace
                     .editor
                     .files
@@ -191,17 +189,16 @@ impl StudioApp {
                         filter.is_empty()
                             || path.to_string_lossy().to_lowercase().contains(&filter)
                     })
-                    .cloned()
-                    .collect();
+                    .collect::<Vec<_>>();
                 ui.small(format!(
                     "{} of {} files",
                     filtered_files.len(),
                     self.workspace.editor.files.len()
                 ));
-                enter_opens_match = filter_response.lost_focus()
+                let enter_opens_match = filter_response.lost_focus()
                     && ui.input(|input| input.key_pressed(egui::Key::Enter))
                     && filtered_files.len() == 1;
-                let tree = workspace_tree(&filtered_files);
+                let tree = workspace_tree(filtered_files.iter().map(|path| path.as_path()));
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if tree.entries.is_empty() {
                         ui.weak(if filter.is_empty() {
@@ -221,35 +218,46 @@ impl StudioApp {
                         );
                     }
                 });
+                if enter_opens_match {
+                    open_file = filtered_files
+                        .first()
+                        .map(|path| path.as_path().to_path_buf());
+                }
             });
-        if enter_opens_match {
-            open_file = filtered_files.first().cloned();
-        }
         if let Some(path) = open_file {
             self.open_workspace_file(path);
         }
 
         let selected_path = self.workspace.editor.selected_file.clone();
-        let active_contents = self
+        let (active_line_count, active_character_count, diagnostic) = self
             .workspace
             .editor
             .active_document()
-            .map(|document| document.contents.clone())
+            .map(|document| {
+                let diagnostic = selected_path.as_deref().and_then(|path| {
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default();
+                    (name == "Vapor.toml"
+                        || name.ends_with(".vapor.toml")
+                        || name == "Cargo.toml")
+                        .then(|| {
+                            document
+                                .contents
+                                .parse::<toml::Value>()
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                        })
+                });
+                (
+                    document.contents.lines().count(),
+                    document.contents.chars().count(),
+                    diagnostic,
+                )
+            })
             .unwrap_or_default();
         let active_dirty = self.workspace.editor.active_document_is_dirty();
-        let diagnostic = selected_path.as_deref().and_then(|path| {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default();
-            (name == "Vapor.toml" || name.ends_with(".vapor.toml") || name == "Cargo.toml")
-                .then(|| {
-                    active_contents
-                        .parse::<toml::Value>()
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
-                })
-        });
 
         egui::Panel::right("workspace-inspector")
             .resizable(true)
@@ -265,8 +273,8 @@ impl StudioApp {
                     ui.label(format!("{} file", workspace_file_kind(path)));
                     ui.label(format!(
                         "{} lines · {} characters",
-                        active_contents.lines().count(),
-                        active_contents.chars().count()
+                        active_line_count,
+                        active_character_count
                     ));
                     ui.label(if active_dirty { "Unsaved changes" } else { "Saved" });
                     if let Some(diagnostic) = &diagnostic {
@@ -315,7 +323,7 @@ impl StudioApp {
     }
 }
 
-fn workspace_tree(files: &[PathBuf]) -> WorkspaceTreeNode {
+fn workspace_tree<'a>(files: impl IntoIterator<Item = &'a std::path::Path>) -> WorkspaceTreeNode<'a> {
     let mut root = WorkspaceTreeNode::default();
     for file in files {
         let components = file
@@ -330,17 +338,17 @@ fn workspace_tree(files: &[PathBuf]) -> WorkspaceTreeNode {
     root
 }
 
-fn insert_workspace_tree_entry(
-    node: &mut WorkspaceTreeNode,
+fn insert_workspace_tree_entry<'a>(
+    node: &mut WorkspaceTreeNode<'a>,
     parts: &[String],
-    path: &std::path::Path,
+    path: &'a std::path::Path,
 ) {
     let Some((name, rest)) = parts.split_first() else {
         return;
     };
     if rest.is_empty() {
         node.entries
-            .insert(name.clone(), WorkspaceTreeChild::File(path.to_path_buf()));
+            .insert(name.clone(), WorkspaceTreeChild::File(path));
         return;
     }
     let entry = node
@@ -354,7 +362,7 @@ fn insert_workspace_tree_entry(
 
 fn draw_workspace_tree(
     ui: &mut egui::Ui,
-    node: &WorkspaceTreeNode,
+    node: &WorkspaceTreeNode<'_>,
     selected: Option<&PathBuf>,
     enabled: bool,
     parent_path: &std::path::Path,
@@ -383,10 +391,10 @@ fn draw_workspace_tree(
             WorkspaceTreeChild::File(path) => {
                 let response = ui.add_enabled(
                     enabled,
-                    egui::Button::selectable(selected == Some(path), name),
+                    egui::Button::selectable(selected.is_some_and(|selected| selected == *path), name),
                 );
                 if response.clicked() {
-                    *open_file = Some(path.clone());
+                    *open_file = Some(path.to_path_buf());
                 }
             }
         }

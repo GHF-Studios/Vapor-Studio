@@ -6,7 +6,23 @@ use vapor_studio_core::InstallationState;
 
 impl StudioApp {
     pub(in crate::app) fn draw_home(&mut self, ui: &mut egui::Ui) {
-        let profile = self.profile.items[self.profile.active_index].clone();
+        let (profile_name, root_package, installation_status_text, installation_tone, installed, needs_review) = {
+            let profile = &self.profile.items[self.profile.active_index];
+            let (status, tone) = installation_status(&profile.installation);
+            (
+                profile.name.clone(),
+                profile.root_package.clone(),
+                status,
+                tone,
+                matches!(&profile.installation, InstallationState::Installed { .. }),
+                matches!(
+                    &profile.installation,
+                    InstallationState::OutOfDate { .. }
+                        | InstallationState::Partial { .. }
+                        | InstallationState::NeedsRepair { .. }
+                ),
+            )
+        };
         page_header(ui, "Start", "Home", "Play your selected composition or continue working on content.");
         ui.add_space(8.0);
 
@@ -14,18 +30,10 @@ impl StudioApp {
         ui.columns(2, |columns| {
             egui::Frame::group(&card_style).show(&mut columns[0], |ui| {
                 ui.small("SELECTED PROFILE");
-                ui.heading(&profile.name);
-                if let Some(root) = profile.root_package.as_ref() {
+                ui.heading(&profile_name);
+                if let Some(root) = root_package.as_ref() {
                     ui.label(content_selector(root));
-                    let (status, tone) = installation_status(&profile.installation);
-                    status_text(ui, status, tone);
-                    let installed = matches!(profile.installation, InstallationState::Installed { .. });
-                    let needs_review = matches!(
-                        profile.installation,
-                        InstallationState::OutOfDate { .. }
-                            | InstallationState::Partial { .. }
-                            | InstallationState::NeedsRepair { .. }
-                    );
+                    status_text(ui, installation_status_text, installation_tone);
                     let source_ready = !self.has_unsaved_workspace_edits()
                         && self.profile_composition.preview().is_some_and(|preview| {
                             preview.selector == content_selector(root)
@@ -135,7 +143,7 @@ impl StudioApp {
                         self.section = Section::Create;
                     }
                 }
-                if profile.root_package.is_some()
+                if root_package.is_some()
                     && ui.add_enabled(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                         egui::Button::new("Browse content"),

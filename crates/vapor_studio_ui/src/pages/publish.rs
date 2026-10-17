@@ -4,6 +4,11 @@ use super::super::{Section, StudioApp, source_content_selector};
 use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
+enum WorkshopPublishAction {
+    Publish(String, vapor_studio_core::WorkshopPackagePreview),
+    DiscardReview,
+}
+
 impl StudioApp {
     pub(in crate::app) fn draw_publish(&mut self, ui: &mut egui::Ui) {
         page_header(ui, "Share", "Publish", "Review the destination and exact payload before sending anything outside this device.");
@@ -18,10 +23,11 @@ impl StudioApp {
         });
 
         if self.root_publishing.tab == PublishTab::WorkshopContent {
+        let mut action = None;
         ui.group(|ui| {
             ui.heading("Publish a Workshop item");
             ui.label("Stage an authored item from Discover. The staged review remains available here while you inspect its identity, files, dependencies, and target.");
-            let Some(preview) = self.workshop.preview.clone() else {
+            let Some(preview) = self.workshop.preview.as_ref() else {
                 ui.weak("No Workshop artifact is staged for review.");
                 if ui
                     .add_enabled(
@@ -151,19 +157,23 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    self.publish_reviewed_workshop_content(
-                        identity,
-                        preview.clone(),
-                    );
+                    action = Some(WorkshopPublishAction::Publish(identity.clone(), preview.clone()));
                 }
                 if ui
                     .add_enabled(!self.operation.running, egui::Button::new("Discard review"))
                     .clicked()
                 {
-                    self.invalidate_workshop_review();
+                    action = Some(WorkshopPublishAction::DiscardReview);
                 }
             });
         });
+        match action {
+            Some(WorkshopPublishAction::Publish(identity, preview)) => {
+                self.publish_reviewed_workshop_content(identity, preview);
+            }
+            Some(WorkshopPublishAction::DiscardReview) => self.invalidate_workshop_review(),
+            None => {}
+        }
         } else {
         ui.group(|ui| {
             ui.heading("Publish a Vapor app build");

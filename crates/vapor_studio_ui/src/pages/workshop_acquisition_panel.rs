@@ -2,6 +2,11 @@ use super::super::StudioApp;
 use super::super::components::design::{empty_state, section_header};
 use eframe::egui;
 
+enum AcquisitionAction {
+    UseAsProfileRoot(String),
+    ReviewActiveProfile,
+}
+
 impl StudioApp {
     pub(super) fn draw_workshop_acquisition_panel(&mut self, ui: &mut egui::Ui) {
         section_header(ui, "Recent imports", "These Workshop downloads were added to Vapor's local cache during this session. Browse all available content in Discover.");
@@ -27,7 +32,8 @@ impl StudioApp {
             empty_state(ui, "No recent imports", "Items imported from Workshop are added to Vapor's local cache. Browse Discover to find cached and installed content.", |_| {});
         } else {
             section_header(ui, "Downloaded this session", "Cached items are available to dependency plans. Installing a composition into a play profile is a separate step.");
-            for acquisition in self.workshop.pending_acquisitions.clone() {
+            let mut action = None;
+            for acquisition in &self.workshop.pending_acquisitions {
                 ui.group(|ui| {
                     ui.label(format!(
                         "Cached: {}{} · {}",
@@ -67,7 +73,9 @@ impl StudioApp {
                             })
                             .clicked()
                         {
-                            self.use_workshop_as_profile_root(&acquisition.id);
+                            action = Some(AcquisitionAction::UseAsProfileRoot(
+                                acquisition.id.clone(),
+                            ));
                         }
                         ui.weak("Preview this Packagepack's dependency plan before installing it.");
                     } else {
@@ -93,11 +101,20 @@ impl StudioApp {
                             )
                             .clicked()
                         {
-                            self.section = super::super::Section::Library;
-                            self.preview_selected_composition();
+                            action = Some(AcquisitionAction::ReviewActiveProfile);
                         }
                     }
                 });
+            }
+            match action {
+                Some(AcquisitionAction::UseAsProfileRoot(id)) => {
+                    self.use_workshop_as_profile_root(&id);
+                }
+                Some(AcquisitionAction::ReviewActiveProfile) => {
+                    self.section = super::super::Section::Library;
+                    self.preview_selected_composition();
+                }
+                None => {}
             }
         }
     }

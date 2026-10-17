@@ -2,6 +2,16 @@ use super::super::StudioApp;
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
+enum SourceContentAction {
+    Validate(vapor_studio_core::SourceContent),
+    OpenManifest(PathBuf),
+    EditDependencies(String),
+    UseAsProfileRoot(vapor_studio_core::ContentIdentity, PathBuf),
+    EditWorkshopMetadata(vapor_studio_core::SourceContent),
+    EditRuntimeOutputs(vapor_studio_core::SourceContent),
+    Unregister(vapor_studio_core::SourceContent),
+}
+
 impl StudioApp {
     pub(super) fn draw_workspace_content_panel(&mut self, ui: &mut egui::Ui) {
         if self.catalog.sources.is_empty() {
@@ -40,7 +50,8 @@ impl StudioApp {
         } else {
             ui.heading(format!("Content projects · {}", self.catalog.sources.len()));
             ui.label("Registered authored projects in this workspace. Select a role to validate, edit its dependencies, or manage its Workshop intent.");
-            for content in self.catalog.sources.clone() {
+            let mut action = None;
+            for content in &self.catalog.sources {
                 ui.group(|ui| {
                         ui.horizontal(|ui| {
                             ui.strong(&content.id);
@@ -116,7 +127,7 @@ impl StudioApp {
                                 .on_hover_text("Validate this content manifest and its local references through Vapor Shell.")
                                 .clicked()
                             {
-                                self.validate_source_project(&content);
+                                action = Some(SourceContentAction::Validate(content.clone()));
                             }
                             if let Some(relative_manifest) = relative_manifest {
                                 if ui
@@ -127,32 +138,29 @@ impl StudioApp {
                                     .on_disabled_hover_text("Save or discard the current file before opening a project manifest.")
                                     .clicked()
                                 {
-                                    self.open_workspace_file(relative_manifest);
+                                    action = Some(SourceContentAction::OpenManifest(relative_manifest));
                                 }
                             }
                             if ui
                                     .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Edit dependencies"))
                                     .clicked()
                             {
-                                self.authoring.composition_edit_selector =
-                                    super::super::source_content_selector(&content);
-                                self.authoring.composition_edit = None;
-                                self.authoring.composition_original_links = None;
-                                self.section = super::super::Section::Compose;
-                                self.load_source_composition();
+                                action = Some(SourceContentAction::EditDependencies(
+                                    super::super::source_content_selector(content),
+                                ));
                             }
                             if content.kind == vapor_core::ContentKind::Packagepack.as_str()
                                 && ui
                                     .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Use in active profile"))
                                     .clicked()
                             {
-                                self.assign_profile_root(
+                                action = Some(SourceContentAction::UseAsProfileRoot(
                                     vapor_studio_core::ContentIdentity {
                                         id: content.id.clone(),
                                         version: content.version.clone(),
                                     },
-                                    Some(PathBuf::from(self.workspace.root.trim())),
-                                );
+                                    PathBuf::from(self.workspace.root.trim()),
+                                ));
                             }
                             ui.menu_button("More", |ui| {
                                 if ui
@@ -163,7 +171,9 @@ impl StudioApp {
                                     .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; Workshop edits use a fresh Shell-validated manifest snapshot.")
                                     .clicked()
                                 {
-                                    self.load_source_workshop_metadata(&content);
+                                    action = Some(SourceContentAction::EditWorkshopMetadata(
+                                        content.clone(),
+                                    ));
                                     ui.close();
                                 }
                                 if ui
@@ -174,7 +184,9 @@ impl StudioApp {
                                     .on_disabled_hover_text("Save or discard open edits first; runtime output edits use a fresh Shell-validated manifest snapshot.")
                                     .clicked()
                                 {
-                                    self.load_source_runtime_outputs(&content);
+                                    action = Some(SourceContentAction::EditRuntimeOutputs(
+                                        content.clone(),
+                                    ));
                                     ui.close();
                                 }
                                 ui.separator();
@@ -186,12 +198,40 @@ impl StudioApp {
                                     .on_hover_text("Remove this project from Vapor discovery without deleting its files or changing Cargo membership.")
                                     .clicked()
                                 {
-                                    self.workspace.pending_unregistration = Some(content.clone());
+                                    action = Some(SourceContentAction::Unregister(content.clone()));
                                     ui.close();
                                 }
                             });
                         });
                     });
+            }
+            match action {
+                Some(SourceContentAction::Validate(content)) => {
+                    self.validate_source_project(&content);
+                }
+                Some(SourceContentAction::OpenManifest(path)) => {
+                    self.open_workspace_file(path);
+                }
+                Some(SourceContentAction::EditDependencies(selector)) => {
+                    self.authoring.composition_edit_selector = selector;
+                    self.authoring.composition_edit = None;
+                    self.authoring.composition_original_links = None;
+                    self.section = super::super::Section::Compose;
+                    self.load_source_composition();
+                }
+                Some(SourceContentAction::UseAsProfileRoot(identity, workspace)) => {
+                    self.assign_profile_root(identity, Some(workspace));
+                }
+                Some(SourceContentAction::EditWorkshopMetadata(content)) => {
+                    self.load_source_workshop_metadata(&content);
+                }
+                Some(SourceContentAction::EditRuntimeOutputs(content)) => {
+                    self.load_source_runtime_outputs(&content);
+                }
+                Some(SourceContentAction::Unregister(content)) => {
+                    self.workspace.pending_unregistration = Some(content);
+                }
+                None => {}
             }
         }
         if let Some(project) = self.workspace.pending_unregistration.clone() {

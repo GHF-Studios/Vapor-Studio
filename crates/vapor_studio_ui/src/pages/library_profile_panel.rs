@@ -40,7 +40,7 @@ impl StudioApp {
     pub(super) fn draw_profile_management_panel(
         &mut self,
         ui: &mut eframe::egui::Ui,
-        profile: &vapor_studio_core::CompositionProfile,
+        profile_name: &str,
     ) {
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -53,7 +53,7 @@ impl StudioApp {
                     .add_enabled(
                         !self.operation.running
                             && !self.has_unsaved_workspace_edits()
-                            && self.profile.name_draft.trim() != profile.name,
+                            && self.profile.name_draft.trim() != profile_name,
                         egui::Button::new("Rename"),
                     )
                     .clicked()
@@ -80,7 +80,7 @@ impl StudioApp {
                     egui::Color32::YELLOW,
                     format!(
                         "Remove {} from Studio? Installed content and workspace files remain untouched.",
-                        profile.name
+                        profile_name
                     ),
                 );
                 ui.horizontal(|ui| {

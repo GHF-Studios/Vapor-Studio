@@ -4,20 +4,29 @@ use super::super::components::design::empty_state;
 use eframe::egui;
 use vapor_studio_core::InstallationState;
 
+pub(super) enum ProfileCompositionAction {
+    BrowseContent,
+    CreateContent,
+    EditComposition(String),
+    PreviewPlan,
+    DownloadDependencies(Vec<String>),
+}
+
 impl StudioApp {
     pub(super) fn draw_profile_composition_panel(
-        &mut self,
+        &self,
         ui: &mut eframe::egui::Ui,
         profile: &vapor_studio_core::CompositionProfile,
-    ) {
+    ) -> Option<ProfileCompositionAction> {
         let Some(root) = &profile.root_package else {
+            let mut action = None;
             empty_state(
                 ui,
                 "No composition selected",
                 "Choose a Packagepack to make this profile playable. It remains separate from the source files in your workspace.",
                 |ui| {
                     if ui.button("Browse available content").clicked() {
-                        self.section = super::super::Section::Discover;
+                        action = Some(ProfileCompositionAction::BrowseContent);
                     }
                     let resume_draft = self.authoring.create.is_dirty();
                     if ui
@@ -28,61 +37,56 @@ impl StudioApp {
                         })
                         .clicked()
                     {
-                        self.section = super::super::Section::Create;
+                        action = Some(ProfileCompositionAction::CreateContent);
                     }
                 },
             );
-            return;
+            return action;
         };
+        let mut action = None;
+        let selector = content_selector(root);
+        let editable_source = self.catalog.sources.iter().any(|content| {
+            content.id == root.id && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+        });
+        if ui
+            .add_enabled(
+                !self.operation.running
+                    && !self.has_unsaved_workspace_edits()
+                    && editable_source,
+                egui::Button::new("Edit composition"),
+            )
+            .on_disabled_hover_text(
+                "Only a Packagepack in the active workspace can be edited here.",
+            )
+            .clicked()
         {
-            let selector = content_selector(root);
-            let editable_source = self.catalog.sources.iter().any(|content| {
-                content.id == root.id
-                    && content.kind == vapor_core::ContentKind::Packagepack.as_str()
-            });
-            if ui
-                .add_enabled(
-                    !self.operation.running
-                        && !self.has_unsaved_workspace_edits()
-                        && editable_source,
-                    egui::Button::new("Edit composition"),
-                )
-                .on_disabled_hover_text(
-                    "Only a Packagepack in the active workspace can be edited here.",
-                )
-                .clicked()
-            {
-                self.authoring.composition_edit_selector = selector.clone();
-                self.authoring.composition_edit = None;
-                self.authoring.composition_original_links = None;
-                self.section = super::super::Section::Compose;
-                self.load_source_composition();
-            }
-            if ui
-                .add_enabled(
-                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                    egui::Button::new("Preview dependency plan"),
-                )
-                .on_disabled_hover_text(
-                    "Save or discard workspace file and structured metadata drafts first; resolution reads manifests from disk.",
-                )
-                .clicked()
-            {
-                self.preview_selected_composition();
-            }
-            let preview = self
-                .profile_composition
-                .preview()
-                .filter(|preview| preview.selector == selector)
-                .cloned();
-            if let Some(preview) = preview {
-                let published_file_ids =
-                    super::super::components::composition_preview::draw_composition_preview(
-                        ui, &preview,
-                    );
-                if !published_file_ids.is_empty() {
-                    self.download_profile_composition_dependencies(published_file_ids);
-                }
+            action = Some(ProfileCompositionAction::EditComposition(selector.clone()));
+        }
+        if ui
+            .add_enabled(
+                !self.operation.running && !self.has_unsaved_workspace_edits(),
+                egui::Button::new("Preview dependency plan"),
+            )
+            .on_disabled_hover_text(
+                "Save or discard workspace file and structured metadata drafts first; resolution reads manifests from disk.",
+            )
+            .clicked()
+        {
+            action = Some(ProfileCompositionAction::PreviewPlan);
+        }
+        if let Some(preview) = self
+            .profile_composition
+            .preview()
+            .filter(|preview| preview.selector == selector)
+        {
+            let published_file_ids =
+                super::super::components::composition_preview::draw_composition_preview(
+                    ui, preview,
+                );
+            if !published_file_ids.is_empty() {
+                action = Some(ProfileCompositionAction::DownloadDependencies(
+                    published_file_ids,
+                ));
             }
         }
 
@@ -142,5 +146,6 @@ impl StudioApp {
         } else {
             ui.weak("Install this composition to record its exact content versions and dependencies.");
         }
+        action
     }
 }

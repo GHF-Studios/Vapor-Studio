@@ -1,6 +1,15 @@
 use super::super::StudioApp;
 use super::super::components::design::{empty_state, section_header};
 use eframe::egui;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Copy, Default)]
+struct LocalWorkshopContent {
+    available: bool,
+    conflicted: bool,
+    included_in_active_profile: bool,
+    packagepack_available: bool,
+}
 
 impl StudioApp {
     pub(super) fn draw_workshop_subscriptions_panel(&mut self, ui: &mut egui::Ui) {
@@ -22,6 +31,32 @@ impl StudioApp {
             empty_state(ui, "No Vapor Workshop subscriptions", "Items you subscribe to in Steam Workshop will appear here.", |_| {});
         }
         if !self.workshop.subscriptions.is_empty() {
+            // Build the local/profile view once. The old row renderer scanned the
+            // whole catalog (and graph) several times for every subscription.
+            let active_profile = &self.profile.items[self.profile.active_index];
+            let active_content = active_profile
+                .resolved_graph
+                .as_ref()
+                .map(|graph| {
+                    graph
+                        .nodes
+                        .iter()
+                        .map(|node| node.content.clone())
+                        .collect::<BTreeSet<_>>()
+                })
+                .unwrap_or_default();
+            let mut local_by_workshop_id = BTreeMap::<String, LocalWorkshopContent>::new();
+            for content in &self.catalog.items {
+                let Some(id) = content.published_file_id.as_ref() else {
+                    continue;
+                };
+                let status = local_by_workshop_id.entry(id.clone()).or_default();
+                status.available = true;
+                status.conflicted |= !content.is_unambiguous();
+                status.included_in_active_profile |= active_content.contains(&content.identity());
+                status.packagepack_available |= content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                    && content.is_unambiguous();
+            }
             egui::CollapsingHeader::new(format!("My subscriptions ({})", self.workshop.subscriptions.len()))
                 .default_open(true)
                 .show(ui, |ui| {
@@ -37,22 +72,10 @@ impl StudioApp {
                                 .map(|item| item.title.clone())
                         })
                         .unwrap_or_else(|| "Workshop item".to_owned());
-                    let locally_available = self.catalog.items.iter().any(|content| {
-                        content.published_file_id.as_deref() == Some(id.as_str())
-                    });
-                    let local_conflict = self.catalog.items.iter().any(|content| {
-                        content.published_file_id.as_deref() == Some(id.as_str())
-                            && !content.is_unambiguous()
-                    });
-                    let included_in_active_profile = self.catalog.items.iter()
-                        .filter(|content| content.published_file_id.as_deref() == Some(id.as_str()))
-                        .map(|content| content.identity())
-                        .any(|identity| {
-                        self.profile.items[self.profile.active_index]
-                            .resolved_graph
-                            .as_ref()
-                            .is_some_and(|graph| graph.nodes.iter().any(|node| node.content == identity))
-                    });
+                    let local = local_by_workshop_id
+                        .get(&id)
+                        .copied()
+                        .unwrap_or_default();
                     ui.horizontal_wrapped(|ui| {
                         let mut selected = self.workshop.selected_items.contains(&id);
                         if ui
@@ -84,9 +107,9 @@ impl StudioApp {
                                 ui.weak(format!("{:.1} / {:.1} MiB", current as f64 / 1_048_576.0, total as f64 / 1_048_576.0));
                             }
                         }
-                        if locally_available {
+                        if local.available {
                             ui.weak("Available in local content");
-                            if local_conflict {
+                            if local.conflicted {
                                 ui.colored_label(
                                     egui::Color32::YELLOW,
                                     "Local records conflict; review them in Discover before using this item.",
@@ -98,15 +121,9 @@ impl StudioApp {
                                     self.review_workshop_content(&id);
                                 }
                             }
-                            let available_packagepack = self.catalog.items.iter().any(|content| {
-                                content.published_file_id.as_deref() == Some(id.as_str())
-                                    && content.kind
-                                        == vapor_core::ContentKind::Packagepack.as_str()
-                                    && content.is_unambiguous()
-                            });
                             let create_draft_blocks_assignment = self
                                 .workshop_root_change_blocked_by_create_draft(&id);
-                            if available_packagepack && !local_conflict
+                            if local.packagepack_available && !local.conflicted
                                 && ui.add_enabled(
                                     !self.operation.running
                                         && !self.has_unsaved_workspace_edits()
@@ -127,7 +144,7 @@ impl StudioApp {
                             {
                                 self.use_available_workshop_package_as_profile_root(&id);
                             }
-                            if included_in_active_profile
+                            if local.included_in_active_profile
                                 && ui.add_enabled(
                                     !self.operation.running && !self.has_unsaved_workspace_edits(),
                                     egui::Button::new("Review active profile plan"),
@@ -141,7 +158,7 @@ impl StudioApp {
                                 self.preview_selected_composition();
                             }
                         }
-                        let import_label = if locally_available {
+                        let import_label = if local.available {
                             "Refresh cached copy"
                         } else {
                             "Import to Vapor cache"
@@ -154,9 +171,9 @@ impl StudioApp {
                             self.set_workshop_subscription(id.clone(), false);
                         }
                     });
-                    if locally_available
+                    if local.available
                         && self.profile.items[self.profile.active_index].root_package.is_some()
-                        && !included_in_active_profile
+                        && !local.included_in_active_profile
                     {
                         ui.small("Available locally · not included in the active profile's composition");
                     }

@@ -6,7 +6,7 @@ use vapor_studio_core::{
 };
 
 #[derive(Clone, Copy)]
-enum ProfilePrimaryAction {
+pub(super) enum ProfilePrimaryAction {
     PlayInstalled,
     Repair,
     Verify,
@@ -14,6 +14,14 @@ enum ProfilePrimaryAction {
     ReviewPlan,
     BuildAndPlay,
     Install,
+}
+
+pub(super) enum ProfileInstallationAction {
+    Primary(ProfilePrimaryAction),
+    ValidateSource,
+    VerifyInstalled,
+    AdoptInstalledGraph,
+    DiscoverContent,
 }
 
 fn identity_label(identity: &ContentIdentity) -> String {
@@ -123,10 +131,11 @@ fn graph_difference_lines(
 
 impl StudioApp {
     pub(super) fn draw_profile_installation_panel(
-        &mut self,
+        &self,
         ui: &mut eframe::egui::Ui,
         profile: &vapor_studio_core::CompositionProfile,
-    ) {
+    ) -> Option<ProfileInstallationAction> {
+        let mut action_to_run = None;
         let has_root = profile.root_package.is_some();
         let has_source = profile.workspace.is_some();
         let root_plan_node = profile.root_package.as_ref().and_then(|root| {
@@ -188,27 +197,17 @@ impl StudioApp {
             let can_start = !self.operation.running
                 && (matches!(action, ProfilePrimaryAction::PlayInstalled)
                     || !self.has_unsaved_workspace_edits());
-            let mut clicked = false;
             ui.add_enabled_ui(can_start, |ui| {
-                clicked = super::super::components::design::primary_button(ui, label).clicked();
-            });
-            if clicked {
-                match action {
-                    ProfilePrimaryAction::PlayInstalled => self.run_installed_selected(),
-                    ProfilePrimaryAction::Repair => self.repair_selected_installation(),
-                    ProfilePrimaryAction::Verify => self.verify_selected_installation(),
-                    ProfilePrimaryAction::Update => self.update_selected(),
-                    ProfilePrimaryAction::ReviewPlan => self.preview_selected_composition(),
-                    ProfilePrimaryAction::BuildAndPlay => self.run_selected(),
-                    ProfilePrimaryAction::Install => self.install_selected(),
+                if super::super::components::design::primary_button(ui, label).clicked() {
+                    action_to_run = Some(ProfileInstallationAction::Primary(action));
                 }
-            }
+            });
         }
         ui.horizontal_wrapped(|ui| {
             if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && has_source, egui::Button::new("Validate source"))
                 .on_disabled_hover_text("Source validation needs this profile to be associated with a workspace. Cached or seeded compositions validate during install.")
-                .clicked() { self.validate_selected_source(); }
-            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify installed content")).clicked() { self.verify_selected_installation(); }
+                .clicked() { action_to_run = Some(ProfileInstallationAction::ValidateSource); }
+            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify installed content")).clicked() { action_to_run = Some(ProfileInstallationAction::VerifyInstalled); }
         });
 
         ui.label("Installation");
@@ -301,7 +300,7 @@ impl StudioApp {
                     })
                     .clicked()
                 {
-                    self.adopt_installed_profile_graph();
+                    action_to_run = Some(ProfileInstallationAction::AdoptInstalledGraph);
                 }
             }
             InstallationState::Partial { detail } => {
@@ -328,9 +327,9 @@ impl StudioApp {
             )
             .clicked()
         {
-            self.section = super::super::Section::Discover;
-            self.discover();
+            action_to_run = Some(ProfileInstallationAction::DiscoverContent);
         }
+        action_to_run
     }
 }
 
