@@ -173,6 +173,7 @@ impl StudioApp {
             ));
 
             let mut settings_changed = false;
+            let field_width = (ui.available_width() - 160.0).clamp(180.0, 420.0);
             egui::Grid::new("root-publish-settings")
                 .num_columns(2)
                 .spacing([14.0, 9.0])
@@ -181,7 +182,7 @@ impl StudioApp {
                     settings_changed |= ui.add_enabled(
                         !self.operation.running,
                         egui::TextEdit::singleline(&mut self.root_publishing.account)
-                            .desired_width(320.0)
+                            .desired_width(field_width)
                             .hint_text("Steamworks account name"),
                     ).changed();
                     ui.end_row();
@@ -189,7 +190,7 @@ impl StudioApp {
                     settings_changed |= ui.add_enabled(
                         !self.operation.running,
                         egui::TextEdit::singleline(&mut self.root_publishing.description)
-                            .desired_width(420.0)
+                            .desired_width(field_width)
                             .hint_text("Vapor root package"),
                     ).changed();
                     ui.end_row();
@@ -197,7 +198,7 @@ impl StudioApp {
                     settings_changed |= ui.add_enabled(
                         !self.operation.running,
                         egui::TextEdit::singleline(&mut self.root_publishing.set_live_branch)
-                            .desired_width(320.0)
+                            .desired_width(field_width)
                             .hint_text("Leave empty to upload without changing a branch"),
                     ).changed();
                     ui.end_row();

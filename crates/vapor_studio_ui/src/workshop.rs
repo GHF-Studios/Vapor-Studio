@@ -31,7 +31,6 @@ pub(super) struct WorkshopState {
     pub(super) focused_result: Option<String>,
     pub(super) results_query: Option<String>,
     pub(super) subscriptions: std::collections::BTreeSet<String>,
-    pub(super) focused_subscription: Option<String>,
     pub(super) subscriptions_loaded: bool,
     pub(super) subscription_details:
         std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
@@ -57,7 +56,6 @@ impl Default for WorkshopState {
             focused_result: None,
             results_query: None,
             subscriptions: Default::default(),
-            focused_subscription: None,
             subscriptions_loaded: false,
             subscription_details: Default::default(),
             subscription_poll_interval: WORKSHOP_PROGRESS_POLL_INTERVAL,
@@ -207,13 +205,6 @@ impl StudioApp {
             .iter()
             .map(|item| item.published_file_id.clone())
             .collect();
-        if self.workshop.focused_subscription.as_ref().is_none_or(|focused| {
-            !self.workshop.subscriptions.contains(focused)
-        }) {
-            self.workshop.focused_subscription = subscriptions
-                .first()
-                .map(|item| item.published_file_id.clone());
-        }
         self.workshop.subscription_details = subscriptions
             .into_iter()
             .map(|item| (item.published_file_id.clone(), item))

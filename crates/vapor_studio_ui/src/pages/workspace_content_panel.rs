@@ -131,26 +131,6 @@ impl StudioApp {
                                 }
                             }
                             if ui
-                                .add_enabled(
-                                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new("Edit Workshop metadata"),
-                                )
-                                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; Workshop edits use a fresh Shell-validated manifest snapshot.")
-                                .clicked()
-                            {
-                                self.load_source_workshop_metadata(&content);
-                            }
-                            if ui
-                                .add_enabled(
-                                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new("Edit runtime outputs"),
-                                )
-                                .on_disabled_hover_text("Save or discard open edits first; runtime output edits use a fresh Shell-validated manifest snapshot.")
-                                .clicked()
-                            {
-                                self.load_source_runtime_outputs(&content);
-                            }
-                            if ui
                                     .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Edit dependencies"))
                                     .clicked()
                             {
@@ -174,16 +154,42 @@ impl StudioApp {
                                     Some(PathBuf::from(self.workspace.root.trim())),
                                 );
                             }
-                            if ui
-                                .add_enabled(
-                                    !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new("Unregister"),
-                                )
-                                .on_hover_text("Remove this project from Vapor discovery without deleting its files or changing Cargo membership.")
-                                .clicked()
-                            {
-                                self.workspace.pending_unregistration = Some(content.clone());
-                            }
+                            ui.menu_button("More", |ui| {
+                                if ui
+                                    .add_enabled(
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                        egui::Button::new("Edit Workshop metadata"),
+                                    )
+                                    .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; Workshop edits use a fresh Shell-validated manifest snapshot.")
+                                    .clicked()
+                                {
+                                    self.load_source_workshop_metadata(&content);
+                                    ui.close();
+                                }
+                                if ui
+                                    .add_enabled(
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                        egui::Button::new("Edit runtime outputs"),
+                                    )
+                                    .on_disabled_hover_text("Save or discard open edits first; runtime output edits use a fresh Shell-validated manifest snapshot.")
+                                    .clicked()
+                                {
+                                    self.load_source_runtime_outputs(&content);
+                                    ui.close();
+                                }
+                                ui.separator();
+                                if ui
+                                    .add_enabled(
+                                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                        egui::Button::new("Unregister project"),
+                                    )
+                                    .on_hover_text("Remove this project from Vapor discovery without deleting its files or changing Cargo membership.")
+                                    .clicked()
+                                {
+                                    self.workspace.pending_unregistration = Some(content.clone());
+                                    ui.close();
+                                }
+                            });
                         });
                     });
             }

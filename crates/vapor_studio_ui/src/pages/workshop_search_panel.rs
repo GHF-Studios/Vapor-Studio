@@ -3,7 +3,7 @@ use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_workshop_search_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add_enabled(
                 !self.operation.running,
                 egui::TextEdit::singleline(&mut self.workshop.search_query)
@@ -23,7 +23,7 @@ impl StudioApp {
         });
         if !self.workshop.results.is_empty() {
             let page_count = self.workshop.total_results.div_ceil(50).max(1);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.weak(format!(
                     "Showing {} of {} results · page {} of {}",
                     self.workshop.results.len(),
@@ -51,7 +51,7 @@ impl StudioApp {
                     self.search_workshop();
                 }
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
                         !self.operation.running,
@@ -78,7 +78,7 @@ impl StudioApp {
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>();
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.small(format!(
                     "Selected across pages and searches · {count} item(s)"
                 ));

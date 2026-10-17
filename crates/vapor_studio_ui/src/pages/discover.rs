@@ -26,7 +26,7 @@ impl StudioApp {
             self.draw_workshop_browser(ui);
             return;
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.catalog.search_query)
                 .desired_width(320.0)
                 .hint_text("Search local content"));
