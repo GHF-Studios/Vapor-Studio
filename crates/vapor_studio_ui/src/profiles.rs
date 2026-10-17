@@ -119,6 +119,10 @@ impl StudioApp {
                 "Discard the Create draft or save or discard workspace, composition, or manifest edits before switching profiles.".to_owned();
             return;
         }
+        self.activate_profile_context(index);
+    }
+
+    fn activate_profile_context(&mut self, index: usize) {
         self.profile.active_index = index;
         self.profile.name_draft = self.profile.items[index].name.clone();
         self.profile.confirm_removal = false;
@@ -234,6 +238,8 @@ impl StudioApp {
         self.profile.name_draft = self.profile.items[index].name.clone();
         self.profile.confirm_removal = false;
         self.profile.new_name.clear();
+        self.profile_composition.clear_context();
+        self.invalidate_workshop_review();
         self.status = format!(
             "Created profile {}.",
             self.profile.items[self.profile.active_index].name
@@ -277,7 +283,7 @@ impl StudioApp {
         self.profile.confirm_removal = false;
         self.profile.name_draft.clear();
         let next_index = index.min(self.profile.items.len() - 1);
-        self.select_profile(next_index);
+        self.activate_profile_context(next_index);
         self.status = format!("Removed profile {}.", removed.name);
     }
 
