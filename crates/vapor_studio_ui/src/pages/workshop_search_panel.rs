@@ -212,17 +212,22 @@ impl StudioApp {
                     "Not subscribed through Steam"
                 });
                 details.separator();
-                let locally_available = self.catalog.items.iter().any(|content| {
-                    content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
-                });
+                let local_identities = self.catalog.items.iter()
+                    .filter(|content| content.published_file_id.as_deref() == Some(item.published_file_id.as_str()))
+                    .map(|content| content.identity())
+                    .collect::<Vec<_>>();
+                let locally_available = !local_identities.is_empty();
                 let available_packagepack = self.catalog.items.iter().any(|content| {
                     content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
                         && content.kind == vapor_core::ContentKind::Packagepack.as_str()
                         && content.is_unambiguous()
                 });
-                let can_review_profile = self.profile.items[self.profile.active_index]
-                    .root_package
-                    .is_some();
+                let included_in_active_profile = local_identities.iter().any(|identity| {
+                    self.profile.items[self.profile.active_index]
+                        .resolved_graph
+                        .as_ref()
+                        .is_some_and(|graph| graph.nodes.iter().any(|node| &node.content == identity))
+                });
                 if !locally_available {
                     let mut clicked = false;
                     details.add_enabled_ui(!self.operation.running, |ui| {
@@ -252,7 +257,7 @@ impl StudioApp {
                     if clicked {
                         self.use_available_workshop_package_as_profile_root(&item.published_file_id);
                     }
-                } else if can_review_profile {
+                } else if included_in_active_profile {
                     details.label("Available in local content");
                     let mut clicked = false;
                     details.add_enabled_ui(
@@ -271,6 +276,7 @@ impl StudioApp {
                     }
                 } else {
                     details.label("Available in local content");
+                    details.weak("This item is not included in the active play profile.");
                 }
                 details.horizontal_wrapped(|ui| {
                     if ui

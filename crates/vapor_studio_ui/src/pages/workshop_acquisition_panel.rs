@@ -53,18 +53,25 @@ impl StudioApp {
                         }
                         ui.weak("Preview this Packagepack's dependency plan before installing it.");
                     } else {
-                        ui.weak("Use this item as a dependency of a Packagepack to include it in a composition.");
-                        let has_root = self.profile.items[self.profile.active_index].root_package.is_some();
-                        if ui
+                        let active_profile = &self.profile.items[self.profile.active_index];
+                        let included_in_profile = active_profile
+                            .resolved_graph
+                            .as_ref()
+                            .is_some_and(|graph| {
+                                graph.nodes.iter().any(|node| {
+                                    node.content.id == acquisition.id
+                                        && node.content.version == acquisition.version
+                                })
+                            });
+                        ui.weak(if included_in_profile {
+                            "This item is part of the active profile's resolved composition."
+                        } else {
+                            "This cached item is not currently part of the active profile's composition."
+                        });
+                        if included_in_profile && ui
                             .add_enabled(
-                                !self.operation.running && !self.has_unsaved_workspace_edits() && has_root,
-                                egui::Button::new(format!(
-                                    "Recheck {} composition",
-                                    self.profile.items[self.profile.active_index].name
-                                )),
-                            )
-                            .on_disabled_hover_text(
-                                "Select a Packagepack profile and save or discard open editor changes first.",
+                                !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                egui::Button::new("Review active profile plan"),
                             )
                             .clicked()
                         {

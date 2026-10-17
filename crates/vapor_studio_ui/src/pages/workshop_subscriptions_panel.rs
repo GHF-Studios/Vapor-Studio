@@ -40,6 +40,15 @@ impl StudioApp {
                     let locally_available = self.catalog.items.iter().any(|content| {
                         content.published_file_id.as_deref() == Some(id.as_str())
                     });
+                    let included_in_active_profile = self.catalog.items.iter()
+                        .filter(|content| content.published_file_id.as_deref() == Some(id.as_str()))
+                        .map(|content| content.identity())
+                        .any(|identity| {
+                        self.profile.items[self.profile.active_index]
+                            .resolved_graph
+                            .as_ref()
+                            .is_some_and(|graph| graph.nodes.iter().any(|node| node.content == identity))
+                    });
                     ui.horizontal_wrapped(|ui| {
                         let mut selected = self.workshop.selected_items.contains(&id);
                         if ui
@@ -92,16 +101,13 @@ impl StudioApp {
                             {
                                 self.use_available_workshop_package_as_profile_root(&id);
                             }
-                            if self.profile.items[self.profile.active_index].root_package.is_some()
+                            if included_in_active_profile
                                 && ui.add_enabled(
                                     !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new(format!(
-                                        "Recheck {} plan",
-                                        self.profile.items[self.profile.active_index].name
-                                    )),
+                                    egui::Button::new("Review active profile plan"),
                                 )
                                 .on_hover_text(
-                                    "Resolve the selected Packagepack again using the current local cache.",
+                                        "Resolve this profile again using the current local cache.",
                                 )
                                 .clicked()
                             {
@@ -122,6 +128,12 @@ impl StudioApp {
                             self.set_workshop_subscription(id.clone(), false);
                         }
                     });
+                    if locally_available
+                        && self.profile.items[self.profile.active_index].root_package.is_some()
+                        && !included_in_active_profile
+                    {
+                        ui.small("Available locally · not included in the active profile's composition");
+                    }
                     if let Some(item) = details.as_ref() && !item.description.is_empty() {
                         ui.collapsing("Description", |ui| { ui.label(&item.description); });
                     }
