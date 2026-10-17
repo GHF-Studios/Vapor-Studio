@@ -108,7 +108,7 @@ impl StudioApp {
     }
 
     pub(super) fn load_source_composition(&mut self) {
-        if !self.require_open_workspace("edit a source content dependency graph") {
+        if !self.require_open_workspace("edit source content dependencies") {
             return;
         }
         let selector = self.authoring.composition_edit_selector.trim().to_owned();
@@ -170,7 +170,7 @@ impl StudioApp {
             ))
         });
         self.status =
-            "Validating and saving the source content graph through Vapor Shell…".to_owned();
+            "Validating and saving composition dependencies through Vapor Shell…".to_owned();
     }
 
     pub(super) fn load_source_workshop_metadata(

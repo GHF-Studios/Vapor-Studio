@@ -41,8 +41,14 @@ impl StudioApp {
                     ));
                     egui::CollapsingHeader::new("Cache and file details")
                         .show(ui, |ui| {
-                            ui.small(format!("Cache folder · {}", acquisition.cache_root.display()));
-                            ui.small(format!("File fingerprint · {}", acquisition.fingerprint));
+                            ui.small(format!(
+                                "Cache folder · {}",
+                                acquisition.cache_root.display()
+                            ));
+                            ui.small(format!(
+                                "File fingerprint · {}",
+                                acquisition.fingerprint
+                            ));
                         });
                     if acquisition.kind == "packagepack" {
                         if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(),

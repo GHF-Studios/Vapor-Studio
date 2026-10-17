@@ -14,7 +14,7 @@ impl StudioApp {
         self.authoring.composition_original_links = Some(composition.links.clone());
         self.authoring.composition_edit = Some(composition);
         self.status = format!(
-            "Loaded the {} dependency graph. Review its edges before saving.",
+            "Loaded dependencies for this {}. Review them before saving.",
             self.authoring
                 .composition_edit
                 .as_ref()
@@ -35,7 +35,7 @@ impl StudioApp {
         self.authoring.composition_original_links = Some(composition.links.clone());
         self.authoring.composition_edit = Some(composition);
         self.invalidate_profiles_for_source_content(&identity);
-        self.status = "Saved the source content graph. Studio is refreshing its catalog and composition plan.".to_owned();
+        self.status = "Saved the composition. Studio is refreshing its content catalog and plan.".to_owned();
     }
 
     pub(super) fn apply_source_workshop_loaded(

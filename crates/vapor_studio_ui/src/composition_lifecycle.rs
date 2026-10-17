@@ -178,7 +178,7 @@ impl StudioApp {
                     !vapor_studio_core::resolved_graph_matches(saved, &actual_graph)
                 }) {
                     let message =
-                        "Verified installed content differs from this profile's saved graph."
+                        "Verified installed content differs from this profile's saved setup."
                             .to_owned();
                     self.profile.items[self.profile.active_index].installation =
                         vapor_studio_core::InstallationState::OutOfDate {
@@ -188,7 +188,7 @@ impl StudioApp {
                             verified: true,
                         };
                     self.status = format!(
-                        "{message} Review the installed graph, then update or explicitly adopt it."
+                        "{message} Review the installed content, then update or save it to the profile."
                     );
                     return;
                 }
@@ -199,7 +199,7 @@ impl StudioApp {
                     artifacts,
                     graph_fingerprint,
                 };
-            self.status = format!("Installed composition verified. {checked} graph nodes checked.");
+            self.status = format!("Installed composition verified. {checked} content items checked.");
         } else {
             self.profile.items[self.profile.active_index].installation =
                 vapor_studio_core::InstallationState::NeedsRepair {
@@ -230,7 +230,7 @@ impl StudioApp {
                 artifacts,
                 graph_fingerprint,
             };
-        self.status = "Adopted the verified installed graph for this profile.".to_owned();
+        self.status = "Saved the verified installed setup to this profile.".to_owned();
     }
 
     pub(super) fn apply_verification_error(&mut self, error: String) {
