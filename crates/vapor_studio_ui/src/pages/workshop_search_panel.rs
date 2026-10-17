@@ -217,6 +217,10 @@ impl StudioApp {
                     .map(|content| content.identity())
                     .collect::<Vec<_>>();
                 let locally_available = !local_identities.is_empty();
+                let local_conflict = self.catalog.items.iter().any(|content| {
+                    content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
+                        && !content.is_unambiguous()
+                });
                 let available_packagepack = self.catalog.items.iter().any(|content| {
                     content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
                         && content.kind == vapor_core::ContentKind::Packagepack.as_str()
@@ -228,7 +232,15 @@ impl StudioApp {
                         .as_ref()
                         .is_some_and(|graph| graph.nodes.iter().any(|node| &node.content == identity))
                 });
-                if !locally_available {
+                if local_conflict {
+                    details.colored_label(
+                        egui::Color32::YELLOW,
+                        "Local records disagree about this Workshop item. Review them in Discover before assigning it to a profile.",
+                    );
+                    if details.button("Review local records").clicked() {
+                        self.review_workshop_content(&item.published_file_id);
+                    }
+                } else if !locally_available {
                     let mut clicked = false;
                     details.add_enabled_ui(!self.operation.running, |ui| {
                         clicked = super::super::components::design::primary_button(

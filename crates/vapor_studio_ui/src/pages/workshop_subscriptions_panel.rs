@@ -40,6 +40,10 @@ impl StudioApp {
                     let locally_available = self.catalog.items.iter().any(|content| {
                         content.published_file_id.as_deref() == Some(id.as_str())
                     });
+                    let local_conflict = self.catalog.items.iter().any(|content| {
+                        content.published_file_id.as_deref() == Some(id.as_str())
+                            && !content.is_unambiguous()
+                    });
                     let included_in_active_profile = self.catalog.items.iter()
                         .filter(|content| content.published_file_id.as_deref() == Some(id.as_str()))
                         .map(|content| content.identity())
@@ -83,13 +87,25 @@ impl StudioApp {
                         }
                         if locally_available {
                             ui.weak("Available in local content");
+                            if local_conflict {
+                                ui.colored_label(
+                                    egui::Color32::YELLOW,
+                                    "Local records conflict; review them in Discover before using this item.",
+                                );
+                                if ui.add_enabled(
+                                    !self.operation.running,
+                                    egui::Button::new("Review local records"),
+                                ).clicked() {
+                                    self.review_workshop_content(&id);
+                                }
+                            }
                             let available_packagepack = self.catalog.items.iter().any(|content| {
                                 content.published_file_id.as_deref() == Some(id.as_str())
                                     && content.kind
                                         == vapor_core::ContentKind::Packagepack.as_str()
                                     && content.is_unambiguous()
                             });
-                            if available_packagepack
+                            if available_packagepack && !local_conflict
                                 && ui.add_enabled(
                                     !self.operation.running && !self.has_unsaved_workspace_edits(),
                                     egui::Button::new(format!(

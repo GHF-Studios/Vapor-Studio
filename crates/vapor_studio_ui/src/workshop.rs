@@ -1,5 +1,7 @@
 use super::operation_protocol::OperationResult;
 use super::{StudioApp, catalog_content_selector};
+use crate::navigation::CatalogSourceFilter;
+use super::catalog::DiscoverTab;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -75,6 +77,20 @@ enum RepreviewRequest {
 }
 
 impl StudioApp {
+    pub(super) fn review_workshop_content(&mut self, published_file_id: &str) {
+        self.catalog.selected = self
+            .catalog
+            .items
+            .iter()
+            .find(|content| content.published_file_id.as_deref() == Some(published_file_id))
+            .map(catalog_content_selector);
+        self.catalog.discover_tab = DiscoverTab::Local;
+        self.catalog.source_filter = CatalogSourceFilter::Workshop;
+        self.catalog.kind_filter = None;
+        self.catalog.search_query = published_file_id.to_owned();
+        self.section = crate::navigation::Section::Discover;
+    }
+
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
         self.catalog.items.iter().any(|content| {
             catalog_content_selector(content) == selector && !content.is_unambiguous()
