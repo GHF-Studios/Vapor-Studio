@@ -1,9 +1,24 @@
 use super::super::StudioApp;
 use eframe::egui;
 
+#[derive(Clone, Copy)]
+enum WorkshopMetadataAction {
+    Save,
+    Discard,
+    Close,
+}
+
+#[derive(Clone, Copy)]
+enum RuntimeOutputsAction {
+    Save,
+    Discard,
+    Close,
+}
+
 impl StudioApp {
     pub(super) fn draw_workspace_authoring_panel(&mut self, ui: &mut egui::Ui) {
-        if let Some(metadata) = self.authoring.workshop_metadata_edit.clone() {
+        let mut workshop_action = None;
+        if let Some(metadata) = self.authoring.workshop_metadata_edit.as_ref() {
             ui.group(|ui| {
                 ui.heading(format!("Workshop metadata · {}", metadata.id));
                 ui.label("Edit the publication intent saved in this role manifest. This action does not upload to Steam.");
@@ -53,14 +68,13 @@ impl StudioApp {
                         !self.operation.running && !self.workspace.editor.has_dirty_documents() && self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save Workshop metadata"),
                     ).clicked() {
-                        self.save_source_workshop_metadata();
+                        workshop_action = Some(WorkshopMetadataAction::Save);
                     }
                     if ui.add_enabled(!self.operation.running && self.authoring.manifest_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
-                        self.set_workshop_metadata_fields(&metadata.policy);
-                        self.authoring.manifest_metadata_dirty = false;
+                        workshop_action = Some(WorkshopMetadataAction::Discard);
                     }
                     if ui.add_enabled(!self.operation.running && !self.authoring.manifest_metadata_dirty, egui::Button::new("Close")).clicked() {
-                        self.authoring.workshop_metadata_edit = None;
+                        workshop_action = Some(WorkshopMetadataAction::Close);
                     }
                     if self.authoring.manifest_metadata_dirty {
                         ui.colored_label(egui::Color32::YELLOW, "Unsaved metadata draft");
@@ -68,7 +82,27 @@ impl StudioApp {
                 });
             });
         }
-        if let Some(outputs) = self.authoring.runtime_outputs_edit.clone() {
+        match workshop_action {
+            Some(WorkshopMetadataAction::Save) => self.save_source_workshop_metadata(),
+            Some(WorkshopMetadataAction::Discard) => {
+                if let Some(policy) = self
+                    .authoring
+                    .workshop_metadata_edit
+                    .as_ref()
+                    .map(|metadata| metadata.policy.clone())
+                {
+                    self.set_workshop_metadata_fields(&policy);
+                    self.authoring.manifest_metadata_dirty = false;
+                }
+            }
+            Some(WorkshopMetadataAction::Close) => {
+                self.authoring.workshop_metadata_edit = None;
+            }
+            None => {}
+        }
+
+        let mut outputs_action = None;
+        if let Some(outputs) = self.authoring.runtime_outputs_edit.as_ref() {
             ui.group(|ui| {
                 ui.heading(format!("Runtime outputs · {}", outputs.id));
                 ui.label("Declare Cargo build outputs copied into the deployed artifact's bin/ and lib/ directories. Enter one file name per line; paths are not accepted.");
@@ -94,20 +128,30 @@ impl StudioApp {
                         !self.operation.running && !self.workspace.editor.has_dirty_documents() && self.authoring.manifest_metadata_dirty,
                         egui::Button::new("Save runtime outputs"),
                     ).clicked() {
-                        self.save_source_runtime_outputs();
+                        outputs_action = Some(RuntimeOutputsAction::Save);
                     }
                     if ui.add_enabled(!self.operation.running && self.authoring.manifest_metadata_dirty, egui::Button::new("Discard draft")).clicked() {
-                        self.set_runtime_output_fields(&outputs);
-                        self.authoring.manifest_metadata_dirty = false;
+                        outputs_action = Some(RuntimeOutputsAction::Discard);
                     }
                     if ui.add_enabled(!self.operation.running && !self.authoring.manifest_metadata_dirty, egui::Button::new("Close")).clicked() {
-                        self.authoring.runtime_outputs_edit = None;
+                        outputs_action = Some(RuntimeOutputsAction::Close);
                     }
                     if self.authoring.manifest_metadata_dirty {
                         ui.colored_label(egui::Color32::YELLOW, "Unsaved runtime output changes");
                     }
                 });
             });
+        }
+        match outputs_action {
+            Some(RuntimeOutputsAction::Save) => self.save_source_runtime_outputs(),
+            Some(RuntimeOutputsAction::Discard) => {
+                if let Some(outputs) = self.authoring.runtime_outputs_edit.clone() {
+                    self.set_runtime_output_fields(&outputs);
+                    self.authoring.manifest_metadata_dirty = false;
+                }
+            }
+            Some(RuntimeOutputsAction::Close) => self.authoring.runtime_outputs_edit = None,
+            None => {}
         }
     }
 }

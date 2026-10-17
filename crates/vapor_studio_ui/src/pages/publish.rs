@@ -1,6 +1,6 @@
 use super::super::root_publishing::{PublishTab, root_publish_confirmation};
 use super::super::components::design::page_header;
-use super::super::{Section, StudioApp, source_content_selector};
+use super::super::{Section, StudioApp};
 use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
@@ -51,10 +51,10 @@ impl StudioApp {
                 .catalog
                 .sources
                 .iter()
-                .any(|content| source_content_selector(content) == identity);
+                .any(|content| content.id == preview.id && content.version == preview.version);
             let conflicted = self.catalog.items.iter().any(|content| {
-                content.identity().id == preview.id
-                    && content.identity().version == preview.version
+                content.id == preview.id
+                    && content.version == preview.version
                     && !content.is_unambiguous()
             });
 

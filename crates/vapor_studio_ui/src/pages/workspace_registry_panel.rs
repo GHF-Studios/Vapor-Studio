@@ -6,6 +6,7 @@ impl StudioApp {
     pub(super) fn draw_workspace_registry_panel(&mut self, ui: &mut egui::Ui) {
         ui.label("Choose the source workspace used by this play profile and authoring session.");
         let card_style = ui.style().clone();
+        let mut workspace_to_open = None;
         ui.columns(2, |columns| {
             egui::Frame::group(&card_style).show(&mut columns[0], |ui| {
                 ui.heading("Current workspace");
@@ -66,7 +67,7 @@ impl StudioApp {
                 if self.workspace.registered_sources.is_empty() {
                     ui.weak("No registered source workspaces loaded yet. Refresh to check this installation.");
                 }
-                for source in self.workspace.registered_sources.clone() {
+                for source in &self.workspace.registered_sources {
                     let active = self.workspace.active_source.as_ref() == Some(&source);
                     let selected = Path::new(self.workspace.root.trim()) == source;
                     egui::Frame::group(&card_style).show(ui, |ui| {
@@ -85,12 +86,15 @@ impl StudioApp {
                                 )
                                 .clicked()
                             {
-                                self.open_workspace_path(source.clone());
+                                workspace_to_open = Some(source.clone());
                             }
                         });
                     });
                 }
             });
         });
+        if let Some(path) = workspace_to_open {
+            self.open_workspace_path(path);
+        }
     }
 }

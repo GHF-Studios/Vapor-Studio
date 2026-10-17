@@ -12,6 +12,12 @@ enum SourceContentAction {
     Unregister(vapor_studio_core::SourceContent),
 }
 
+#[derive(Clone, Copy)]
+enum UnregistrationConfirmationAction {
+    Confirm,
+    Keep,
+}
+
 impl StudioApp {
     pub(super) fn draw_workspace_content_panel(&mut self, ui: &mut egui::Ui) {
         if self.catalog.sources.is_empty() {
@@ -58,61 +64,69 @@ impl StudioApp {
                             ui.weak(&content.kind);
                             ui.weak(content.version.as_deref().unwrap_or("workspace version"));
                         });
-                        if !content.binaries.is_empty() || !content.libraries.is_empty() {
-                            let mut outputs = Vec::new();
-                            if !content.binaries.is_empty() {
-                                outputs.push(format!("binaries: {}", content.binaries.join(", ")));
-                            }
-                            if !content.libraries.is_empty() {
-                                outputs.push(format!("libraries: {}", content.libraries.join(", ")));
-                            }
-                            ui.small(format!("Declared runtime outputs · {}", outputs.join(" · ")));
-                        }
-                        if !content.dependencies.is_empty() {
-                            ui.small(format!("Dependencies: {}", content.dependencies.join(" · ")));
-                        }
-                        let workshop = &content.workshop;
-                        if workshop.app_id.is_some()
-                            || workshop.published_file_id.is_some()
-                            || workshop.visibility.is_some()
-                            || workshop.title.is_some()
-                            || workshop.description.is_some()
-                            || !workshop.tags.is_empty()
-                            || workshop.change_note.is_some()
-                        {
-                            ui.collapsing("Workshop publication metadata", |ui| {
-                                if let Some(app_id) = workshop.app_id {
-                                    ui.small(format!("Steam AppID: {app_id}"));
+                        egui::CollapsingHeader::new(format!(
+                            "Project details · {} dependencies · {} runtime outputs",
+                            content.dependencies.len(),
+                            content.binaries.len() + content.libraries.len(),
+                        ))
+                            .default_open(false)
+                            .show(ui, |ui| {
+                                if !content.binaries.is_empty() || !content.libraries.is_empty() {
+                                    let mut outputs = Vec::new();
+                                    if !content.binaries.is_empty() {
+                                        outputs.push(format!("binaries: {}", content.binaries.join(", ")));
+                                    }
+                                    if !content.libraries.is_empty() {
+                                        outputs.push(format!("libraries: {}", content.libraries.join(", ")));
+                                    }
+                                    ui.small(format!("Declared runtime outputs · {}", outputs.join(" · ")));
+                                }
+                                if !content.dependencies.is_empty() {
+                                    ui.small(format!("Dependencies: {}", content.dependencies.join(" · ")));
+                                }
+                                let workshop = &content.workshop;
+                                if workshop.app_id.is_some()
+                                    || workshop.published_file_id.is_some()
+                                    || workshop.visibility.is_some()
+                                    || workshop.title.is_some()
+                                    || workshop.description.is_some()
+                                    || !workshop.tags.is_empty()
+                                    || workshop.change_note.is_some()
+                                {
+                                    ui.collapsing("Workshop publication metadata", |ui| {
+                                        if let Some(app_id) = workshop.app_id {
+                                            ui.small(format!("Steam AppID: {app_id}"));
+                                        } else {
+                                            ui.colored_label(
+                                                egui::Color32::YELLOW,
+                                                "Steam AppID not configured",
+                                            );
+                                        }
+                                        ui.small(format!(
+                                            "Published item: {}",
+                                            workshop.published_file_id.as_deref().unwrap_or("new item")
+                                        ));
+                                        if let Some(visibility) = &workshop.visibility {
+                                            ui.small(format!("Visibility: {visibility}"));
+                                        }
+                                        if let Some(title) = &workshop.title {
+                                            ui.small(format!("Workshop title: {title}"));
+                                        }
+                                        if let Some(description) = &workshop.description {
+                                            ui.small(format!("Description: {description}"));
+                                        }
+                                        if !workshop.tags.is_empty() {
+                                            ui.small(format!("Tags: {}", workshop.tags.join(", ")));
+                                        }
+                                        if let Some(change_note) = &workshop.change_note {
+                                            ui.small(format!("Default change note: {change_note}"));
+                                        }
+                                        ui.weak("This is authored intent; staging performs the authoritative package and publication checks.");
+                                    });
                                 } else {
-                                    ui.colored_label(
-                                        egui::Color32::YELLOW,
-                                        "Steam AppID not configured",
-                                    );
+                                    ui.small("Workshop publication: not configured");
                                 }
-                                ui.small(format!(
-                                    "Published item: {}",
-                                    workshop.published_file_id.as_deref().unwrap_or("new item")
-                                ));
-                                if let Some(visibility) = &workshop.visibility {
-                                    ui.small(format!("Visibility: {visibility}"));
-                                }
-                                if let Some(title) = &workshop.title {
-                                    ui.small(format!("Workshop title: {title}"));
-                                }
-                                if let Some(description) = &workshop.description {
-                                    ui.small(format!("Description: {description}"));
-                                }
-                                if !workshop.tags.is_empty() {
-                                    ui.small(format!("Tags: {}", workshop.tags.join(", ")));
-                                }
-                                if let Some(change_note) = &workshop.change_note {
-                                    ui.small(format!("Default change note: {change_note}"));
-                                }
-                                ui.weak("This is authored intent; staging performs the authoritative package and publication checks.");
                             });
-                        } else {
-                            ui.small("Workshop publication: not configured");
-                        }
                         ui.horizontal_wrapped(|ui| {
                             let relative_manifest = content
                                 .manifest
@@ -234,7 +248,8 @@ impl StudioApp {
                 None => {}
             }
         }
-        if let Some(project) = self.workspace.pending_unregistration.clone() {
+        let mut unregistration_action = None;
+        if let Some(project) = self.workspace.pending_unregistration.as_ref() {
             ui.group(|ui| {
                 ui.heading(format!("Unregister {}?", project.id));
                 ui.label(format!(
@@ -247,13 +262,20 @@ impl StudioApp {
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                         egui::Button::new("Unregister from Vapor"),
                     ).clicked() {
-                        self.unregister_content_project();
+                        unregistration_action = Some(UnregistrationConfirmationAction::Confirm);
                     }
                     if ui.add_enabled(!self.operation.running, egui::Button::new("Keep registered")).clicked() {
-                        self.workspace.pending_unregistration = None;
+                        unregistration_action = Some(UnregistrationConfirmationAction::Keep);
                     }
                 });
             });
+        }
+        match unregistration_action {
+            Some(UnregistrationConfirmationAction::Confirm) => self.unregister_content_project(),
+            Some(UnregistrationConfirmationAction::Keep) => {
+                self.workspace.pending_unregistration = None;
+            }
+            None => {}
         }
     }
 
@@ -267,7 +289,8 @@ impl StudioApp {
                 ));
                 ui.weak("Adoption adds a valid project to Vapor discovery. It does not move files, publish anything, or change Cargo membership.");
             }
-            for candidate in self.workspace.unregistered_projects.candidates.clone() {
+            let mut adoption_path = None;
+            for candidate in &self.workspace.unregistered_projects.candidates {
                 let card_style = ui.style().clone();
                 egui::Frame::group(&card_style).show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -291,11 +314,14 @@ impl StudioApp {
                                 )
                                 .clicked()
                             {
-                                self.adopt_content_project(candidate.path.clone());
+                                adoption_path = Some(candidate.path.clone());
                             }
                         });
                     });
                 });
+            }
+            if let Some(path) = adoption_path {
+                self.adopt_content_project(path);
             }
             if self.workspace.unregistered_scan_completed && !has_candidates {
                 ui.weak("No unregistered content manifests were found.");

@@ -11,6 +11,15 @@ struct LocalWorkshopContent {
     packagepack_available: bool,
 }
 
+enum SubscriptionAction {
+    SetSelected(String, bool),
+    ReviewLocal(String),
+    UseAsProfileRoot(String),
+    ReviewProfile,
+    Import(String),
+    Unsubscribe(String),
+}
+
 impl StudioApp {
     pub(super) fn draw_workshop_subscriptions_panel(&mut self, ui: &mut egui::Ui) {
         section_header(ui, "Your Steam subscriptions", "Steam subscription downloads and imports to Vapor's local cache are separate steps.");
@@ -57,27 +66,27 @@ impl StudioApp {
                 status.packagepack_available |= content.kind == vapor_core::ContentKind::Packagepack.as_str()
                     && content.is_unambiguous();
             }
+            let mut action = None;
             egui::CollapsingHeader::new(format!("My subscriptions ({})", self.workshop.subscriptions.len()))
                 .default_open(true)
                 .show(ui, |ui| {
-                for id in self.workshop.subscriptions.iter().cloned().collect::<Vec<_>>() {
-                    let details = self.workshop.subscription_details.get(&id).cloned();
+                for id in &self.workshop.subscriptions {
+                    let details = self.workshop.subscription_details.get(id);
                     let title = details
-                        .as_ref()
-                        .map(|item| item.title.clone())
+                        .map(|item| item.title.as_str())
                         .or_else(|| {
                             self.workshop.results
                                 .iter()
-                                .find(|item| item.published_file_id == id)
-                                .map(|item| item.title.clone())
+                                .find(|item| item.published_file_id.as_str() == id.as_str())
+                                .map(|item| item.title.as_str())
                         })
-                        .unwrap_or_else(|| "Workshop item".to_owned());
+                        .unwrap_or("Workshop item");
                     let local = local_by_workshop_id
-                        .get(&id)
+                        .get(id)
                         .copied()
                         .unwrap_or_default();
                     ui.horizontal_wrapped(|ui| {
-                        let mut selected = self.workshop.selected_items.contains(&id);
+                        let mut selected = self.workshop.selected_items.contains(id);
                         if ui
                             .add_enabled(
                                 !self.operation.running,
@@ -85,14 +94,10 @@ impl StudioApp {
                             )
                             .changed()
                         {
-                            if selected {
-                                self.workshop.selected_items.insert(id.clone());
-                            } else {
-                                self.workshop.selected_items.remove(&id);
-                            }
+                            action = Some(SubscriptionAction::SetSelected(id.clone(), selected));
                         }
                         ui.strong(title);
-                        if let Some(item) = &details {
+                        if let Some(item) = details {
                             let state = if item.downloading {
                                 "Downloading in Steam"
                             } else if item.needs_update {
@@ -118,11 +123,11 @@ impl StudioApp {
                                     !self.operation.running,
                                     egui::Button::new("Review local records"),
                                 ).clicked() {
-                                    self.review_workshop_content(&id);
+                                    action = Some(SubscriptionAction::ReviewLocal(id.clone()));
                                 }
                             }
                             let create_draft_blocks_assignment = self
-                                .workshop_root_change_blocked_by_create_draft(&id);
+                                .workshop_root_change_blocked_by_create_draft(id);
                             if local.packagepack_available && !local.conflicted
                                 && ui.add_enabled(
                                     !self.operation.running
@@ -142,7 +147,7 @@ impl StudioApp {
                                 })
                                 .clicked()
                             {
-                                self.use_available_workshop_package_as_profile_root(&id);
+                                action = Some(SubscriptionAction::UseAsProfileRoot(id.clone()));
                             }
                             if local.included_in_active_profile
                                 && ui.add_enabled(
@@ -154,8 +159,7 @@ impl StudioApp {
                                 )
                                 .clicked()
                             {
-                                self.section = super::super::Section::Library;
-                                self.preview_selected_composition();
+                                action = Some(SubscriptionAction::ReviewProfile);
                             }
                         }
                         let import_label = if local.available {
@@ -164,11 +168,10 @@ impl StudioApp {
                             "Import to Vapor cache"
                         };
                         if ui.add_enabled(!self.operation.running, egui::Button::new(import_label)).clicked() {
-                            self.workshop.published_file_id = id.clone();
-                            self.download_workshop_item();
+                            action = Some(SubscriptionAction::Import(id.clone()));
                         }
                         if ui.add_enabled(!self.operation.running, egui::Button::new("Unsubscribe")).clicked() {
-                            self.set_workshop_subscription(id.clone(), false);
+                            action = Some(SubscriptionAction::Unsubscribe(id.clone()));
                         }
                     });
                     if local.available
@@ -177,17 +180,42 @@ impl StudioApp {
                     {
                         ui.small("Available locally · not included in the active profile's composition");
                     }
-                    if let Some(item) = details.as_ref() && !item.description.is_empty() {
+                    if let Some(item) = details && !item.description.is_empty() {
                         ui.collapsing("Description", |ui| { ui.label(&item.description); });
                     }
                     ui.collapsing("Workshop item ID", |ui| {
                         ui.small(format!("PublishedFileId {id}"));
                     });
-                    if let Some(url) = details.as_ref().and_then(|item| item.preview_url.as_ref()) {
+                    if let Some(url) = details.and_then(|item| item.preview_url.as_ref()) {
                         ui.hyperlink_to("Open Workshop item", url);
                     }
                 }
             });
+            match action {
+                Some(SubscriptionAction::SetSelected(id, selected)) => {
+                    if selected {
+                        self.workshop.selected_items.insert(id);
+                    } else {
+                        self.workshop.selected_items.remove(&id);
+                    }
+                }
+                Some(SubscriptionAction::ReviewLocal(id)) => self.review_workshop_content(&id),
+                Some(SubscriptionAction::UseAsProfileRoot(id)) => {
+                    self.use_available_workshop_package_as_profile_root(&id);
+                }
+                Some(SubscriptionAction::ReviewProfile) => {
+                    self.section = super::super::Section::Library;
+                    self.preview_selected_composition();
+                }
+                Some(SubscriptionAction::Import(id)) => {
+                    self.workshop.published_file_id = id;
+                    self.download_workshop_item();
+                }
+                Some(SubscriptionAction::Unsubscribe(id)) => {
+                    self.set_workshop_subscription(id, false);
+                }
+                None => {}
+            }
         }
     }
 }

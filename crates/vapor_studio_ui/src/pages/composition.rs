@@ -18,18 +18,6 @@ impl StudioApp {
         ui.weak("Saving checks the selected content and updates its source manifest through Vapor.");
         let composition_has_changes = self.authoring.composition_has_unsaved_changes();
 
-        let source_projects = self
-            .catalog
-            .sources
-            .iter()
-            .map(|content| {
-                (
-                    super::super::source_content_selector(content),
-                    content.kind.clone(),
-                    content.version.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
         ui.horizontal(|ui| {
             ui.label("Source project");
             ui.add_enabled_ui(!self.operation.running && !composition_has_changes, |ui| {
@@ -40,15 +28,16 @@ impl StudioApp {
                         self.authoring.composition_edit_selector.clone()
                     })
                     .show_ui(ui, |ui| {
-                        for (selector, kind, _) in &source_projects {
+                        for content in &self.catalog.sources {
+                            let selector = super::super::source_content_selector(content);
                             if ui
                                 .selectable_label(
-                                    self.authoring.composition_edit_selector == *selector,
-                                    format!("{selector} · {kind}"),
+                                    self.authoring.composition_edit_selector == selector,
+                                    format!("{selector} · {}", content.kind),
                                 )
                                 .clicked()
                             {
-                                self.authoring.composition_edit_selector = selector.clone();
+                                self.authoring.composition_edit_selector = selector;
                                 self.authoring.composition_edit = None;
                                 self.authoring.composition_original_links = None;
                                 self.authoring.composition_link_candidate.clear();
@@ -72,7 +61,7 @@ impl StudioApp {
             ui.weak("Save or discard this draft before loading another source project.");
         }
 
-        if source_projects.is_empty() {
+        if self.catalog.sources.is_empty() {
             let candidates = self.workspace.unregistered_projects.candidates.len();
             let card_style = ui.style().clone();
             egui::Frame::group(&card_style).show(ui, |ui| {
@@ -211,34 +200,6 @@ impl StudioApp {
 
             ui.separator();
             ui.label("Add additional workspace content");
-            let choices = source_contents
-                .iter()
-                .filter(|content| content.id != composition.id)
-                .filter(|content| {
-                    match (
-                        super::super::source_content_kind(&composition.kind),
-                        super::super::source_content_kind(&content.kind),
-                    ) {
-                        (Some(parent), Some(child)) => {
-                            vapor_studio_core::source_dependency_relationship(parent, child)
-                                .is_some()
-                                && !(parent == vapor_core::ContentKind::Packagepack
-                                    && vapor_studio_core::source_dependency_choice_group(
-                                        parent, child,
-                                    )
-                                    .is_some())
-                        }
-                        _ => false,
-                    }
-                })
-                .map(|content| {
-                    (
-                        super::super::source_content_selector(content),
-                        content.kind.clone(),
-                        content.version.clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(!operation_running, |ui| {
                     egui::ComboBox::from_id_salt("composition-link-candidate")
@@ -248,16 +209,24 @@ impl StudioApp {
                             self.authoring.composition_link_candidate.clone()
                         })
                         .show_ui(ui, |ui| {
-                            for (selector, kind, version) in &choices {
+                            for content in source_contents.iter().filter(|content| {
+                                is_additional_composition_dependency(content, composition)
+                            }) {
+                                let selector = super::super::source_content_selector(content);
                                 let label = format!(
-                                    "{selector} · {kind} · {}",
-                                    version.as_deref().unwrap_or("unversioned")
+                                    "{selector} · {} · {}",
+                                    content.kind,
+                                    content.version.as_deref().unwrap_or("unversioned")
                                 );
-                                ui.selectable_value(
-                                    &mut self.authoring.composition_link_candidate,
-                                    selector.clone(),
-                                    label,
-                                );
+                                if ui
+                                    .selectable_label(
+                                        self.authoring.composition_link_candidate == selector,
+                                        label,
+                                    )
+                                    .clicked()
+                                {
+                                    self.authoring.composition_link_candidate = selector;
+                                }
                             }
                     });
                 });
@@ -265,22 +234,25 @@ impl StudioApp {
                     .add_enabled(
                         !self.operation.running
                             && !self.authoring.composition_link_candidate.is_empty()
-                            && choices.iter().any(|(selector, _, _)| {
-                                selector == &self.authoring.composition_link_candidate
+                            && source_contents.iter().any(|content| {
+                                is_additional_composition_dependency(content, composition)
+                                    && super::super::source_content_selector(content)
+                                        == self.authoring.composition_link_candidate
                             }),
                         egui::Button::new("Add content"),
                     )
                     .clicked()
                 {
-                    if let Some((selector, kind, version)) =
-                        choices.iter().find(|(selector, _, _)| {
-                            selector == &self.authoring.composition_link_candidate
-                        })
+                    if let Some(content) = source_contents.iter().find(|content| {
+                        is_additional_composition_dependency(content, composition)
+                            && super::super::source_content_selector(content)
+                                == self.authoring.composition_link_candidate
+                    })
                     {
-                        let id = selector.split('@').next().unwrap_or(selector).to_owned();
+                        let id = content.id.clone();
                         let relationship = super::super::source_content_kind(&composition.kind)
                             .and_then(|parent| {
-                                super::super::source_content_kind(kind).and_then(|child| {
+                                super::super::source_content_kind(&content.kind).and_then(|child| {
                                     vapor_studio_core::source_dependency_relationship(parent, child)
                                 })
                             })
@@ -296,7 +268,7 @@ impl StudioApp {
                                 id,
                                 relationship: relationship.to_owned(),
                                 optional: false,
-                                version: version.as_ref().map(|version| format!("={version}")),
+                                version: content.version.as_ref().map(|version| format!("={version}")),
                                 workshop_id: None,
                                 reason: None,
                             });
@@ -412,6 +384,26 @@ impl StudioApp {
             "Workspace: {}",
             PathBuf::from(self.workspace.root.trim()).display()
         ));
+    }
+}
+
+fn is_additional_composition_dependency(
+    content: &vapor_studio_core::SourceContent,
+    composition: &vapor_studio_core::SourceComposition,
+) -> bool {
+    if content.id == composition.id {
+        return false;
+    }
+    match (
+        super::super::source_content_kind(&composition.kind),
+        super::super::source_content_kind(&content.kind),
+    ) {
+        (Some(parent), Some(child)) => {
+            vapor_studio_core::source_dependency_relationship(parent, child).is_some()
+                && !(parent == vapor_core::ContentKind::Packagepack
+                    && vapor_studio_core::source_dependency_choice_group(parent, child).is_some())
+        }
+        _ => false,
     }
 }
 

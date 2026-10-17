@@ -1,6 +1,15 @@
 use super::super::StudioApp;
 use eframe::egui;
 
+enum WorkshopSearchAction {
+    ReviewLocal(String),
+    Import(String),
+    UseAsProfileRoot(String),
+    ReviewProfile,
+    ChangeSubscription(String, bool),
+    RefreshCache(String),
+}
+
 impl StudioApp {
     pub(super) fn draw_workshop_search_panel(&mut self, ui: &mut egui::Ui) {
         let mut run_search = false;
@@ -89,12 +98,7 @@ impl StudioApp {
             let count = self.workshop.selected_items.len();
             let subscription_batch_supported =
                 count <= vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH;
-            let selected_ids = self
-                .workshop
-                .selected_items
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>();
+            let mut subscription_action = None;
             ui.horizontal_wrapped(|ui| {
                 ui.small(format!(
                     "Selected across pages and searches · {count} item(s)"
@@ -124,7 +128,7 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    self.set_workshop_subscriptions(selected_ids.clone(), true);
+                    subscription_action = Some(true);
                 }
                 if ui
                     .add_enabled(
@@ -133,9 +137,13 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    self.set_workshop_subscriptions(selected_ids, false);
+                    subscription_action = Some(false);
                 }
             });
+            if let Some(subscribe) = subscription_action {
+                let selected_ids = self.workshop.selected_items.iter().cloned().collect();
+                self.set_workshop_subscriptions(selected_ids, subscribe);
+            }
             if !subscription_batch_supported {
                 ui.small(format!(
                     "Steam subscription changes handle up to {} items at once. Import selection remains available.",
@@ -159,6 +167,7 @@ impl StudioApp {
         }
 
         let narrow_layout = ui.available_width() < 820.0;
+        let mut action = None;
         ui.columns(if narrow_layout { 1 } else { 2 }, |columns| {
             {
                 let list = &mut columns[0];
@@ -211,7 +220,7 @@ impl StudioApp {
             details.heading("Item details");
             let focused_item = self.workshop.results.iter().find(|item|
                 self.workshop.focused_result.as_deref() == Some(item.published_file_id.as_str())
-            ).cloned();
+            );
             if let Some(item) = focused_item {
                 details.strong(&item.title);
                 details.collapsing("Workshop item ID", |ui| {
@@ -230,35 +239,42 @@ impl StudioApp {
                     "Not subscribed through Steam"
                 });
                 details.separator();
-                let local_identities = self.catalog.items.iter()
-                    .filter(|content| content.published_file_id.as_deref() == Some(item.published_file_id.as_str()))
-                    .map(|content| content.identity())
-                    .collect::<Vec<_>>();
-                let locally_available = !local_identities.is_empty();
-                let local_conflict = self.catalog.items.iter().any(|content| {
-                    content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
-                        && !content.is_unambiguous()
-                });
-                let available_packagepack = self.catalog.items.iter().any(|content| {
-                    content.published_file_id.as_deref() == Some(item.published_file_id.as_str())
-                        && content.kind == vapor_core::ContentKind::Packagepack.as_str()
-                        && content.is_unambiguous()
-                });
+                let mut locally_available = false;
+                let mut local_conflict = false;
+                let mut available_packagepack = false;
+                let mut included_in_active_profile = false;
+                let active_graph = self.profile.items[self.profile.active_index]
+                    .resolved_graph
+                    .as_ref();
+                for content in &self.catalog.items {
+                    if content.published_file_id.as_deref()
+                        != Some(item.published_file_id.as_str())
+                    {
+                        continue;
+                    }
+                    locally_available = true;
+                    local_conflict |= !content.is_unambiguous();
+                    available_packagepack |= content.kind
+                        == vapor_core::ContentKind::Packagepack.as_str()
+                        && content.is_unambiguous();
+                    included_in_active_profile |= active_graph.is_some_and(|graph| {
+                        graph.nodes.iter().any(|node| {
+                            node.content.id == content.id
+                                && node.content.version == content.version
+                        })
+                    });
+                }
                 let create_draft_blocks_assignment = self
                     .workshop_root_change_blocked_by_create_draft(&item.published_file_id);
-                let included_in_active_profile = local_identities.iter().any(|identity| {
-                    self.profile.items[self.profile.active_index]
-                        .resolved_graph
-                        .as_ref()
-                        .is_some_and(|graph| graph.nodes.iter().any(|node| &node.content == identity))
-                });
                 if local_conflict {
                     details.colored_label(
                         egui::Color32::YELLOW,
                         "Local records disagree about this Workshop item. Review them in Discover before assigning it to a profile.",
                     );
                     if details.button("Review local records").clicked() {
-                        self.review_workshop_content(&item.published_file_id);
+                        action = Some(WorkshopSearchAction::ReviewLocal(
+                            item.published_file_id.clone(),
+                        ));
                     }
                 } else if !locally_available {
                     let mut clicked = false;
@@ -270,8 +286,9 @@ impl StudioApp {
                         .clicked();
                     });
                     if clicked {
-                        self.workshop.published_file_id = item.published_file_id.clone();
-                        self.download_workshop_item();
+                        action = Some(WorkshopSearchAction::Import(
+                            item.published_file_id.clone(),
+                        ));
                     }
                 } else if available_packagepack {
                     details.label("Available in local content");
@@ -297,7 +314,9 @@ impl StudioApp {
                         "Finish the current operation before changing the active profile."
                     });
                     if clicked {
-                        self.use_available_workshop_package_as_profile_root(&item.published_file_id);
+                        action = Some(WorkshopSearchAction::UseAsProfileRoot(
+                            item.published_file_id.clone(),
+                        ));
                     }
                 } else if included_in_active_profile {
                     details.label("Available in local content");
@@ -313,8 +332,7 @@ impl StudioApp {
                         },
                     );
                     if clicked {
-                        self.section = super::super::Section::Library;
-                        self.preview_selected_composition();
+                        action = Some(WorkshopSearchAction::ReviewProfile);
                     }
                 } else {
                     details.label("Available in local content");
@@ -333,7 +351,10 @@ impl StudioApp {
                         })
                         .clicked()
                     {
-                        self.set_workshop_subscription(item.published_file_id.clone(), !subscribed);
+                        action = Some(WorkshopSearchAction::ChangeSubscription(
+                            item.published_file_id.clone(),
+                            !subscribed,
+                        ));
                     }
                     if locally_available {
                         if ui
@@ -343,8 +364,9 @@ impl StudioApp {
                             )
                             .clicked()
                         {
-                            self.workshop.published_file_id = item.published_file_id.clone();
-                            self.download_workshop_item();
+                            action = Some(WorkshopSearchAction::RefreshCache(
+                                item.published_file_id.clone(),
+                            ));
                         }
                     }
                     if let Some(url) = &item.preview_url {
@@ -355,5 +377,23 @@ impl StudioApp {
                 details.weak("Select a Workshop item to review its description, subscription, and import options.");
             }
         });
+        match action {
+            Some(WorkshopSearchAction::ReviewLocal(id)) => self.review_workshop_content(&id),
+            Some(WorkshopSearchAction::Import(id) | WorkshopSearchAction::RefreshCache(id)) => {
+                self.workshop.published_file_id = id;
+                self.download_workshop_item();
+            }
+            Some(WorkshopSearchAction::UseAsProfileRoot(id)) => {
+                self.use_available_workshop_package_as_profile_root(&id);
+            }
+            Some(WorkshopSearchAction::ReviewProfile) => {
+                self.section = super::super::Section::Library;
+                self.preview_selected_composition();
+            }
+            Some(WorkshopSearchAction::ChangeSubscription(id, subscribe)) => {
+                self.set_workshop_subscription(id, subscribe);
+            }
+            None => {}
+        }
     }
 }
