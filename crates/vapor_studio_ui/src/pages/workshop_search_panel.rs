@@ -3,24 +3,27 @@ use eframe::egui;
 
 impl StudioApp {
     pub(super) fn draw_workshop_search_panel(&mut self, ui: &mut egui::Ui) {
+        let mut run_search = false;
         ui.horizontal_wrapped(|ui| {
-            ui.add_enabled(
+            let response = ui.add_enabled(
                 !self.operation.running,
                 egui::TextEdit::singleline(&mut self.workshop.search_query)
                     .hint_text("Search Workshop items")
                     .desired_width(300.0),
             );
-            if ui
+            run_search |= (response.has_focus() || response.lost_focus())
+                && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            run_search |= ui
                 .add_enabled(
                     !self.operation.running,
                     egui::Button::new("Search Workshop"),
                 )
-                .clicked()
-            {
-                self.workshop.page = 1;
-                self.search_workshop();
-            }
+                .clicked();
         });
+        if run_search && !self.operation.running {
+            self.workshop.page = 1;
+            self.search_workshop();
+        }
         if !self.workshop.results.is_empty() {
             let page_count = self.workshop.total_results.div_ceil(50).max(1);
             ui.horizontal_wrapped(|ui| {
@@ -52,19 +55,33 @@ impl StudioApp {
                 }
             });
             ui.horizontal_wrapped(|ui| {
+                let page_is_selected = self.workshop.results.iter().all(|item| {
+                    self.workshop
+                        .selected_items
+                        .contains(&item.published_file_id)
+                });
                 if ui
                     .add_enabled(
                         !self.operation.running,
-                        egui::Button::new("Select this page"),
+                        egui::Button::new(if page_is_selected {
+                            "Clear this page"
+                        } else {
+                            "Select this page"
+                        }),
                     )
                     .clicked()
                 {
-                    self.workshop.selected_items.extend(
-                        self.workshop
-                            .results
-                            .iter()
-                            .map(|item| item.published_file_id.clone()),
-                    );
+                    for item in &self.workshop.results {
+                        if page_is_selected {
+                            self.workshop
+                                .selected_items
+                                .remove(&item.published_file_id);
+                        } else {
+                            self.workshop
+                                .selected_items
+                                .insert(item.published_file_id.clone());
+                        }
+                    }
                 }
             });
         }
