@@ -15,7 +15,7 @@ enum PackagepackRoleSelection {
 impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
         page_header(ui, "Author", "Compose", "Build a content package by choosing its compatible projects and versions.");
-        ui.weak("Saving validates the graph and writes the source manifest through Vapor.");
+        ui.weak("Saving checks the selected content and updates its source manifest through Vapor.");
         let composition_has_changes = self
             .authoring
             .composition_edit
@@ -131,7 +131,7 @@ impl StudioApp {
         if let Some(composition) = self.authoring.composition_edit.as_mut() {
             ui.separator();
             ui.label(format!("Editing {} · {}", composition.id, composition.kind));
-            ui.small(format!("Manifest: {}", composition.manifest.display()));
+            ui.small(format!("Source file: {}", composition.manifest.display()));
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.group(|ui| {
                     ui.heading("Playable content");
@@ -291,7 +291,7 @@ impl StudioApp {
                             .iter()
                             .any(|link| link.id == id && link.relationship == relationship)
                         {
-                            self.status = format!("{id} is already in this graph.");
+                            self.status = format!("{id} is already included in this composition.");
                         } else {
                             composition.links.push(SourceCompositionLink {
                                 id,
@@ -334,7 +334,7 @@ impl StudioApp {
                         preview_source_selector = Some(source_selector);
                     }
                     if ui.add_enabled(!self.operation.running && source_graph_saved, egui::Button::new("Use as active profile root"))
-                        .on_disabled_hover_text("Save the current graph before resolving it into a profile.")
+                        .on_disabled_hover_text("Save this composition before resolving it into a profile.")
                         .clicked()
                     {
                         use_profile_root = true;
@@ -348,7 +348,7 @@ impl StudioApp {
                     egui::Button::new("Stage Workshop review"),
                 )
                 .on_disabled_hover_text(
-                    "Save the current graph before staging its source content for review.",
+                    "Save this composition before staging its source content for review.",
                 )
                 .clicked()
             {

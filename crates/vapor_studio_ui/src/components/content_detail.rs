@@ -28,44 +28,70 @@ impl StudioApp {
                     content.version.as_deref().unwrap_or("unversioned")
                 ));
                 if !content.is_unambiguous() {
-                    ui.colored_label(egui::Color32::YELLOW, "Conflicting local records: do not select or publish this identity until its sources are reconciled.");
-                    for conflict in &content.conflicts {
-                        ui.small(format!(
-                            "{} differs: '{}' at {} · '{}' at {}",
-                            conflict.field,
-                            conflict.first_value,
-                            conflict.first_location.display(),
-                            conflict.conflicting_value,
-                            conflict.conflicting_location.display(),
-                        ));
-                    }
+                    ui.colored_label(egui::Color32::YELLOW, "Local copies disagree. Review the source details before using or publishing this content.");
+                    egui::CollapsingHeader::new("Conflicting source details")
+                        .show(ui, |ui| {
+                            for conflict in &content.conflicts {
+                                ui.small(format!(
+                                    "{} differs: '{}' at {} · '{}' at {}",
+                                    conflict.field,
+                                    conflict.first_value,
+                                    conflict.first_location.display(),
+                                    conflict.conflicting_value,
+                                    conflict.conflicting_location.display(),
+                                ));
+                            }
+                        });
                 }
-                for location in &content.locations {
-                    let source = match location.kind {
+                let available_sources = content
+                    .locations
+                    .iter()
+                    .map(|location| match location.kind {
                         vapor_studio_core::CatalogLocationKind::Workspace => "Workspace",
                         vapor_studio_core::CatalogLocationKind::Cache => "Vapor cache",
                         vapor_studio_core::CatalogLocationKind::Installed if location.enabled => {
                             "Installed"
                         }
                         vapor_studio_core::CatalogLocationKind::Installed => "Installed · disabled",
-                    };
-                    ui.label(format!(
-                        "{source}{} · {}",
-                        location
-                            .install_source
-                            .as_deref()
-                            .map(|source| format!(" · via {source}"))
-                            .unwrap_or_default(),
-                        location.root.display()
-                    ));
-                    ui.small(format!(
-                        "Payload fingerprint: {}",
-                        location
-                            .fingerprint
-                            .as_deref()
-                            .unwrap_or("not recorded for this source")
-                    ));
-                }
+                    })
+                    .collect::<std::collections::BTreeSet<_>>();
+                ui.label(format!(
+                    "Available from · {}",
+                    available_sources.into_iter().collect::<Vec<_>>().join(", ")
+                ));
+                egui::CollapsingHeader::new("File locations and integrity details")
+                    .show(ui, |ui| {
+                        for location in &content.locations {
+                            let source = match location.kind {
+                                vapor_studio_core::CatalogLocationKind::Workspace => "Workspace",
+                                vapor_studio_core::CatalogLocationKind::Cache => "Vapor cache",
+                                vapor_studio_core::CatalogLocationKind::Installed
+                                    if location.enabled =>
+                                {
+                                    "Installed"
+                                }
+                                vapor_studio_core::CatalogLocationKind::Installed => {
+                                    "Installed · disabled"
+                                }
+                            };
+                            ui.label(format!(
+                                "{source}{} · {}",
+                                location
+                                    .install_source
+                                    .as_deref()
+                                    .map(|source| format!(" · via {source}"))
+                                    .unwrap_or_default(),
+                                location.root.display()
+                            ));
+                            ui.small(format!(
+                                "File fingerprint: {}",
+                                location
+                                    .fingerprint
+                                    .as_deref()
+                                    .unwrap_or("not recorded for this source")
+                            ));
+                        }
+                    });
                 if content.dependencies.is_empty() {
                     ui.weak("No declared dependencies.");
                 } else {

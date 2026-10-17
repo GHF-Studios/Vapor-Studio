@@ -90,7 +90,7 @@ impl StudioApp {
                 if self.has_unsaved_workspace_edits() {
                     ui.colored_label(egui::Color32::from_rgb(242, 193, 91), "Unsaved edits");
                 } else if !self.workspace.root.trim().is_empty() {
-                    ui.weak("Workspace ready");
+                    ui.weak("Workspace open");
                 }
                 if ui.button(if self.workspace.root.trim().is_empty() { "Open workspace" } else { "Manage workspace" }).clicked() {
                     self.section = Section::Workspace;

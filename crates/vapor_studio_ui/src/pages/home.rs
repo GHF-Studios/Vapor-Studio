@@ -1,5 +1,5 @@
 use super::super::operation_center::operation_kind_label;
-use super::super::components::design::{page_header, primary_button};
+use super::super::components::design::{installation_status, page_header, primary_button, status_text};
 use super::super::{Section, StudioApp, content_selector};
 use eframe::egui;
 use vapor_studio_core::InstallationState;
@@ -13,11 +13,19 @@ impl StudioApp {
         let card_style = ui.style().clone();
         ui.columns(2, |columns| {
             egui::Frame::group(&card_style).show(&mut columns[0], |ui| {
-                ui.small("READY TO PLAY");
+                ui.small("SELECTED PROFILE");
                 ui.heading(&profile.name);
                 if let Some(root) = profile.root_package.as_ref() {
-                    ui.label(format!("{} · {}", content_selector(root), installation_label(&profile.installation)));
+                    ui.label(content_selector(root));
+                    let (status, tone) = installation_status(&profile.installation);
+                    status_text(ui, status, tone);
                     let installed = matches!(profile.installation, InstallationState::Installed { .. });
+                    let needs_review = matches!(
+                        profile.installation,
+                        InstallationState::OutOfDate { .. }
+                            | InstallationState::Partial { .. }
+                            | InstallationState::NeedsRepair { .. }
+                    );
                     let source_ready = !self.has_unsaved_workspace_edits()
                         && self.profile_composition.preview().is_some_and(|preview| {
                             preview.selector == content_selector(root)
@@ -28,23 +36,26 @@ impl StudioApp {
                         });
                     let action = if installed {
                         "Play composition"
+                    } else if needs_review {
+                        "Review installation"
                     } else if source_ready {
                         "Build and play"
                     } else {
                         "Set up composition"
                     };
                     let can_play = !self.operation.running
-                        && !matches!(profile.installation,
-                            InstallationState::OutOfDate { .. }
-                                | InstallationState::Partial { .. }
-                                | InstallationState::NeedsRepair { .. })
-                        && (installed || source_ready || !self.has_unsaved_workspace_edits());
+                        && (needs_review
+                            || installed
+                            || source_ready
+                            || !self.has_unsaved_workspace_edits());
                     let mut play_clicked = false;
                     ui.add_enabled_ui(can_play, |ui| {
                         play_clicked = primary_button(ui, action).clicked();
                     });
                     if play_clicked {
-                        if installed {
+                        if needs_review {
+                            self.section = Section::Library;
+                        } else if installed {
                             self.run_installed_selected();
                         } else if source_ready {
                             self.run_selected();
@@ -53,10 +64,7 @@ impl StudioApp {
                             self.preview_selected_composition();
                         }
                     }
-                    if matches!(profile.installation,
-                        InstallationState::OutOfDate { .. }
-                            | InstallationState::Partial { .. }
-                            | InstallationState::NeedsRepair { .. }) {
+                    if needs_review {
                         ui.colored_label(egui::Color32::YELLOW,
                             "This installation needs review before it can be played. Open Profiles for verification or repair.");
                     }
@@ -175,16 +183,5 @@ impl StudioApp {
                 });
             }
         }
-    }
-}
-
-fn installation_label(state: &InstallationState) -> &'static str {
-    match state {
-        InstallationState::Unknown => "Status not checked",
-        InstallationState::NotInstalled => "Not installed",
-        InstallationState::Installed { .. } => "Installed",
-        InstallationState::OutOfDate { .. } => "Out of date",
-        InstallationState::Partial { .. } => "Partially installed",
-        InstallationState::NeedsRepair { .. } => "Needs repair",
     }
 }

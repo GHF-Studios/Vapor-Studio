@@ -1,5 +1,6 @@
 use super::super::StudioApp;
 use super::super::content_selector;
+use super::super::components::design::{installation_status, status_text};
 use eframe::egui;
 
 impl StudioApp {
@@ -13,14 +14,7 @@ impl StudioApp {
                     .as_ref()
                     .map(content_selector)
                     .unwrap_or_else(|| "No composition selected".to_owned());
-                let status = match &profile.installation {
-                    vapor_studio_core::InstallationState::Unknown => "Not checked",
-                    vapor_studio_core::InstallationState::NotInstalled => "Not installed",
-                    vapor_studio_core::InstallationState::Installed { .. } => "Ready to play",
-                    vapor_studio_core::InstallationState::OutOfDate { .. } => "Update available",
-                    vapor_studio_core::InstallationState::Partial { .. } => "Needs repair",
-                    vapor_studio_core::InstallationState::NeedsRepair { .. } => "Needs repair",
-                };
+                let (status, tone) = installation_status(&profile.installation);
                 let selected = index == self.profile.active_index;
                 let style = ui.style().clone();
                 egui::Frame::group(&style).show(ui, |ui| {
@@ -35,7 +29,7 @@ impl StudioApp {
                         self.select_profile(index);
                     }
                     ui.label(root);
-                    ui.small(status);
+                    status_text(ui, status, tone);
                 });
             }
         });

@@ -40,7 +40,7 @@ fn graph_difference_lines(
     let mut differences = Vec::new();
     if saved.root != installed.root {
         differences.push(format!(
-            "Root changed: {} → {}",
+            "Selected content changed: {} → {}",
             identity_label(&saved.root),
             identity_label(&installed.root),
         ));
@@ -74,7 +74,7 @@ fn graph_difference_lines(
             .find(|node| node.content == expected.content)
         else {
             differences.push(format!(
-                "Missing installed node: {} · {}",
+                "No longer installed: {} · {}",
                 expected.kind,
                 identity_label(&expected.content),
             ));
@@ -82,20 +82,20 @@ fn graph_difference_lines(
         };
         let mut changes = Vec::new();
         if expected.kind != actual.kind {
-            changes.push("kind".to_owned());
+            changes.push("content type".to_owned());
         }
         if expected.fingerprint != actual.fingerprint {
-            changes.push("payload".to_owned());
+            changes.push("file contents".to_owned());
         }
         if expected.source != actual.source {
-            changes.push("source".to_owned());
+            changes.push("source location".to_owned());
         }
         if canonical_dependencies(expected) != canonical_dependencies(actual) {
             changes.push("dependencies".to_owned());
         }
         if !changes.is_empty() {
             differences.push(format!(
-                "Changed {}: {}",
+                "Changed {} · {}",
                 identity_label(&expected.content),
                 changes.join(", "),
             ));
@@ -108,7 +108,7 @@ fn graph_difference_lines(
             .any(|expected| expected.content == actual.content)
         {
             differences.push(format!(
-                "Added installed node: {} · {}",
+                "Also installed: {} · {}",
                 actual.kind,
                 identity_label(&actual.content),
             ));
@@ -116,7 +116,7 @@ fn graph_difference_lines(
     }
     if differences.is_empty() {
         differences
-            .push("No graph differences were found; verify the installed files again.".to_owned());
+            .push("No content differences found; verify the installed files again.".to_owned());
     }
     differences
 }
@@ -208,7 +208,7 @@ impl StudioApp {
             if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && has_source, egui::Button::new("Validate source"))
                 .on_disabled_hover_text("Source validation needs this profile to be associated with a workspace. Cached or seeded compositions validate during install.")
                 .clicked() { self.validate_selected_source(); }
-            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify graph")).clicked() { self.verify_selected_installation(); }
+            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify installed content")).clicked() { self.verify_selected_installation(); }
         });
 
         ui.label("Installation");
@@ -225,18 +225,21 @@ impl StudioApp {
                     "{} exact content versions installed",
                     artifacts.len()
                 ));
-                for artifact in artifacts {
-                    ui.small(format!(
-                        "{}{} · {}",
-                        artifact.id,
-                        artifact
-                            .version
-                            .as_ref()
-                            .map(|version| format!("@{version}"))
-                            .unwrap_or_default(),
-                        artifact.root.display()
-                    ));
-                }
+                egui::CollapsingHeader::new("Installed file locations")
+                    .show(ui, |ui| {
+                        for artifact in artifacts {
+                            ui.small(format!(
+                                "{}{} · {}",
+                                artifact.id,
+                                artifact
+                                    .version
+                                    .as_ref()
+                                    .map(|version| format!("@{version}"))
+                                    .unwrap_or_default(),
+                                artifact.root.display()
+                            ));
+                        }
+                    });
             }
             InstallationState::OutOfDate {
                 detail,
@@ -246,50 +249,55 @@ impl StudioApp {
             } => {
                 ui.colored_label(
                     egui::Color32::YELLOW,
-                    "Installed content differs from this profile's saved graph",
+                    "Installed content differs from this profile's saved setup",
                 );
                 ui.label(detail);
                 if !verified {
-                    ui.label("Verify the installed files before adopting this graph.");
+                    ui.label("Verify the installed files before saving these changes to the profile.");
                 }
                 if let Some(saved_graph) = &profile.resolved_graph {
-                    ui.collapsing("Compare with saved graph", |ui| {
-                        for difference in graph_difference_lines(saved_graph, actual_graph) {
-                            ui.small(difference);
-                        }
-                    });
+                    egui::CollapsingHeader::new("Review changes")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for difference in graph_difference_lines(saved_graph, actual_graph) {
+                                ui.small(difference);
+                            }
+                        });
                 } else {
-                    ui.weak("This profile has no saved graph yet.");
+                    ui.weak("This profile has no saved content selection yet.");
                 }
                 ui.small(format!(
-                    "Installed graph: {} nodes · engine {}",
+                    "Installed setup: {} content items · engine {}",
                     actual_graph.nodes.len(),
                     actual_graph.effective_engine.id,
                 ));
-                for node in &actual_graph.nodes {
-                    ui.small(format!(
-                        "{} · {}{} · {} · {}",
-                        node.kind,
-                        node.content.id,
-                        node.content
-                            .version
-                            .as_deref()
-                            .map(|version| format!("@{version}"))
-                            .unwrap_or_default(),
-                        node.fingerprint.as_deref().unwrap_or("unfingerprinted"),
-                        node.source.as_deref().unwrap_or("source unknown"),
-                    ));
-                }
-                ui.small(format!("{} installed artifacts observed", artifacts.len()));
+                egui::CollapsingHeader::new("Installed content details")
+                    .show(ui, |ui| {
+                        for node in &actual_graph.nodes {
+                            ui.small(format!(
+                                "{} · {}{} · {} · {}",
+                                node.kind,
+                                node.content.id,
+                                node.content
+                                    .version
+                                    .as_deref()
+                                    .map(|version| format!("@{version}"))
+                                    .unwrap_or_default(),
+                                node.fingerprint.as_deref().unwrap_or("unfingerprinted"),
+                                node.source.as_deref().unwrap_or("source unknown"),
+                            ));
+                        }
+                        ui.small(format!("{} installed artifacts observed", artifacts.len()));
+                    });
                 if ui
                     .add_enabled(
                         !self.operation.running && *verified,
-                        egui::Button::new("Adopt installed graph"),
+                        egui::Button::new("Save installed setup to profile"),
                     )
                     .on_hover_text(if *verified {
-                        "Replace this profile's saved graph after reviewing the verified installed nodes."
+                        "Update this profile to match the verified content currently installed."
                     } else {
-                        "Verify the installed graph before adopting it."
+                        "Verify the installed files before saving this setup to the profile."
                     })
                     .clicked()
                 {
@@ -391,7 +399,7 @@ mod graph_difference_tests {
         installed.nodes[1].dependencies.reverse();
         assert_eq!(
             graph_difference_lines(&saved, &installed),
-            ["No graph differences were found; verify the installed files again."],
+            ["No content differences found; verify the installed files again."],
         );
 
         installed.nodes[1].fingerprint = Some("sha256:changed".to_owned());
@@ -403,17 +411,17 @@ mod graph_difference_tests {
         assert!(
             differences
                 .iter()
-                .any(|line| line.contains("payload, source, dependencies"))
+                .any(|line| line.contains("file contents, source location, dependencies"))
         );
         assert!(
             differences
                 .iter()
-                .any(|line| line.contains("Missing installed node"))
+                .any(|line| line.contains("No longer installed"))
         );
         assert!(
             differences
                 .iter()
-                .any(|line| line.contains("Added installed node"))
+                .any(|line| line.contains("Also installed"))
         );
     }
 }

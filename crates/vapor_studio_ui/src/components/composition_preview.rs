@@ -19,7 +19,7 @@ pub(crate) fn draw_composition_preview(
                 );
             }
         });
-        ui.weak("Dependency-first resolution · no packages, downloads, or installed files were changed.");
+        ui.weak("This is a read-only plan. It has not downloaded or installed anything.");
         for node in &preview.nodes {
             let source = match (node.source, node.already_installed) {
                 (CompositionPreviewSource::Workspace, true) => "Workspace source · already installed",

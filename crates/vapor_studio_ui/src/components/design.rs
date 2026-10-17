@@ -1,4 +1,5 @@
 use eframe::egui;
+use vapor_studio_core::InstallationState;
 
 pub(crate) const ACCENT: egui::Color32 = egui::Color32::from_rgb(112, 190, 213);
 pub(crate) const ACCENT_FILL: egui::Color32 = egui::Color32::from_rgb(34, 92, 116);
@@ -74,4 +75,17 @@ pub(crate) enum StatusTone {
     Positive,
     Caution,
     Error,
+}
+
+/// The same installation state should mean the same thing throughout Studio.
+pub(crate) fn installation_status(state: &InstallationState) -> (&'static str, StatusTone) {
+    match state {
+        InstallationState::Unknown => ("Status not checked", StatusTone::Neutral),
+        InstallationState::NotInstalled => ("Not installed", StatusTone::Neutral),
+        InstallationState::Installed { .. } => ("Installed", StatusTone::Positive),
+        InstallationState::OutOfDate { .. } => ("Content differs", StatusTone::Caution),
+        InstallationState::Partial { .. } | InstallationState::NeedsRepair { .. } => {
+            ("Needs repair", StatusTone::Error)
+        }
+    }
 }

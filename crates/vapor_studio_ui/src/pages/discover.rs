@@ -101,7 +101,6 @@ impl StudioApp {
                         self.catalog.search_query.clear();
                         self.catalog.source_filter = CatalogSourceFilter::All;
                         self.catalog.kind_filter = None;
-                        self.catalog.selected = None;
                     }
                 } else if self.workspace.root.trim().is_empty() {
                     ui.heading("No local content yet");
@@ -146,22 +145,19 @@ impl StudioApp {
                     )
             })
         });
+        let selected_is_hidden = self.catalog.selected.is_some()
+            && self.catalog.items.iter().any(|content| {
+                super::super::catalog_content_selector(content)
+                    == self.catalog.selected.as_deref().unwrap_or_default()
+            })
+            && !selected_is_visible;
         if ui.available_width() < 820.0 {
             section_header(ui, "Available content", "Local sources and authored projects in the active workspace.");
             self.draw_workspace_candidates(ui);
             self.draw_catalog_list(ui);
             ui.separator();
             section_header(ui, "Details", "Select a content version to review its source, dependencies, and available actions.");
-            if selected_is_visible {
-                self.draw_content_detail(ui);
-            } else {
-                empty_state(
-                    ui,
-                    "Choose content to inspect",
-                    "The detail panel will show where a version came from and whether it can be selected, installed, or published.",
-                    |_| {},
-                );
-            }
+            self.draw_selected_content_detail(ui, selected_is_visible, selected_is_hidden);
         } else {
             ui.columns(2, |columns| {
                 columns[0].set_min_width(360.0);
@@ -173,17 +169,44 @@ impl StudioApp {
 
                 columns[1].set_min_width(360.0);
                 section_header(&mut columns[1], "Details", "Select a content version to review its source, dependencies, and available actions.");
-                if selected_is_visible {
-                    self.draw_content_detail(&mut columns[1]);
-                } else {
-                    empty_state(
-                        &mut columns[1],
-                        "Choose content to inspect",
-                        "The detail panel will show where a version came from and whether it can be selected, installed, or published.",
-                        |_| {},
-                    );
-                }
+                self.draw_selected_content_detail(
+                    &mut columns[1],
+                    selected_is_visible,
+                    selected_is_hidden,
+                );
             });
+        }
+    }
+
+    fn draw_selected_content_detail(
+        &mut self,
+        ui: &mut egui::Ui,
+        selected_is_visible: bool,
+        selected_is_hidden: bool,
+    ) {
+        if selected_is_visible {
+            self.draw_content_detail(ui);
+        } else if !selected_is_hidden {
+            empty_state(
+                ui,
+                "Choose content to inspect",
+                "The detail panel will show where a version came from and whether it can be selected, installed, or published.",
+                |_| {},
+            );
+        } else {
+            let selected = self.catalog.selected.clone().unwrap_or_default();
+            empty_state(
+                ui,
+                "Selected content is filtered out",
+                &format!("{selected} is still selected, but the current search or filters hide it."),
+                |ui| {
+                    if ui.button("Clear search and filters").clicked() {
+                        self.catalog.search_query.clear();
+                        self.catalog.source_filter = CatalogSourceFilter::All;
+                        self.catalog.kind_filter = None;
+                    }
+                },
+            );
         }
     }
 }

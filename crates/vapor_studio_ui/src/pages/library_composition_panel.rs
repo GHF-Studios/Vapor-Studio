@@ -38,10 +38,10 @@ impl StudioApp {
                     !self.operation.running
                         && !self.has_unsaved_workspace_edits()
                         && editable_source,
-                    egui::Button::new("Edit source graph"),
+                    egui::Button::new("Edit composition"),
                 )
                 .on_disabled_hover_text(
-                    "Only a Packagepack authored in the active workspace can be edited here.",
+                    "Only a Packagepack in the active workspace can be edited here.",
                 )
                 .clicked()
             {
@@ -82,7 +82,7 @@ impl StudioApp {
         if let Some(graph) = &profile.resolved_graph {
             ui.group(|ui| {
                 ui.label(format!(
-                    "Resolved composition · {} content nodes",
+                    "Selected content · {} items",
                     graph.nodes.len()
                 ));
                 if let InstallationState::Installed {
@@ -90,7 +90,7 @@ impl StudioApp {
                     ..
                 } = &profile.installation
                 {
-                    ui.small(format!("Resolved graph fingerprint: {fingerprint}"));
+                    ui.small(format!("Content fingerprint: {fingerprint}"));
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
@@ -106,7 +106,7 @@ impl StudioApp {
                             .unwrap_or_else(|| "None".to_owned())
                     ));
                 });
-                egui::CollapsingHeader::new("Resolved content")
+                egui::CollapsingHeader::new("Included content")
                     .default_open(true)
                     .show(ui, |ui| {
                         for node in &graph.nodes {
@@ -128,7 +128,7 @@ impl StudioApp {
                     });
             });
         } else {
-            ui.weak("Install this composition to resolve and record its exact dependency graph.");
+            ui.weak("Install this composition to record its exact content versions and dependencies.");
         }
     }
 }
