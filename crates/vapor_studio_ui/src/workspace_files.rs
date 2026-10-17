@@ -17,12 +17,10 @@ pub(super) fn discover_workspace_files(root: &Path) -> Result<Vec<PathBuf>, Stri
             let entry = entry.map_err(|error| error.to_string())?;
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with('.')
-                || matches!(
-                    name.as_ref(),
-                    "target" | "node_modules" | "vendor" | "output"
-                )
-            {
+            if matches!(
+                name.as_ref(),
+                ".git" | ".hg" | ".svn" | ".cache" | "target" | "node_modules" | "vendor" | "output"
+            ) {
                 continue;
             }
             let file_type = entry.file_type().map_err(|error| error.to_string())?;
@@ -37,7 +35,7 @@ pub(super) fn discover_workspace_files(root: &Path) -> Result<Vec<PathBuf>, Stri
                 files.push(relative);
                 if files.len() > 10_000 {
                     return Err(
-                        "workspace contains more than 10,000 visible files; narrow the source root"
+                        "workspace contains more than 10,000 files; narrow the source root"
                             .to_owned(),
                     );
                 }

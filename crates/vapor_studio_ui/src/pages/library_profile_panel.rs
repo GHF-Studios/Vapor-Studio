@@ -5,41 +5,46 @@ use eframe::egui;
 impl StudioApp {
     pub(super) fn draw_profile_selector_panel(&mut self, ui: &mut eframe::egui::Ui) {
         let can_switch = !self.operation.running && !self.has_unsaved_context_switch_edits();
-        let card_style = ui.style().clone();
         let mut requested_profile = None;
-        egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
-            for index in 0..self.profile.items.len() {
-                let profile = &self.profile.items[index];
-                let (status, tone) = installation_status(&profile.installation);
-                let selected = index == self.profile.active_index;
-                egui::Frame::group(&card_style).show(ui, |ui| {
-                    let response = ui.add_enabled(
-                        can_switch,
-                        egui::Button::selectable(
-                            selected,
-                            egui::RichText::new(&profile.name).strong(),
-                        ),
-                    );
-                    if response
-                        .on_disabled_hover_text("Discard the Create draft or save/discard workspace edits before switching profiles.")
-                        .clicked()
-                    {
-                        requested_profile = Some(index);
-                    }
+        let profile_list_height = ui.available_height().min(560.0).max(1.0);
+        egui::ScrollArea::vertical()
+            .max_height(profile_list_height)
+            .show(ui, |ui| {
+                for index in 0..self.profile.items.len() {
+                    let profile = &self.profile.items[index];
+                    let (status, tone) = installation_status(&profile.installation);
+                    let selected = index == self.profile.active_index;
+                    ui.horizontal_wrapped(|ui| {
+                        let response = ui.add_enabled(
+                            can_switch,
+                            egui::Button::selectable(
+                                selected,
+                                egui::RichText::new(&profile.name).strong(),
+                            ),
+                        );
+                        if response
+                            .on_disabled_hover_text("Discard the Create draft or save/discard workspace edits before switching profiles.")
+                            .clicked()
+                        {
+                            requested_profile = Some(index);
+                        }
+                        status_text(ui, status, tone);
+                    });
                     if let Some(root) = &profile.root_package {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(&root.id);
-                            if let Some(version) = &root.version {
-                                ui.weak(version);
-                            }
-                        });
+                        ui.small(format!(
+                            "{}{}",
+                            root.id,
+                            root.version
+                                .as_ref()
+                                .map(|version| format!(" · {version}"))
+                                .unwrap_or_default()
+                        ));
                     } else {
-                        ui.weak("No composition selected");
+                        ui.small("No game setup selected");
                     }
-                    status_text(ui, status, tone);
-                });
-            }
-        });
+                    ui.separator();
+                }
+            });
         if let Some(index) = requested_profile {
             self.select_profile(index);
         }
@@ -57,8 +62,12 @@ impl StudioApp {
                 ui.strong("Profile settings");
                 ui.weak("Name and launch configuration");
             });
-            ui.horizontal(|ui| {
-                ui.text_edit_singleline(&mut self.profile.name_draft);
+            ui.horizontal_wrapped(|ui| {
+                let name_width = (ui.available_width() - 160.0).max(140.0).min(360.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.profile.name_draft)
+                        .desired_width(name_width),
+                );
                 if ui
                     .add_enabled(
                         !self.operation.running

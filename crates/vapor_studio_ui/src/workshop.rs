@@ -9,6 +9,7 @@ use vapor_studio_core::OperationKind;
 
 const WORKSHOP_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const WORKSHOP_PROGRESS_POLL_MAX_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_RECENT_WORKSHOP_ACQUISITIONS: usize = 50;
 
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
 pub(super) enum WorkshopTab {
@@ -26,7 +27,8 @@ pub(super) struct WorkshopState {
     pub(super) change_note: String,
     pub(super) confirmation: String,
     pub(super) selected_items: std::collections::BTreeSet<String>,
-    pub(super) pending_acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
+    pub(super) recent_acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
+    pub(super) pending_acquisition_ids: std::collections::BTreeSet<String>,
     pub(super) search_query: String,
     pub(super) pending_search: Option<(String, u32)>,
     pub(super) results: Vec<vapor_studio_core::WorkshopItem>,
@@ -34,6 +36,7 @@ pub(super) struct WorkshopState {
     pub(super) results_query: Option<String>,
     pub(super) subscriptions: std::collections::BTreeSet<String>,
     pub(super) subscriptions_loaded: bool,
+    pub(super) subscriptions_stale: bool,
     pub(super) subscription_search_query: String,
     pub(super) subscription_details:
         std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
@@ -53,7 +56,8 @@ impl Default for WorkshopState {
             change_note: String::new(),
             confirmation: String::new(),
             selected_items: Default::default(),
-            pending_acquisitions: Vec::new(),
+            recent_acquisitions: Vec::new(),
+            pending_acquisition_ids: Default::default(),
             search_query: String::new(),
             pending_search: None,
             results: Vec::new(),
@@ -61,6 +65,7 @@ impl Default for WorkshopState {
             results_query: None,
             subscriptions: Default::default(),
             subscriptions_loaded: false,
+            subscriptions_stale: false,
             subscription_search_query: String::new(),
             subscription_details: Default::default(),
             subscription_poll_interval: WORKSHOP_PROGRESS_POLL_INTERVAL,
@@ -125,6 +130,7 @@ impl StudioApp {
     }
 
     pub(super) fn apply_workshop_subscriptions_error(&mut self, error: String) {
+        self.workshop.subscriptions_stale = self.workshop.subscriptions_loaded;
         self.status = error;
         let downloading = self
             .workshop
@@ -147,16 +153,41 @@ impl StudioApp {
     pub(super) fn apply_workshop_acquisition(
         &mut self,
         acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
+        requested: usize,
     ) {
-        self.status = format!(
-            "Imported {} Workshop item(s) into Vapor's cache.",
-            acquisitions.len()
-        );
-        self.workshop.pending_acquisitions = acquisitions;
-        self.workshop.selected_items.clear();
+        let imported = acquisitions.len();
+        for acquisition in acquisitions.into_iter().rev() {
+            if let Some(existing) = self.workshop.recent_acquisitions.iter().position(|recent| {
+                recent.id == acquisition.id && recent.version == acquisition.version
+            }) {
+                self.workshop.recent_acquisitions.remove(existing);
+            }
+            self.workshop.recent_acquisitions.insert(0, acquisition);
+        }
+        self.workshop
+            .recent_acquisitions
+            .truncate(MAX_RECENT_WORKSHOP_ACQUISITIONS);
+        self.open_workshop_tab(WorkshopTab::Imports);
+        if imported == requested {
+            self.status = if imported == 1 {
+                "Added the Workshop item to content available on this device.".to_owned()
+            } else {
+                format!("Added {imported} Workshop items to content available on this device.")
+            };
+            for id in std::mem::take(&mut self.workshop.pending_acquisition_ids) {
+                self.workshop.selected_items.remove(&id);
+            }
+        } else {
+            self.status = super::operation_protocol::partial_workshop_acquisition_message(
+                imported,
+                requested,
+            );
+            self.workshop.pending_acquisition_ids.clear();
+        }
     }
 
     pub(super) fn apply_workshop_acquisition_error(&mut self, error: String) {
+        self.workshop.pending_acquisition_ids.clear();
         self.status = error;
     }
 
@@ -229,6 +260,7 @@ impl StudioApp {
         subscriptions: Vec<vapor_studio_core::WorkshopSubscription>,
     ) {
         self.workshop.subscriptions_loaded = true;
+        self.workshop.subscriptions_stale = false;
         let downloading = subscriptions.iter().any(|item| item.downloading);
         self.workshop.subscriptions = subscriptions
             .iter()
@@ -262,20 +294,25 @@ impl StudioApp {
             }
         }
         self.status = format!(
-            "{} {} Steam Workshop item(s).",
+            "{} {} Steam Workshop item{}.",
             if subscribed {
                 "Subscribed to"
             } else {
                 "Unsubscribed from"
             },
-            ids.len()
+            ids.len(),
+            if ids.len() == 1 { "" } else { "s" }
         );
     }
 
     pub(super) fn stage_workshop_content(&mut self, selector: String) {
+        if !self.catalog.source_snapshot_current() || !self.catalog.local_catalog_current() {
+            self.status = "Refresh the project list and on-device content list before preparing this upload. Studio needs current information to check the selected version and find conflicting copies.".to_owned();
+            return;
+        }
         if self.catalog_identity_is_conflicted(&selector) {
             self.status = format!(
-                "Cannot stage {selector}: local records for this exact version disagree. Review the catalog conflict first."
+                "Cannot prepare {selector}: on-device copies of this version disagree. Review their details before continuing."
             );
             return;
         }
@@ -306,9 +343,13 @@ impl StudioApp {
         selector: String,
         expected_review: vapor_studio_core::WorkshopPackagePreview,
     ) {
+        if !self.catalog.source_snapshot_current() || !self.catalog.local_catalog_current() {
+            self.status = "Refresh the project list and on-device content list before publishing. Studio needs current information to check the selected version and find conflicting copies.".to_owned();
+            return;
+        }
         if self.catalog_identity_is_conflicted(&selector) {
             self.status = format!(
-                "Cannot publish {selector}: local records for this exact version disagree. Review the catalog conflict first."
+                "Cannot publish {selector}: on-device copies of this version disagree. Review their details before continuing."
             );
             return;
         }
@@ -352,12 +393,11 @@ impl StudioApp {
     pub(super) fn download_workshop_item(&mut self) {
         let published_file_id = self.workshop.published_file_id.trim().to_owned();
         if published_file_id.is_empty() {
-            self.status = "Enter a numeric Steam Workshop item ID.".to_owned();
+            self.status = "Enter the number from the Workshop item's link.".to_owned();
             return;
         }
         if !published_file_id.bytes().all(|byte| byte.is_ascii_digit()) {
-            self.status =
-                "Workshop downloads currently require a numeric PublishedFileId.".to_owned();
+            self.status = "Enter the number from the Workshop item's link, not its full URL.".to_owned();
             return;
         }
         self.download_workshop_items(vec![published_file_id], None);
@@ -395,6 +435,10 @@ impl StudioApp {
         );
     }
 
+    pub(in crate::app) fn import_workshop_items(&mut self, published_file_ids: Vec<String>) {
+        self.download_workshop_items(published_file_ids, None);
+    }
+
     fn download_workshop_items(
         &mut self,
         published_file_ids: Vec<String>,
@@ -413,7 +457,7 @@ impl StudioApp {
             .iter()
             .all(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
         {
-            self.status = "Workshop downloads require numeric PublishedFileIds.".to_owned();
+            self.status = "Enter the Workshop item numbers, not full links.".to_owned();
             return;
         }
         let executable = match std::env::current_exe() {
@@ -439,13 +483,18 @@ impl StudioApp {
                 }
             }
         }
+        self.workshop.pending_acquisition_ids = published_file_ids.iter().cloned().collect();
         self.spawn(OperationKind::Acquire, move |_context| {
-            OperationResult::WorkshopAcquisition(vapor_studio_core::download_workshop_items(
-                &executable,
-                &published_file_ids,
-            ))
+            OperationResult::WorkshopAcquisition(
+                vapor_studio_core::download_workshop_items(&executable, &published_file_ids)
+                    .map(|acquisitions| (acquisitions, count)),
+            )
         });
-        self.status = format!("Importing {count} public Workshop item(s) into Vapor's cache…");
+        self.status = if count == 1 {
+            "Downloading this item for use in Studio…".to_owned()
+        } else {
+            format!("Downloading {count} items for use in Studio…")
+        };
     }
 
     pub(in crate::app) fn search_workshop(&mut self) {

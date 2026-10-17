@@ -1,4 +1,5 @@
 use super::super::StudioApp;
+use super::super::components::design::{StatusTone, status_text};
 use super::super::content_selector;
 use eframe::egui;
 use vapor_studio_core::{
@@ -6,18 +7,14 @@ use vapor_studio_core::{
 };
 
 #[derive(Clone, Copy)]
-pub(super) enum ProfilePrimaryAction {
-    PlayInstalled,
+pub(super) enum ProfileInstallationAction {
+    Play,
     Repair,
     Verify,
     Update,
     ReviewPlan,
     BuildAndPlay,
     Install,
-}
-
-pub(super) enum ProfileInstallationAction {
-    Primary(ProfilePrimaryAction),
     ValidateSource,
     VerifyInstalled,
     AdoptInstalledGraph,
@@ -140,20 +137,37 @@ impl StudioApp {
         let mut action_to_run = None;
         let has_root = profile.root_package.is_some();
         let has_source = profile.workspace.is_some();
-        let root_plan_node = profile.root_package.as_ref().and_then(|root| {
+        let selected_preview = profile.root_package.as_ref().and_then(|root| {
             let selector = content_selector(root);
             self.profile_composition
                 .preview()
-                .filter(|preview| preview.selector == selector && preview.ready())
-                .and_then(|preview| preview.nodes.last())
+                .filter(|preview| preview.selector == selector)
         });
-        let preview_ready = root_plan_node.is_some();
+        let root_plan_node = profile.root_package.as_ref().and_then(|root| {
+            selected_preview.and_then(|preview| {
+                preview.nodes.iter().find(|node| node.id == root.id)
+            })
+        });
+        let plan_needs_install = selected_preview.is_some_and(|preview| {
+            preview.nodes.iter().any(|node| {
+                !node.already_installed
+                    && node.source != vapor_studio_core::CompositionPreviewSource::Installed
+            })
+        });
+        let plan_has_refresh_source = selected_preview.is_some_and(|preview| {
+            preview
+                .nodes
+                .iter()
+                .any(|node| node.source != vapor_studio_core::CompositionPreviewSource::Installed)
+        });
         let root_installed = root_plan_node.is_some_and(|node| node.already_installed);
-        let root_has_refresh_source = root_plan_node.is_some_and(|node| {
-            node.source != vapor_studio_core::CompositionPreviewSource::Installed
-        });
-        let root_is_workspace_source = root_plan_node.is_some_and(|node| {
-            node.source == vapor_studio_core::CompositionPreviewSource::Workspace
+        let root_is_workspace_source = profile.root_package.as_ref().is_some_and(|root| {
+            root_plan_node.is_some_and(|node| {
+                node.source == vapor_studio_core::CompositionPreviewSource::Workspace
+            }) || self.catalog.sources.iter().any(|content| {
+                content.id == root.id
+                    && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+            })
         });
         let installed = matches!(&profile.installation, InstallationState::Installed { .. });
         let needs_repair = matches!(
@@ -161,163 +175,213 @@ impl StudioApp {
             InstallationState::NeedsRepair { .. } | InstallationState::Partial { .. }
         );
         let out_of_date = matches!(&profile.installation, InstallationState::OutOfDate { .. });
-        let primary_action = if !has_root {
-            None
-        } else if installed && !needs_repair && !out_of_date {
-            Some(("Play installed", ProfilePrimaryAction::PlayInstalled))
-        } else if needs_repair {
-            Some((
-                if preview_ready && root_has_refresh_source {
-                    "Repair composition"
+        if has_root {
+            let (label, action) = if needs_repair {
+                if plan_has_refresh_source || has_source {
+                    ("Repair game setup", ProfileInstallationAction::Repair)
                 } else {
-                    "Verify installation"
-                },
-                if preview_ready && root_has_refresh_source {
-                    ProfilePrimaryAction::Repair
-                } else {
-                    ProfilePrimaryAction::Verify
-                },
-            ))
-        } else if out_of_date {
-            Some((
-                if preview_ready && root_has_refresh_source {
-                    "Update composition"
-                } else {
-                    "Review update plan"
-                },
-                if preview_ready && root_has_refresh_source {
-                    ProfilePrimaryAction::Update
-                } else {
-                    ProfilePrimaryAction::ReviewPlan
-                },
-            ))
-        } else if root_is_workspace_source && has_source {
-            Some(("Build and play source", ProfilePrimaryAction::BuildAndPlay))
-        } else if preview_ready && !root_installed && root_has_refresh_source {
-            Some(("Install composition", ProfilePrimaryAction::Install))
-        } else {
-            Some(("Preview dependency plan", ProfilePrimaryAction::ReviewPlan))
-        };
-        if let Some((label, action)) = primary_action {
-            let can_start = !self.operation.running
-                && (matches!(action, ProfilePrimaryAction::PlayInstalled)
-                    || !self.has_unsaved_workspace_edits());
-            ui.add_enabled_ui(can_start, |ui| {
-                if super::super::components::design::primary_button(ui, label).clicked() {
-                    action_to_run = Some(ProfileInstallationAction::Primary(action));
+                    ("Verify installation", ProfileInstallationAction::Verify)
                 }
+            } else if out_of_date {
+                if plan_has_refresh_source || has_source {
+                    ("Update game setup", ProfileInstallationAction::Update)
+                } else {
+                    ("Review update", ProfileInstallationAction::ReviewPlan)
+                }
+            } else if installed {
+                ("Launch", ProfileInstallationAction::Play)
+            } else if root_is_workspace_source && has_source {
+                ("Build and launch project", ProfileInstallationAction::BuildAndPlay)
+            } else {
+                ("Install game setup", ProfileInstallationAction::Install)
+            };
+            let needs_saved_project = match action {
+                ProfileInstallationAction::Play | ProfileInstallationAction::Verify => {
+                    root_is_workspace_source
+                }
+                ProfileInstallationAction::VerifyInstalled
+                | ProfileInstallationAction::AdoptInstalledGraph
+                | ProfileInstallationAction::ValidateSource
+                | ProfileInstallationAction::DiscoverContent => false,
+                _ => true,
+            };
+            let project_is_dirty = needs_saved_project && self.has_unsaved_workspace_edits();
+            let mut clicked = false;
+            ui.add_enabled_ui(!self.operation.running && !project_is_dirty, |ui| {
+                clicked = super::super::components::design::primary_button(ui, label).clicked();
+            })
+            .response
+            .on_disabled_hover_text(if self.operation.running {
+                "Wait for the current operation to finish."
+            } else {
+                "Save or discard project edits before changing or running this setup."
             });
+            if clicked {
+                action_to_run = Some(action);
+            }
         }
-        ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && has_root && has_source, egui::Button::new("Validate source"))
-                .on_disabled_hover_text("Source validation needs this profile to be associated with a workspace. Cached or seeded compositions validate during install.")
-                .clicked() { action_to_run = Some(ProfileInstallationAction::ValidateSource); }
-            if ui.add_enabled(!self.operation.running && has_root && (installed || root_installed), egui::Button::new("Verify installed content")).clicked() { action_to_run = Some(ProfileInstallationAction::VerifyInstalled); }
-        });
-
-        ui.label("Installation");
-        match &profile.installation {
-            InstallationState::Unknown => {
-                ui.weak("Not checked")
-                    .on_hover_text("Studio has not inspected this profile's installed content.");
-            }
-            InstallationState::NotInstalled => {
-                ui.weak("Not installed");
-            }
-            InstallationState::Installed { artifacts, .. } => {
-                ui.label(format!(
-                    "{} exact content versions installed",
-                    artifacts.len()
-                ));
-                egui::CollapsingHeader::new("Installed file locations").show(ui, |ui| {
-                    for artifact in artifacts {
-                        ui.small(format!(
-                            "{}{} · {}",
-                            artifact.id,
-                            artifact
-                                .version
-                                .as_ref()
-                                .map(|version| format!("@{version}"))
-                                .unwrap_or_default(),
-                            artifact.root.display()
-                        ));
-                    }
-                });
-            }
-            InstallationState::OutOfDate {
-                detail,
-                actual_graph,
-                artifacts,
-                verified,
-            } => {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "Installed content differs from this profile's saved setup",
-                );
-                ui.label(detail);
-                if !verified {
-                    ui.label(
-                        "Verify the installed files before saving these changes to the profile.",
-                    );
-                }
-                if let Some(saved_graph) = &profile.resolved_graph {
-                    egui::CollapsingHeader::new("Review changes")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            for difference in graph_difference_lines(saved_graph, actual_graph) {
-                                ui.small(difference);
-                            }
-                        });
-                } else {
-                    ui.weak("This profile has no saved content selection yet.");
-                }
-                ui.small(format!(
-                    "Installed setup: {} content items · engine {}",
-                    actual_graph.nodes.len(),
-                    actual_graph.effective_engine.id,
-                ));
-                egui::CollapsingHeader::new("Installed content details").show(ui, |ui| {
-                    for node in &actual_graph.nodes {
-                        ui.small(format!(
-                            "{} · {}{} · {} · {}",
-                            node.kind,
-                            node.content.id,
-                            node.content
-                                .version
-                                .as_deref()
-                                .map(|version| format!("@{version}"))
-                                .unwrap_or_default(),
-                            node.fingerprint.as_deref().unwrap_or("unfingerprinted"),
-                            node.source.as_deref().unwrap_or("source unknown"),
-                        ));
-                    }
-                    ui.small(format!("{} installed artifacts observed", artifacts.len()));
-                });
+        if has_root {
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
-                        !self.operation.running && *verified,
-                        egui::Button::new("Save installed setup to profile"),
+                        !self.operation.running
+                            && !self.has_unsaved_workspace_edits()
+                            && has_source,
+                        egui::Button::new("Check project"),
                     )
-                    .on_hover_text(if *verified {
-                        "Update this profile to match the verified content currently installed."
-                    } else {
-                        "Verify the installed files before saving this setup to the profile."
-                    })
+                    .on_disabled_hover_text(
+                        "This check is for a project folder open in Studio. Downloaded content is checked during install.",
+                    )
                     .clicked()
                 {
-                    action_to_run = Some(ProfileInstallationAction::AdoptInstalledGraph);
+                    action_to_run = Some(ProfileInstallationAction::ValidateSource);
                 }
-            }
-            InstallationState::Partial { detail } => {
-                ui.colored_label(egui::Color32::YELLOW, "Installation needs attention");
-                ui.label(detail);
-            }
-            InstallationState::NeedsRepair { detail, artifacts } => {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    format!("{} installed versions need repair", artifacts.len()),
-                );
-                ui.label(detail);
+                if ui
+                    .add_enabled(
+                        !self.operation.running && (installed || root_installed),
+                        egui::Button::new("Check installed files"),
+                    )
+                    .clicked()
+                {
+                    action_to_run = Some(ProfileInstallationAction::VerifyInstalled);
+                }
+            });
+
+            ui.label("Available on this device");
+            match &profile.installation {
+                InstallationState::Unknown if root_installed && plan_needs_install => {
+                    status_text(ui, "Game setup incomplete", StatusTone::Caution);
+                    ui.weak(
+                        "The Packagepack is present, but required engine or game content still needs installation.",
+                    );
+                }
+                InstallationState::Unknown if root_installed => {
+                    status_text(
+                        ui,
+                        "Packagepack present · setup not checked",
+                        StatusTone::Neutral,
+                    );
+                    ui.weak(
+                        "Install or verify the full engine and game setup before relying on this profile.",
+                    );
+                }
+                InstallationState::Unknown => {
+                    ui.weak("Not checked")
+                        .on_hover_text("Studio has not inspected this profile's installed content.");
+                }
+                InstallationState::NotInstalled if root_installed && plan_needs_install => {
+                    status_text(ui, "Game setup incomplete", StatusTone::Caution);
+                    ui.weak(
+                        "The Packagepack is present, but required engine or game content still needs installation.",
+                    );
+                }
+                InstallationState::NotInstalled if root_installed => {
+                    status_text(
+                        ui,
+                        "Packagepack present · setup not verified",
+                        StatusTone::Neutral,
+                    );
+                }
+                InstallationState::NotInstalled => {
+                    ui.weak("Not installed");
+                }
+                InstallationState::Installed { artifacts, .. } => {
+                    ui.label(format!(
+                        "{} content items installed",
+                        artifacts.len()
+                    ));
+                    egui::CollapsingHeader::new("Installed file locations").show(ui, |ui| {
+                        for artifact in artifacts {
+                            ui.small(format!(
+                                "{}{} · {}",
+                                artifact.id,
+                                artifact
+                                    .version
+                                    .as_ref()
+                                    .map(|version| format!("@{version}"))
+                                    .unwrap_or_default(),
+                                artifact.root.display()
+                            ));
+                        }
+                    });
+                }
+                InstallationState::OutOfDate {
+                    detail,
+                    actual_graph,
+                    artifacts,
+                    verified,
+                } => {
+                    status_text(
+                        ui,
+                        "Installed content differs from this profile's saved setup",
+                        StatusTone::Caution,
+                    );
+                    ui.label(detail);
+                    if !verified {
+                        ui.label(
+                            "Verify the installed files before saving these changes to the profile.",
+                        );
+                    }
+                    if let Some(saved_graph) = &profile.resolved_graph {
+                        egui::CollapsingHeader::new("Review changes")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                for difference in graph_difference_lines(saved_graph, actual_graph) {
+                                    ui.small(difference);
+                                }
+                            });
+                    } else {
+                        ui.weak("This profile has no saved content selection yet.");
+                    }
+                    ui.small(format!(
+                        "Installed setup: {} content items · engine {}",
+                        actual_graph.nodes.len(),
+                        actual_graph.effective_engine.id,
+                    ));
+                    egui::CollapsingHeader::new("Installed content details").show(ui, |ui| {
+                        for node in &actual_graph.nodes {
+                            ui.small(format!(
+                                "{} · {}{} · {} · {}",
+                                super::super::display_content_kind(&node.kind),
+                                node.content.id,
+                                node.content
+                                    .version
+                                    .as_deref()
+                                    .map(|version| format!("@{version}"))
+                                    .unwrap_or_default(),
+                                node.fingerprint.as_deref().unwrap_or("unfingerprinted"),
+                                node.source.as_deref().unwrap_or("origin not recorded"),
+                            ));
+                        }
+                        ui.small(format!("{} installed artifacts observed", artifacts.len()));
+                    });
+                    if ui
+                        .add_enabled(
+                            !self.operation.running && *verified,
+                            egui::Button::new("Save installed setup to profile"),
+                        )
+                        .on_hover_text(if *verified {
+                            "Update this profile to match the verified content currently installed."
+                        } else {
+                            "Verify the installed files before saving this setup to the profile."
+                        })
+                        .clicked()
+                    {
+                        action_to_run = Some(ProfileInstallationAction::AdoptInstalledGraph);
+                    }
+                }
+                InstallationState::Partial { detail } => {
+                    status_text(ui, "Installation needs attention", StatusTone::Caution);
+                    ui.label(detail);
+                }
+                InstallationState::NeedsRepair { detail, artifacts } => {
+                    status_text(
+                        ui,
+                        &format!("{} installed versions need repair", artifacts.len()),
+                        StatusTone::Caution,
+                    );
+                    ui.label(detail);
+                }
             }
         }
 
@@ -328,7 +392,7 @@ impl StudioApp {
                 egui::Button::new("Discover content"),
             )
             .on_disabled_hover_text(
-                "Save or discard workspace file and structured metadata drafts first; discovery reads saved manifests.",
+                "Save or discard your project edits first; Studio reads saved project details for this check.",
             )
             .clicked()
         {

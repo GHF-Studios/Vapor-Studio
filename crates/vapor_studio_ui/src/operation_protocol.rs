@@ -6,10 +6,12 @@ use vapor_studio_core::ContentIdentity;
 pub(super) struct WorkspaceOpenSnapshot {
     pub(super) root: PathBuf,
     pub(super) landing_section: Section,
-    pub(super) source_content: Vec<vapor_studio_core::SourceContent>,
+    /// Workspace validation is advisory on open so malformed projects remain editable.
+    pub(super) workspace_validation_error: Option<String>,
+    pub(super) source_content: Result<Vec<vapor_studio_core::SourceContent>, String>,
     pub(super) unregistered_projects: Result<vapor_studio_core::UnregisteredProjectScan, String>,
     pub(super) local_catalog: Result<Vec<vapor_studio_core::CatalogContent>, String>,
-    pub(super) workspace_files: Vec<PathBuf>,
+    pub(super) workspace_files: Result<Vec<PathBuf>, String>,
 }
 
 pub(super) enum OperationResult {
@@ -32,6 +34,7 @@ pub(super) enum OperationResult {
         Result<Vec<vapor_studio_core::SourceContent>, String>,
         Result<Vec<vapor_studio_core::CatalogContent>, String>,
         Result<vapor_studio_core::UnregisteredProjectScan, String>,
+        Option<String>,
     ),
     Message(Result<String, String>),
     CompositionPreview(Result<vapor_studio_core::CompositionPreview, String>),
@@ -54,7 +57,7 @@ pub(super) enum OperationResult {
     Verify(Result<vapor_studio_core::InstallationCheck, String>),
     Repair(Result<vapor_studio_core::InstalledComposition, String>),
     WorkshopStage(Result<vapor_studio_core::WorkshopPackagePreview, String>),
-    WorkshopAcquisition(Result<Vec<vapor_studio_core::WorkshopAcquisition>, String>),
+    WorkshopAcquisition(Result<(Vec<vapor_studio_core::WorkshopAcquisition>, usize), String>),
     WorkshopPublish(Result<vapor_studio_core::WorkshopPublication, String>),
     RootPublish(Result<vapor_sdk_core::root::types::RootPublishReport, String>),
     WorkshopSearch(Result<vapor_studio_core::WorkshopPage, String>, String),
@@ -102,8 +105,16 @@ impl OperationResult {
                 let messages = errors.cloned().collect::<Vec<_>>();
                 (!messages.is_empty()).then(|| messages.join("; "))
             }
-            Self::Discovery(_, Err(error), _) | Self::Discovery(_, _, Err(error)) => {
+            Self::Discovery(_, Err(error), _, _) | Self::Discovery(_, _, Err(error), _) => {
                 Some(error.clone())
+            }
+            Self::WorkshopAcquisition(Ok((acquisitions, requested)))
+                if acquisitions.len() < *requested =>
+            {
+                Some(partial_workshop_acquisition_message(
+                    acquisitions.len(),
+                    *requested,
+                ))
             }
             Self::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
             Self::RootPublish(Ok(report))
@@ -131,7 +142,12 @@ impl OperationResult {
 
     pub(super) fn refreshes_content_catalog(&self) -> bool {
         match self {
-            Self::WorkshopAcquisition(_) | Self::RunInstalled(Ok(_)) => true,
+            Self::WorkshopAcquisition(_)
+            | Self::Install(_)
+            | Self::Update(_)
+            | Self::Repair(_)
+            | Self::RunInstalled(_)
+            | Self::RunProfile(_) => true,
             Self::FileSaved(Ok(path)) => path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml")),
@@ -157,4 +173,8 @@ impl OperationResult {
     pub(super) fn refreshes_workshop_subscriptions(&self) -> bool {
         matches!(self, Self::WorkshopSubscriptionBatchChange(_, _, _))
     }
+}
+
+pub(super) fn partial_workshop_acquisition_message(imported: usize, requested: usize) -> String {
+    format!("Downloaded {imported} of {requested} Workshop items. Your selection is still here so you can try again.")
 }

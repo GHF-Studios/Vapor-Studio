@@ -1,5 +1,5 @@
 use super::super::StudioApp;
-use super::super::components::design::page_header;
+use super::super::components::design::{StatusTone, page_header, status_text};
 use super::super::workspace_ops::WorkspacePanel;
 use eframe::egui;
 
@@ -7,17 +7,18 @@ impl StudioApp {
     pub(in crate::app) fn draw_workspace(&mut self, ui: &mut egui::Ui) {
         let has_workspace = !self.workspace.root.trim().is_empty();
         if self.workspace.editor.files_open {
-            ui.horizontal(|ui| {
-                if ui.button("← Workspace overview").clicked() {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("← Project overview").clicked() {
                     self.workspace.editor.files_open = false;
                 }
                 ui.separator();
                 ui.strong("Project editor");
                 ui.weak(&self.workspace.root);
                 if self.has_unsaved_workspace_edits() {
-                    ui.colored_label(egui::Color32::from_rgb(242, 193, 91), "Unsaved edits");
+                    status_text(ui, "Unsaved edits", StatusTone::Caution);
                 }
             });
+            self.draw_workspace_validation_warning(ui);
             self.draw_workspace_files_panel(ui);
             return;
         }
@@ -25,19 +26,19 @@ impl StudioApp {
         page_header(
             ui,
             "Author",
-            "Workspace",
-            "Manage source projects, edit files, and run managed development actions.",
+            "My projects",
+            "Open a project folder to edit files, find its content, and prepare it to run.",
         );
         ui.label(if self.workspace.root.trim().is_empty() {
-            "Open or create a source workspace to author, validate, and run content."
+            "Choose a folder to get started. You can open an existing project or create one from a template."
         } else {
             &self.workspace.root
         });
         ui.horizontal_wrapped(|ui| {
             for (panel, label) in [
-                (WorkspacePanel::Sources, "Sources"),
-                (WorkspacePanel::Content, "Content"),
-                (WorkspacePanel::Build, "Build"),
+                (WorkspacePanel::Sources, "Project folders"),
+                (WorkspacePanel::Content, "Content projects"),
+                (WorkspacePanel::Build, "Build & run"),
             ] {
                 if ui
                     .add_enabled(
@@ -59,6 +60,7 @@ impl StudioApp {
                 self.open_workspace_files();
             }
         });
+        self.draw_workspace_validation_warning(ui);
         ui.separator();
         match self.workspace.overview_panel {
             WorkspacePanel::Sources => self.draw_workspace_registry_panel(ui),
@@ -69,6 +71,18 @@ impl StudioApp {
                 self.draw_workspace_authoring_panel(ui);
             }
             WorkspacePanel::Build => self.draw_workspace_operations_panel(ui),
+        }
+    }
+
+    fn draw_workspace_validation_warning(&self, ui: &mut egui::Ui) {
+        if let Some(error) = self.workspace.workspace_validation_error.as_deref() {
+            status_text(
+                ui,
+                &format!(
+                    "This project folder needs a repair. Editing remains available; save the fix and refresh the project list before using other actions. {error}"
+                ),
+                StatusTone::Caution,
+            );
         }
     }
 }

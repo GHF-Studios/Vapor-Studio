@@ -140,11 +140,13 @@ pub fn source_dependency_choice_group(
     content::source_dependency_choice_group(parent, child)
 }
 
-/// Return the exclusive dependency role required for a project to be valid.
-pub fn source_required_dependency_choice_group(
+/// Return every exclusive dependency role required for a project to be valid.
+pub fn source_required_dependency_choice_groups(
     parent: vapor_core::ContentKind,
-) -> Option<&'static str> {
-    content::source_required_dependency_choice_group(shell_content_kind(parent)?)
+) -> &'static [&'static str] {
+    shell_content_kind(parent)
+        .map(content::source_required_dependency_choice_groups)
+        .unwrap_or(&[])
 }
 
 pub fn discover_source_content(

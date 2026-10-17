@@ -34,35 +34,90 @@ impl ProfileState {
 }
 
 impl StudioApp {
-    pub(super) fn use_workshop_as_profile_root(&mut self, published_file_id: &str) {
+    pub(super) fn is_active_profile_root(&self, id: &str, version: Option<&str>) -> bool {
+        self.profile
+            .items
+            .get(self.profile.active_index)
+            .and_then(|profile| profile.root_package.as_ref())
+            .is_some_and(|root| root.id == id && root.version.as_deref() == version)
+    }
+
+    pub(super) fn use_workshop_as_profile_root(&mut self, content_id: &str) -> bool {
+        self.assign_workshop_acquisition_to_profile(content_id, false)
+    }
+
+    pub(super) fn launch_workshop_acquisition(&mut self, content_id: &str) -> bool {
+        self.assign_workshop_acquisition_to_profile(content_id, true)
+    }
+
+    fn assign_workshop_acquisition_to_profile(
+        &mut self,
+        content_id: &str,
+        launch_after_assignment: bool,
+    ) -> bool {
         let Some(acquisition) = self
             .workshop
-            .pending_acquisitions
+            .recent_acquisitions
             .iter()
-            .find(|acquisition| acquisition.id == published_file_id)
+            .find(|acquisition| acquisition.id == content_id)
         else {
-            return;
+            self.status = "This Workshop download is no longer in the recent imports list. Import it again to use it.".to_owned();
+            return false;
         };
         if acquisition.kind != "packagepack" {
             self.status = format!(
                 "{} is a {}, so it cannot be a composition root.",
                 acquisition.id, acquisition.kind
             );
-            return;
+            return false;
         }
         let identity = ContentIdentity {
             id: acquisition.id.clone(),
             version: acquisition.version.clone(),
         };
-        if self.assign_profile_root(identity, None) {
-            self.activate_navigation_section(Section::Library);
+        let assigned = if launch_after_assignment {
+            self.assign_profile_root_without_catalog_refresh(identity, None)
+        } else {
+            self.assign_profile_root(identity, None)
+        };
+        if assigned {
+            if launch_after_assignment {
+                self.run_installed_selected();
+            } else {
+                self.activate_navigation_section(Section::Library);
+            }
         }
+        assigned
     }
 
     pub(super) fn use_available_workshop_package_as_profile_root(
         &mut self,
         published_file_id: &str,
-    ) {
+    ) -> bool {
+        self.assign_available_workshop_package_to_profile(published_file_id, false)
+    }
+
+    pub(super) fn launch_workshop_package_as_profile_root(
+        &mut self,
+        published_file_id: &str,
+    ) -> bool {
+        self.assign_available_workshop_package_to_profile(published_file_id, true)
+    }
+
+    fn assign_available_workshop_package_to_profile(
+        &mut self,
+        published_file_id: &str,
+        launch_after_assignment: bool,
+    ) -> bool {
+        if !self.catalog.local_catalog_current() {
+            self.status = if launch_after_assignment {
+                "Refresh the on-device content list before launching this Workshop game setup."
+            } else {
+                "Refresh the on-device content list before selecting this Workshop game setup."
+            }
+            .to_owned();
+            return false;
+        }
         let matches = self
             .catalog
             .items
@@ -76,9 +131,9 @@ impl StudioApp {
             .collect::<Vec<_>>();
         let Some(content) = matches.first().cloned() else {
             self.status = format!(
-                "Workshop item {published_file_id} is available locally, but no Packagepack was found."
+                "Workshop item {published_file_id} is available here, but it is not a playable game setup."
             );
-            return;
+            return false;
         };
         if matches.len() > 1 {
             self.catalog.selected = Some(catalog_content_selector(&content));
@@ -87,10 +142,12 @@ impl StudioApp {
                 Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
             self.catalog.search_query = published_file_id.to_owned();
             self.open_discover_tab(super::catalog::DiscoverTab::Local);
-            self.status = format!(
-                "Workshop item {published_file_id} has multiple local Packagepack versions. Choose the exact version in the catalog before assigning it."
-            );
-            return;
+            self.status = if launch_after_assignment {
+                format!("Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before launching it.")
+            } else {
+                format!("Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before adding it to a profile.")
+            };
+            return false;
         }
         let workspace = content
             .locations
@@ -101,9 +158,19 @@ impl StudioApp {
             id: content.id,
             version: content.version,
         };
-        if self.assign_profile_root(identity, workspace) {
-            self.activate_navigation_section(Section::Library);
+        let assigned = if launch_after_assignment {
+            self.assign_profile_root_without_catalog_refresh(identity, workspace)
+        } else {
+            self.assign_profile_root(identity, workspace)
+        };
+        if assigned {
+            if launch_after_assignment {
+                self.run_installed_selected();
+            } else {
+                self.activate_navigation_section(Section::Library);
+            }
         }
+        assigned
     }
 
     pub(super) fn select_profile(&mut self, index: usize) {
@@ -136,6 +203,7 @@ impl StudioApp {
         } else {
             self.workspace.root.clone()
         };
+        self.workspace.workspace_validation_error = None;
         self.authoring.clear_workspace_context();
         self.catalog.clear_workspace_content();
         self.profile_composition.clear_context();
@@ -144,6 +212,8 @@ impl StudioApp {
         self.workspace.clear_file_context();
         self.workspace.unregistered_projects =
             vapor_studio_core::UnregisteredProjectScan::default();
+        self.workspace.unregistered_scan_completed = false;
+        self.workspace.unregistered_scan_error = None;
         self.discover();
     }
 
@@ -151,6 +221,23 @@ impl StudioApp {
         &mut self,
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
+    ) -> bool {
+        self.assign_profile_root_inner(identity, workspace, true)
+    }
+
+    fn assign_profile_root_without_catalog_refresh(
+        &mut self,
+        identity: ContentIdentity,
+        workspace: Option<PathBuf>,
+    ) -> bool {
+        self.assign_profile_root_inner(identity, workspace, false)
+    }
+
+    fn assign_profile_root_inner(
+        &mut self,
+        identity: ContentIdentity,
+        workspace: Option<PathBuf>,
+        refresh_catalog: bool,
     ) -> bool {
         if self.authoring.manifest_metadata_dirty
             || self.authoring.composition_has_unsaved_changes()
@@ -187,6 +274,17 @@ impl StudioApp {
                     .to_owned();
             return false;
         }
+        let already_selected =
+            self.is_active_profile_root(&identity.id, identity.version.as_deref());
+        if already_selected && !workspace_changed {
+            self.status = format!(
+                "{} is already selected for profile {}.",
+                content_selector(&identity),
+                self.profile.items[self.profile.active_index].name,
+            );
+            self.activate_navigation_section(Section::Library);
+            return true;
+        }
         let profile = &mut self.profile.items[self.profile.active_index];
         profile.root_package = Some(identity.clone());
         profile.workspace = workspace.clone().map(|root| WorkspaceAssociation { root });
@@ -204,9 +302,16 @@ impl StudioApp {
             } else {
                 self.workspace.root.clone()
             };
+            self.workspace.workspace_validation_error = None;
             self.catalog.clear_workspace_content();
             self.workspace.clear_file_context();
-            self.discover();
+            self.workspace.unregistered_projects =
+                vapor_studio_core::UnregisteredProjectScan::default();
+            self.workspace.unregistered_scan_completed = false;
+            self.workspace.unregistered_scan_error = None;
+            if refresh_catalog {
+                self.discover();
+            }
         } else {
             self.profile_composition.invalidate_preview();
         }

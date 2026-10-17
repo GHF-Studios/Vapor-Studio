@@ -30,11 +30,11 @@ impl CatalogSourceFilter {
 
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::All => "All local sources",
-            Self::Workspace => "Workspace source",
-            Self::Cache => "Vapor cache",
-            Self::Installed => "Installed",
-            Self::Workshop => "Imported from Workshop",
+            Self::All => "All on this device",
+            Self::Workspace => "Project folders",
+            Self::Cache => "Downloaded here",
+            Self::Installed => "Ready to play",
+            Self::Workshop => "From Steam Workshop",
         }
     }
 }
@@ -42,14 +42,14 @@ impl CatalogSourceFilter {
 impl Section {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::Home => "Home",
-            Self::Discover => "Discover",
+            Self::Home => "Play",
+            Self::Discover => "Browse",
             Self::Library => "Profiles",
-            Self::Compose => "Compose",
+            Self::Compose => "Game setup",
             Self::Create => "Create",
-            Self::Workspace => "Workspace",
-            Self::Publish => "Publish",
-            Self::Diagnostics => "Diagnostics",
+            Self::Workspace => "Projects",
+            Self::Publish => "Share",
+            Self::Diagnostics => "App status",
         }
     }
 }

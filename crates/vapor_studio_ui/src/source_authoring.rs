@@ -260,7 +260,7 @@ impl StudioApp {
 
     pub(super) fn load_source_composition(&mut self) {
         if self.authoring.pending_composition_role_change.is_some() {
-            self.status = "Confirm or keep the pending Packagepack role choice before loading another composition.".to_owned();
+            self.status = "Confirm or keep the pending game engine or game choice before loading another project.".to_owned();
             return;
         }
         if !self.require_open_workspace("edit source content dependencies") {
@@ -292,7 +292,7 @@ impl StudioApp {
 
     pub(super) fn save_source_composition(&mut self) {
         if self.authoring.pending_composition_role_change.is_some() {
-            self.status = "Confirm or keep the pending Packagepack role choice before saving the composition.".to_owned();
+            self.status = "Confirm or keep the pending game engine or game choice before saving this project.".to_owned();
             return;
         }
         if self.authoring.manifest_metadata_dirty {
@@ -568,11 +568,11 @@ impl StudioApp {
 
     pub(super) fn use_edited_composition_for_profile(&mut self) {
         let Some(composition) = self.authoring.composition_edit.as_ref() else {
-            self.status = "Load a source Packagepack first.".to_owned();
+            self.status = "Load a playable game setup first.".to_owned();
             return;
         };
         if composition.kind != vapor_core::ContentKind::Packagepack.as_str() {
-            self.status = "Only a Packagepack can be selected as a launch profile root.".to_owned();
+            self.status = "Only a playable game setup can be assigned to a play profile.".to_owned();
             return;
         }
         let root = ContentIdentity {

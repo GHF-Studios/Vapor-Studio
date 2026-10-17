@@ -6,6 +6,8 @@ use vapor_studio_core::OperationKind;
 impl StudioApp {
     pub(super) fn apply_remembered_sources(&mut self, known: Vec<PathBuf>) {
         self.workspace.registered_sources = known;
+        self.workspace.registered_sources_loaded = true;
+        self.workspace.registered_sources_error = None;
         self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
     }
 
@@ -15,9 +17,12 @@ impl StudioApp {
         contents: Vec<vapor_studio_core::SourceContent>,
     ) {
         self.catalog.sources = contents;
+        self.catalog.source_discovery_loaded = true;
         self.workspace.unregistered_projects =
             vapor_studio_core::UnregisteredProjectScan::default();
         self.workspace.unregistered_scan_completed = false;
+        self.workspace.unregistered_scan_error = None;
+        self.catalog.source_discovery_error = None;
         self.status = summary;
     }
 
@@ -28,9 +33,12 @@ impl StudioApp {
         identity: vapor_studio_core::ContentIdentity,
     ) {
         self.catalog.sources = contents;
+        self.catalog.source_discovery_loaded = true;
         self.workspace.unregistered_projects =
             vapor_studio_core::UnregisteredProjectScan::default();
         self.workspace.unregistered_scan_completed = false;
+        self.workspace.unregistered_scan_error = None;
+        self.catalog.source_discovery_error = None;
         self.workspace.pending_unregistration = None;
         self.invalidate_profiles_for_source_content(&identity);
         self.status = summary;
@@ -41,7 +49,7 @@ impl StudioApp {
         scan: vapor_studio_core::UnregisteredProjectScan,
     ) {
         self.status = format!(
-            "Found {} adoptable content project{} and {} diagnostic{}.",
+            "Found {} project{} you can add and {} item{} needing attention.",
             scan.candidates.len(),
             if scan.candidates.len() == 1 { "" } else { "s" },
             scan.diagnostics.len(),
@@ -49,6 +57,20 @@ impl StudioApp {
         );
         self.workspace.unregistered_projects = scan;
         self.workspace.unregistered_scan_completed = true;
+        self.workspace.unregistered_scan_error = None;
+    }
+
+    pub(super) fn apply_unregistered_project_scan_error(&mut self, error: String) {
+        let has_previous_results = self.workspace.unregistered_scan_completed;
+        self.workspace.unregistered_scan_error = Some(error.clone());
+        self.status = format!(
+            "Could not refresh the workspace project scan: {error}. {}",
+            if has_previous_results {
+                "The last successful results remain available."
+            } else {
+                "No successful scan is available yet."
+            }
+        );
     }
 
     pub(super) fn validate_source_project(&mut self, content: &vapor_studio_core::SourceContent) {
@@ -169,7 +191,7 @@ impl StudioApp {
                 ),
             )
         });
-        self.status = format!("Validating and adopting {display_path}…");
+        self.status = format!("Checking and adding {display_path}…");
     }
 
     pub(super) fn unregister_content_project(&mut self) {
@@ -234,6 +256,8 @@ impl StudioApp {
             Ok((known, active)) => {
                 self.workspace.registered_sources = known;
                 self.workspace.active_source = active;
+                self.workspace.registered_sources_loaded = true;
+                self.workspace.registered_sources_error = None;
                 self.status = format!(
                     "Loaded {} registered workspace{} from this Vapor installation.",
                     self.workspace.registered_sources.len(),
@@ -244,7 +268,18 @@ impl StudioApp {
                     }
                 );
             }
-            Err(error) => self.status = format!("Could not read registered workspaces: {error}"),
+            Err(error) => {
+                let has_previous_results = self.workspace.registered_sources_loaded;
+                self.workspace.registered_sources_error = Some(error.clone());
+                self.status = format!(
+                    "Could not read registered workspaces: {error}. {}",
+                    if has_previous_results {
+                        "The last successful list remains available."
+                    } else {
+                        "No successful list is available yet."
+                    }
+                );
+            }
         }
     }
 }

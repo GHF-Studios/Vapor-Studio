@@ -6,6 +6,21 @@ use crate::navigation::Section;
 use std::{fs, path::PathBuf};
 use vapor_studio_core::OperationKind;
 
+pub(super) fn starter_workspace_slug_is_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && value
+            .bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
 impl StudioApp {
     pub(super) fn apply_content_workspace_created(
         &mut self,
@@ -17,6 +32,7 @@ impl StudioApp {
         self.authoring.create.reset();
         self.workspace.editor.files = files;
         self.workspace.editor.files_loaded = true;
+        self.workspace.editor.files_refresh_error = None;
         self.workspace.editor.rebuild_file_index();
         self.workspace.editor.selected_file = Some(manifest.clone());
         self.workspace.editor.files_open = true;
@@ -121,22 +137,15 @@ impl StudioApp {
         }
         let organization = self.workspace.starter_organization.trim().to_owned();
         let name = self.workspace.starter_name.trim().to_owned();
-        if name.is_empty()
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-            || !name
-                .bytes()
-                .next()
-                .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-            || !name
-                .bytes()
-                .last()
-                .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        {
+        if !starter_workspace_slug_is_valid(&name) {
             self.status =
                 "Workspace name must use lowercase letters, digits, and internal hyphens."
                     .to_owned();
+            return;
+        }
+        if !starter_workspace_slug_is_valid(&organization) {
+            self.status =
+                "Organization must use lowercase letters, digits, and internal hyphens.".to_owned();
             return;
         }
         let destination = location.join(&name);
@@ -156,36 +165,30 @@ impl StudioApp {
                 &name,
             )
             .and_then(|root| {
-                vapor_studio_core::discover_source_content(&open_executable, &root)
-                    .and_then(|contents| {
-                        let unregistered_projects =
-                            vapor_studio_core::scan_unregistered_content_projects(
-                                &open_executable,
-                                &root,
-                            );
-                        let catalog = vapor_studio_core::discover_content_catalog(
-                            &open_executable,
-                            Some(&root),
-                        );
-                        discover_workspace_files(&root).map(|files| WorkspaceOpenSnapshot {
-                            root: root.clone(),
-                            landing_section: crate::navigation::Section::Workspace,
-                            source_content: contents,
-                            unregistered_projects,
-                            local_catalog: catalog,
-                            workspace_files: files,
-                        })
-                    })
-                    .map_err(|error| {
-                        format!(
-                            "Created workspace at {}, but Studio could not open it: {error}",
-                            root.display()
-                        )
-                    })
+                let source_content =
+                    vapor_studio_core::discover_source_content(&open_executable, &root);
+                let unregistered_projects =
+                    vapor_studio_core::scan_unregistered_content_projects(&open_executable, &root);
+                let catalog = vapor_studio_core::discover_content_catalog(
+                    &open_executable,
+                    Some(&root),
+                );
+                let workspace_files = discover_workspace_files(&root);
+                Ok(WorkspaceOpenSnapshot {
+                    root: root.clone(),
+                    landing_section: crate::navigation::Section::Workspace,
+                    workspace_validation_error: vapor_core::VaporWorkspace::load(&root)
+                        .err()
+                        .map(|error| format!("{}: {error}", root.display())),
+                    source_content,
+                    unregistered_projects,
+                    local_catalog: catalog,
+                    workspace_files,
+                })
             });
             OperationResult::WorkspaceSelection(result)
         });
         self.status =
-            "Creating the maintained Engine, Game, and Packagepack starter workspace…".to_owned();
+            "Creating a playable sample game and its project folders…".to_owned();
     }
 }

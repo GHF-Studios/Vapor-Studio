@@ -1,5 +1,7 @@
 use super::super::StudioApp;
-use super::super::components::design::confirmation_card;
+use super::super::components::design::{
+    StatusTone, confirmation_card, search_field_width, status_text,
+};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +10,7 @@ enum SourceContentAction {
     OpenManifest(PathBuf),
     EditDependencies(String),
     UseAsProfileRoot(vapor_studio_core::ContentIdentity, PathBuf),
+    ReviewProfile,
     EditWorkshopMetadata(vapor_studio_core::SourceContent),
     EditRuntimeOutputs(vapor_studio_core::SourceContent),
     Unregister(vapor_studio_core::SourceContent),
@@ -16,9 +19,10 @@ enum SourceContentAction {
 impl StudioApp {
     pub(super) fn draw_workspace_content_search(&mut self, ui: &mut egui::Ui) -> String {
         ui.horizontal_wrapped(|ui| {
+            let search_width = search_field_width(ui);
             ui.add(
                 egui::TextEdit::singleline(&mut self.workspace.content_search)
-                    .desired_width(320.0)
+                    .desired_width(search_width)
                     .hint_text("Find a project by ID, role, or version"),
             );
             if !self.workspace.content_search.is_empty() && ui.small_button("Clear").clicked() {
@@ -29,33 +33,87 @@ impl StudioApp {
     }
 
     pub(super) fn draw_workspace_content_panel(&mut self, ui: &mut egui::Ui, query: &str) {
+        if let Some(error) = self.catalog.source_discovery_error.as_deref() {
+            status_text(
+                ui,
+                &format!(
+                    "Projects in this folder could not refresh; {}. {error}",
+                    if self.catalog.source_discovery_loaded {
+                        "showing the last successful list"
+                    } else {
+                        "no successful list is available yet"
+                    }
+                ),
+                StatusTone::Caution,
+            );
+        }
+        if let Some(error) = self.workspace.unregistered_scan_error.as_deref() {
+            status_text(
+                ui,
+                &format!(
+                    "Existing-project scan failed; {}. {error}",
+                    if self.workspace.unregistered_scan_completed {
+                        "showing its last successful results"
+                    } else {
+                        "no successful results are available yet"
+                    }
+                ),
+                StatusTone::Caution,
+            );
+        }
         if self.catalog.sources.is_empty() {
             let card_style = ui.style().clone();
             egui::Frame::group(&card_style).show(ui, |ui| {
                 if !self.workspace.unregistered_projects.candidates.is_empty() {
-                    ui.heading(format!(
-                        "{} existing content project{} found",
-                        self.workspace.unregistered_projects.candidates.len(),
-                        if self.workspace.unregistered_projects.candidates.len() == 1 { "" } else { "s" },
-                    ));
-                    ui.label("Nothing has been changed. Adopt a project below to add it to this Workspace's content index; its files and Cargo membership stay where they are.");
+                    if self.catalog.source_snapshot_current() {
+                        ui.heading(format!(
+                            "{} existing content project{} found",
+                            self.workspace.unregistered_projects.candidates.len(),
+                            if self.workspace.unregistered_projects.candidates.len() == 1 { "" } else { "s" },
+                        ));
+                        ui.label("Nothing has been changed. Add a project below to make it available in Studio; its files stay where they are.");
+                    } else {
+                        ui.heading(format!(
+                            "{} possible content project{} found",
+                            self.workspace.unregistered_projects.candidates.len(),
+                            if self.workspace.unregistered_projects.candidates.len() == 1 { "" } else { "s" },
+                        ));
+                        ui.label("Studio cannot confirm which folders have already been added. Refresh the project list before adding one of these.");
+                    }
                 } else if self.workspace.unregistered_scan_completed {
-                    ui.heading("No content projects in this workspace yet");
-                    ui.label("Create a content role from the Create screen, or add an existing role manifest and scan again.");
+                    if self.catalog.source_snapshot_current() {
+                        ui.heading("No projects in this folder yet");
+                        ui.label("Create a project from a template, or add an existing project folder to Studio.");
+                    } else {
+                        ui.heading("The project list could not be confirmed");
+                        ui.label("The folder scan finished, but Studio could not refresh its project list. Refresh before treating this folder as empty.");
+                    }
                 } else {
-                    ui.heading("Discover authored content");
-                    ui.label("Studio checks registered projects first, then scans for existing Engine, Game, pack, and extension manifests you can adopt.");
+                    ui.heading("Find existing projects");
+                    ui.label("Studio checks this folder for projects you can add. Adding a project keeps its files where they are.");
                 }
-                ui.horizontal(|ui| {
-                    if !self.workspace.unregistered_scan_completed
+                ui.horizontal_wrapped(|ui| {
+                    if self.catalog.source_discovery_error.is_some()
+                        && ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Refresh project list")).clicked()
+                    {
+                        self.discover();
+                    }
+                    if self.catalog.source_snapshot_current()
+                        && !self.workspace.unregistered_scan_completed
                         && ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Find existing projects")).clicked()
                     {
                         self.scan_unregistered_content_projects();
                     }
-                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
+                    if ui.add_enabled(
+                        !self.operation.running
+                            && !self.has_unsaved_workspace_edits()
+                            && self.catalog.source_snapshot_current(),
+                        egui::Button::new("Create content"),
+                    ).on_disabled_hover_text("Refresh the project list before starting a new project.").clicked() {
                         self.activate_navigation_section(super::super::Section::Create);
                     }
-                    if self.workspace.unregistered_scan_completed
+                    if self.catalog.source_snapshot_current()
+                        && self.workspace.unregistered_scan_completed
                         && ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Scan again")).clicked()
                     {
                         self.scan_unregistered_content_projects();
@@ -63,8 +121,8 @@ impl StudioApp {
                 });
             });
         } else {
-            ui.heading(format!("Content projects · {}", self.catalog.sources.len()));
-            ui.label("Registered authored projects in this workspace. Select a role to validate, edit its dependencies, or manage its Workshop intent.");
+            ui.heading(format!("Projects in this folder · {}", self.catalog.sources.len()));
+            ui.label("Choose a project to check its files, change the content it needs, or prepare it for sharing.");
             let mut visible_projects = 0;
             let mut action = None;
             for content in self.catalog.sources.iter().filter(|content| {
@@ -80,13 +138,13 @@ impl StudioApp {
             }) {
                 visible_projects += 1;
                 ui.group(|ui| {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.strong(&content.id);
-                            ui.weak(&content.kind);
-                            ui.weak(content.version.as_deref().unwrap_or("workspace version"));
+                            ui.weak(super::super::display_content_kind(&content.kind));
+                            ui.weak(content.version.as_deref().unwrap_or("project version"));
                         });
                         egui::CollapsingHeader::new(format!(
-                            "Project details · {} dependencies · {} runtime outputs",
+                            "Project details · {} included items · {} runtime outputs",
                             content.dependencies.len(),
                             content.binaries.len() + content.libraries.len(),
                         ))
@@ -103,7 +161,7 @@ impl StudioApp {
                                     ui.small(format!("Declared runtime outputs · {}", outputs.join(" · ")));
                                 }
                                 if !content.dependencies.is_empty() {
-                                    ui.small(format!("Dependencies: {}", content.dependencies.join(" · ")));
+                                    ui.small(format!("Includes: {}", content.dependencies.join(" · ")));
                                 }
                                 let workshop = &content.workshop;
                                 if workshop.app_id.is_some()
@@ -118,9 +176,10 @@ impl StudioApp {
                                         if let Some(app_id) = workshop.app_id {
                                             ui.small(format!("Steam AppID: {app_id}"));
                                         } else {
-                                            ui.colored_label(
-                                                egui::Color32::YELLOW,
+                                            status_text(
+                                                ui,
                                                 "Steam AppID not configured",
+                                                StatusTone::Caution,
                                             );
                                         }
                                         ui.small(format!(
@@ -157,9 +216,9 @@ impl StudioApp {
                             if ui
                                 .add_enabled(
                                     !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new("Validate"),
+                                    egui::Button::new("Check project"),
                                 )
-                                .on_hover_text("Validate this content manifest and its local references through Vapor Shell.")
+                                .on_hover_text("Check that this project and its required content are set up correctly.")
                                 .clicked()
                             {
                                 action = Some(SourceContentAction::Validate(content.clone()));
@@ -168,34 +227,56 @@ impl StudioApp {
                                 if ui
                                     .add_enabled(
                                         !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                        egui::Button::new("Edit manifest"),
+                                        egui::Button::new("Edit project file"),
                                     )
-                                    .on_disabled_hover_text("Save or discard the current file before opening a project manifest.")
+                                    .on_disabled_hover_text("Save or discard the current file before opening the project definition.")
                                     .clicked()
                                 {
                                     action = Some(SourceContentAction::OpenManifest(relative_manifest));
                                 }
                             }
                             if ui
-                                    .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Edit dependencies"))
+                                    .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Choose included content"))
                                     .clicked()
                             {
                                 action = Some(SourceContentAction::EditDependencies(
                                     super::super::source_content_selector(content),
                                 ));
                             }
-                            if content.kind == vapor_core::ContentKind::Packagepack.as_str()
-                                && ui
-                                    .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Use in active profile"))
+                            if content.kind == vapor_core::ContentKind::Packagepack.as_str() {
+                                let selected_as_profile_root = self.is_active_profile_root(
+                                    &content.id,
+                                    content.version.as_deref(),
+                                );
+                                if selected_as_profile_root {
+                                    ui.strong("Used as this profile's game setup");
+                                    if ui
+                                        .add_enabled(
+                                            !self.operation.running
+                                                && !self.has_unsaved_workspace_edits(),
+                                            egui::Button::new("Review game setup"),
+                                        )
+                                        .clicked()
+                                    {
+                                        action = Some(SourceContentAction::ReviewProfile);
+                                    }
+                                } else if ui
+                                    .add_enabled(
+                                        !self.operation.running
+                                            && self.catalog.source_snapshot_current()
+                                            && !self.has_unsaved_workspace_edits(),
+                                        egui::Button::new("Use in this profile"),
+                                    )
                                     .clicked()
-                            {
-                                action = Some(SourceContentAction::UseAsProfileRoot(
-                                    vapor_studio_core::ContentIdentity {
-                                        id: content.id.clone(),
-                                        version: content.version.clone(),
-                                    },
-                                    PathBuf::from(self.workspace.root.trim()),
-                                ));
+                                {
+                                    action = Some(SourceContentAction::UseAsProfileRoot(
+                                        vapor_studio_core::ContentIdentity {
+                                            id: content.id.clone(),
+                                            version: content.version.clone(),
+                                        },
+                                        PathBuf::from(self.workspace.root.trim()),
+                                    ));
+                                }
                             }
                             ui.menu_button("More", |ui| {
                                 if ui
@@ -203,7 +284,7 @@ impl StudioApp {
                                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Edit Workshop metadata"),
                                     )
-                                    .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; Workshop edits use a fresh Shell-validated manifest snapshot.")
+                                    .on_disabled_hover_text("Save or discard your open edits first; Workshop changes use the latest saved project details.")
                                     .clicked()
                                 {
                                     action = Some(SourceContentAction::EditWorkshopMetadata(
@@ -216,7 +297,7 @@ impl StudioApp {
                                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Edit runtime outputs"),
                                     )
-                                    .on_disabled_hover_text("Save or discard open edits first; runtime output edits use a fresh Shell-validated manifest snapshot.")
+                                    .on_disabled_hover_text("Save or discard your open edits first; Studio reads the latest saved project details.")
                                     .clicked()
                                 {
                                     action = Some(SourceContentAction::EditRuntimeOutputs(
@@ -228,9 +309,9 @@ impl StudioApp {
                                 if ui
                                     .add_enabled(
                                         !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                        egui::Button::new("Unregister project"),
+                                        egui::Button::new("Stop using in Studio"),
                                     )
-                                    .on_hover_text("Remove this project from Vapor discovery without deleting its files or changing Cargo membership.")
+                                    .on_hover_text("Remove it from Studio's project list. Its files stay where they are.")
                                     .clicked()
                                 {
                                     action = Some(SourceContentAction::Unregister(content.clone()));
@@ -241,11 +322,11 @@ impl StudioApp {
                     });
             }
             ui.small(format!(
-                "Showing {visible_projects} of {} registered projects",
+                "Showing {visible_projects} of {} projects in this folder",
                 self.catalog.sources.len()
             ));
             if visible_projects == 0 {
-                ui.weak("No registered content projects match this search.");
+                ui.weak("No projects in this folder match this search.");
             }
             match action {
                 Some(SourceContentAction::Validate(content)) => {
@@ -256,7 +337,7 @@ impl StudioApp {
                 }
                 Some(SourceContentAction::EditDependencies(selector)) => {
                     if self.authoring.pending_composition_role_change.is_some() {
-                        self.status = "Confirm or keep the pending Packagepack role choice before opening another composition.".to_owned();
+                        self.status = "Confirm or cancel the pending game setup change before opening another one.".to_owned();
                     } else {
                         self.authoring.composition_edit_selector = selector;
                         self.authoring.composition_edit = None;
@@ -267,6 +348,10 @@ impl StudioApp {
                 }
                 Some(SourceContentAction::UseAsProfileRoot(identity, workspace)) => {
                     self.assign_profile_root(identity, Some(workspace));
+                }
+                Some(SourceContentAction::ReviewProfile) => {
+                    self.activate_navigation_section(super::super::Section::Library);
+                    self.preview_selected_composition();
                 }
                 Some(SourceContentAction::EditWorkshopMetadata(content)) => {
                     self.load_source_workshop_metadata(&content);
@@ -282,18 +367,14 @@ impl StudioApp {
         }
         let mut unregistration_confirmation = None;
         if let Some(project) = self.workspace.pending_unregistration.as_ref() {
-            let title = format!("Stop discovering {}?", project.id);
-            let description = format!(
-                "Vapor will stop discovering this {} at {}. The project files and Cargo workspace membership remain unchanged; you can adopt it again later.",
-                project.kind,
-                project.root.display(),
-            );
+            let title = format!("Remove {} from Studio?", project.id);
+            let description = "Its files stay where they are, and you can add it again later.";
             unregistration_confirmation = confirmation_card(
                 ui,
                 &title,
                 &description,
-                "Unregister from Vapor",
-                "Keep registered",
+                "Remove from Studio",
+                "Keep project",
                 !self.operation.running && !self.has_unsaved_workspace_edits(),
             );
         }
@@ -323,23 +404,23 @@ impl StudioApp {
                     .collect::<Vec<_>>();
                 let has_candidates = !candidates.is_empty();
                 if !matching_candidates.is_empty() {
-                    ui.heading(format!(
-                        "Ready to adopt · {} of {}",
+                ui.heading(format!(
+                    "Projects to add · {} of {}",
                         matching_candidates.len(),
                         candidates.len()
                     ));
-                    ui.weak("Adoption adds a valid project to Vapor discovery. It does not move files, publish anything, or change Cargo membership.");
+                ui.weak("Add a project to make it available in Studio. Its files stay where they are.");
                 }
                 let mut adoption_path = None;
                 for candidate in &matching_candidates {
                     let card_style = ui.style().clone();
                     egui::Frame::group(&card_style).show(ui, |ui| {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.vertical(|ui| {
                                 ui.strong(&candidate.id);
                                 ui.small(format!(
                                     "{} · {}",
-                                    candidate.kind,
+                                    super::super::display_content_kind(&candidate.kind.to_string()),
                                     candidate
                                         .path
                                         .strip_prefix(std::path::Path::new(
@@ -355,9 +436,15 @@ impl StudioApp {
                                     if ui
                                         .add_enabled(
                                             !self.operation.running
+                                                && self.workspace.unregistered_scan_error.is_none()
                                                 && !self.has_unsaved_workspace_edits(),
-                                            egui::Button::new("Adopt project"),
+                                            egui::Button::new("Add project"),
                                         )
+                                        .on_disabled_hover_text(if self.workspace.unregistered_scan_error.is_some() {
+                                            "Refresh the folder scan before adding a project; the current results may be out of date."
+                                        } else {
+                                            "Save or discard your edits before adding this project."
+                                        })
                                         .clicked()
                                     {
                                         adoption_path = Some(candidate.path.clone());
@@ -368,7 +455,7 @@ impl StudioApp {
                     });
                 }
                 if has_candidates && matching_candidates.is_empty() {
-                    ui.weak("No unregistered projects match this search.");
+                    ui.weak("No other projects match this search.");
                 }
                 (has_candidates, adoption_path)
             };
@@ -376,13 +463,13 @@ impl StudioApp {
                 self.adopt_content_project(path);
             }
             if self.workspace.unregistered_scan_completed && !has_candidates {
-                ui.weak("No unregistered content manifests were found.");
+                ui.weak("No other project folders were found.");
             }
             if !self.workspace.unregistered_scan_completed
                 && !has_candidates
                 && !self.catalog.sources.is_empty()
             {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.weak("A project scan has not completed yet.");
                     if ui
                         .add_enabled(
@@ -396,7 +483,7 @@ impl StudioApp {
                 });
             }
             for diagnostic in &self.workspace.unregistered_projects.diagnostics {
-                ui.colored_label(egui::Color32::YELLOW, diagnostic);
+                status_text(ui, diagnostic, StatusTone::Caution);
             }
         }
     }

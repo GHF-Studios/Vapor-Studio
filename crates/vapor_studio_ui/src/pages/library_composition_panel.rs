@@ -22,10 +22,10 @@ impl StudioApp {
             let mut action = None;
             empty_state(
                 ui,
-                "No composition selected",
-                "Choose a Packagepack to make this profile playable. It remains separate from the source files in your workspace.",
+                "No game setup selected",
+                "Choose a playable setup for this profile, or make one from your own projects. Your project files stay where they are.",
                 |ui| {
-                    if ui.button("Browse available content").clicked() {
+                    if ui.button("Find a game setup").clicked() {
                         action = Some(ProfileCompositionAction::BrowseContent);
                     }
                     let resume_draft = self.authoring.create.is_dirty();
@@ -33,7 +33,7 @@ impl StudioApp {
                         .button(if resume_draft {
                             "Continue content draft"
                         } else {
-                            "Create a Packagepack"
+                            "Create a game setup"
                         })
                         .clicked()
                     {
@@ -51,10 +51,10 @@ impl StudioApp {
         if ui
             .add_enabled(
                 !self.operation.running && !self.has_unsaved_workspace_edits() && editable_source,
-                egui::Button::new("Edit composition"),
+                egui::Button::new("Edit game setup"),
             )
             .on_disabled_hover_text(
-                "Only a Packagepack in the active workspace can be edited here.",
+                "Only a game setup project in an open project folder can be edited here.",
             )
             .clicked()
         {
@@ -63,10 +63,10 @@ impl StudioApp {
         if ui
             .add_enabled(
                 !self.operation.running && !self.has_unsaved_workspace_edits(),
-                egui::Button::new("Preview dependency plan"),
+                egui::Button::new("Review game setup"),
             )
             .on_disabled_hover_text(
-                "Save or discard workspace file and structured metadata drafts first; resolution reads manifests from disk.",
+                "Save or discard your open project edits first; Studio reads the saved project details.",
             )
             .clicked()
         {
@@ -79,7 +79,9 @@ impl StudioApp {
         {
             let published_file_ids =
                 super::super::components::composition_preview::draw_composition_preview(
-                    ui, preview,
+                    ui,
+                    preview,
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
                 );
             if !published_file_ids.is_empty() {
                 action = Some(ProfileCompositionAction::DownloadDependencies(
@@ -90,7 +92,7 @@ impl StudioApp {
 
         if let Some(graph) = &profile.resolved_graph {
             ui.group(|ui| {
-                ui.label(format!("Selected content · {} items", graph.nodes.len()));
+                ui.label(format!("This setup contains {} items", graph.nodes.len()));
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
                         "Engine: {}",
@@ -105,12 +107,12 @@ impl StudioApp {
                             .unwrap_or_else(|| "None".to_owned())
                     ));
                 });
-                egui::CollapsingHeader::new("Included content")
-                    .default_open(true)
+                egui::CollapsingHeader::new("Show included items")
+                    .default_open(false)
                     .show(ui, |ui| {
                         for node in &graph.nodes {
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(node.kind.as_str());
+                                ui.label(super::super::display_content_kind(node.kind.as_str()));
                                 ui.label(content_selector(&node.content));
                                 if !node.dependencies.is_empty() {
                                     ui.weak(format!("{} dependencies", node.dependencies.len()));

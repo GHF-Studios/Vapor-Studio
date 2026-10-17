@@ -24,14 +24,15 @@ impl StudioApp {
                 }
                 let mut remove_argument = None;
                 for index in 0..argument_count {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let input_width = (ui.available_width() - 100.0).max(120.0).min(360.0);
                         ui.label(format!("{}", index + 1));
                         ui.add_enabled(
                             can_edit,
                             egui::TextEdit::singleline(
                                 &mut self.profile.items[active_profile].launch.arguments[index],
                             )
-                            .desired_width(320.0),
+                            .desired_width(input_width),
                         );
                         if ui
                             .add_enabled(can_edit, egui::Button::new("Remove"))

@@ -7,7 +7,9 @@ impl StudioApp {
             OperationResult::Workspace(Ok(workspace)) => self.apply_workspace_loaded(workspace),
             OperationResult::Workspace(Err(error)) => self.status = error,
             OperationResult::WorkspaceSelection(Err(error)) => self.status = error,
-            OperationResult::UnregisteredProjectScan(Err(error)) => self.status = error,
+            OperationResult::UnregisteredProjectScan(Err(error)) => {
+                self.apply_unregistered_project_scan_error(error)
+            }
             OperationResult::RememberedSources(Err(error)) => self.status = error,
             OperationResult::RememberedSources(Ok(known)) => self.apply_remembered_sources(known),
             OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
@@ -22,9 +24,17 @@ impl StudioApp {
             OperationResult::WorkspaceSelection(Ok(selection)) => {
                 self.activate_workspace(selection)
             }
-            OperationResult::Discovery(source_result, catalog_result, unregistered_result) => {
-                self.apply_catalog_discovery(source_result, catalog_result, unregistered_result)
-            }
+            OperationResult::Discovery(
+                source_result,
+                catalog_result,
+                unregistered_result,
+                workspace_validation_error,
+            ) => self.apply_catalog_discovery(
+                source_result,
+                catalog_result,
+                unregistered_result,
+                workspace_validation_error,
+            ),
             OperationResult::Message(Err(error)) => {
                 if self
                     .operation
@@ -42,8 +52,10 @@ impl StudioApp {
                     self.status = error;
                 }
             }
+            OperationResult::WorkspaceFiles(Err(error)) => {
+                self.apply_workspace_files_error(error)
+            }
             OperationResult::CompositionPreview(Err(error))
-            | OperationResult::WorkspaceFiles(Err(error))
             | OperationResult::WorkspaceFileCreated(Err(error))
             | OperationResult::FileContents(Err(error))
             | OperationResult::FileSaved(Err(error))
@@ -75,8 +87,8 @@ impl StudioApp {
             OperationResult::WorkshopSubscriptions(Err(error)) => {
                 self.apply_workshop_subscriptions_error(error)
             }
-            OperationResult::WorkshopAcquisition(Ok(acquisitions)) => {
-                self.apply_workshop_acquisition(acquisitions)
+            OperationResult::WorkshopAcquisition(Ok((acquisitions, requested))) => {
+                self.apply_workshop_acquisition(acquisitions, requested)
             }
             OperationResult::WorkshopPublish(Ok(publication)) => {
                 self.apply_workshop_publication(publication)

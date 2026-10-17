@@ -11,7 +11,8 @@ impl StudioApp {
                 }
                 ui.strong(operation_kind_label(&operation.kind));
                 ui.weak(operation_phase_label(&operation.phase));
-                ui.label(&self.status);
+                ui.label(compact_status(&self.status))
+                    .on_hover_text(&self.status);
                 if let Some(progress) = &operation.progress {
                     if let Some(total) = progress.total {
                         let fraction = if total == 0 {
@@ -43,7 +44,7 @@ impl StudioApp {
                     }
                     _ => StatusTone::Neutral,
                 };
-                status_text(ui, &self.status, tone);
+                status_text(ui, &compact_status(&self.status), tone).on_hover_text(&self.status);
                 ui.weak(format!(
                     "Last · {} · {}",
                     operation_kind_label(&last.event.kind),
@@ -51,71 +52,64 @@ impl StudioApp {
                 ));
             } else {
                 ui.strong("Ready");
-                status_text(ui, &self.status, StatusTone::Neutral);
+                status_text(ui, &compact_status(&self.status), StatusTone::Neutral)
+                    .on_hover_text(&self.status);
             }
         });
-        egui::CollapsingHeader::new("Recent activity")
-            .default_open(false)
-            .show(ui, |ui| {
-                if self.operation.operation_history.is_empty() {
-                    ui.weak("No operations have been recorded yet.");
-                } else {
-                    for operation in self.operation.operation_history.iter().take(10) {
-                        ui.horizontal(|ui| {
-                            ui.strong(operation_kind_label(&operation.event.kind));
-                            ui.label(operation_status_label(&operation.event.status));
-                            ui.weak(super::operations::elapsed_label(
-                                operation.completed_at_unix,
-                            ));
-                        });
-                    }
-                }
-            });
     }
+}
+
+pub(super) fn compact_status(status: &str) -> String {
+    let mut characters = status.chars();
+    let mut summary = characters.by_ref().take(120).collect::<String>();
+    if characters.next().is_some() {
+        summary.push('…');
+    }
+    summary
 }
 
 pub(super) fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str {
     use vapor_studio_core::OperationKind::*;
     match kind {
-        Discover => "Refresh content catalog",
+        Discover => "Refresh available content",
         SearchWorkshop => "Search Steam Workshop",
-        LoadWorkshopSubscriptions => "Load Workshop subscriptions",
-        ChangeWorkshopSubscription => "Change Workshop subscriptions",
-        Resolve => "Resolve composition",
-        Acquire => "Download Workshop content",
-        Install => "Install composition",
-        Verify => "Verify installation",
-        Update => "Update composition",
-        Repair => "Repair installation",
-        CreateWorkspace => "Create starter workspace",
+        LoadWorkshopSubscriptions => "Check your Workshop subscriptions",
+        ChangeWorkshopSubscription => "Update Workshop subscriptions",
+        Resolve => "Check game setup",
+        Acquire => "Download content",
+        Install => "Install game setup",
+        Verify => "Check installed files",
+        Update => "Update game setup",
+        Repair => "Repair game setup",
+        CreateWorkspace => "Create project folder",
         CreateContent => "Create content project",
-        LoadComposition => "Load composition dependencies",
-        SaveComposition => "Save composition dependencies",
+        LoadComposition => "Load included content",
+        SaveComposition => "Save included content",
         LoadWorkshopMetadata => "Load Workshop metadata",
         SaveWorkshopMetadata => "Save Workshop metadata",
         LoadRuntimeOutputs => "Load runtime output declarations",
         SaveRuntimeOutputs => "Save runtime output declarations",
-        CreateWorkspaceFile => "Create workspace file",
-        OpenWorkspace => "Open workspace",
-        RememberWorkspace => "Add workspace to Vapor sources",
-        AdoptContentProject => "Adopt existing content project",
-        UnregisterContentProject => "Unregister content project",
-        DiscoverContentProjects => "Find unregistered content",
-        DiscoverWorkspace => "Read workspace files",
+        CreateWorkspaceFile => "Create project file",
+        OpenWorkspace => "Open project folder",
+        RememberWorkspace => "Make project folder available",
+        AdoptContentProject => "Add existing project",
+        UnregisterContentProject => "Remove project from Studio",
+        DiscoverContentProjects => "Find projects in folder",
+        DiscoverWorkspace => "Read project files",
         OpenWorkspaceFile => "Open file",
-        SaveWorkspaceFile => "Save workspace file(s)",
-        Fmt => "Format workspace",
-        Check => "Check workspace",
-        Test => "Test workspace",
-        Build => "Build workspace",
-        Clean => "Clean workspace",
-        Validate => "Validate content",
-        Run => "Build and play composition",
-        RunInstalled => "Play installed composition",
-        StageWorkshop => "Stage Workshop review",
-        PublishWorkshop => "Publish to Workshop",
-        StageRootDistribution => "Preview Steam package",
-        PublishRootDistribution => "Publish Steam root package",
+        SaveWorkspaceFile => "Save project files",
+        Fmt => "Format project files",
+        Check => "Check project",
+        Test => "Test project",
+        Build => "Build project",
+        Clean => "Clean project files",
+        Validate => "Check content setup",
+        Run => "Build and launch project",
+        RunInstalled => "Launch game setup",
+        StageWorkshop => "Review Workshop upload",
+        PublishWorkshop => "Publish to Steam Workshop",
+        StageRootDistribution => "Review Steam release",
+        PublishRootDistribution => "Publish Steam release",
     }
 }
 
@@ -123,24 +117,14 @@ fn operation_phase_label(phase: &vapor_studio_core::OperationPhase) -> &'static 
     use vapor_studio_core::OperationPhase::*;
     match phase {
         Queued => "Queued",
-        Resolving => "Resolving",
+        Resolving => "Checking requirements",
         Acquiring => "Downloading",
         Installing => "Installing",
-        Verifying => "Verifying",
+        Verifying => "Checking files",
         Building => "Building",
         Running => "Launching",
         Staging => "Preparing review",
         Publishing => "Publishing",
         Finalizing => "Finishing",
-    }
-}
-
-fn operation_status_label(status: &vapor_studio_core::OperationStatus) -> String {
-    use vapor_studio_core::OperationStatus::*;
-    match status {
-        Running => "In progress".to_owned(),
-        Succeeded { summary } => format!("Complete · {summary}"),
-        Failed { message } => format!("Failed · {message}"),
-        Cancelled => "Cancelled".to_owned(),
     }
 }

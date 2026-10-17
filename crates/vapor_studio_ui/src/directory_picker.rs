@@ -118,24 +118,31 @@ impl DirectoryPicker {
 
     pub(super) fn show(&mut self, context: &egui::Context) -> Option<DirectoryPickerResult> {
         let title = match self.purpose {
-            DirectoryPickerPurpose::OpenWorkspace => "Open a workspace folder",
-            DirectoryPickerPurpose::WorkspaceParent => "Choose where to create the workspace",
+            DirectoryPickerPurpose::OpenWorkspace => "Open a project folder",
+            DirectoryPickerPurpose::WorkspaceParent => "Choose where to create a project folder",
         };
         let mut window_open = self.open;
         let mut result = None;
+        let viewport = context.content_rect().size();
+        let picker_size = egui::vec2(
+            (viewport.x - 24.0).max(1.0),
+            (viewport.y - 24.0).max(1.0),
+        );
+        let folders_height = (viewport.y - 300.0).clamp(40.0, 300.0);
         egui::Window::new(title)
             .id(egui::Id::new("studio-directory-picker"))
             .open(&mut window_open)
             .collapsible(false)
             .resizable(true)
-            .default_width(620.0)
+            .default_width((viewport.x - 24.0).clamp(1.0, 620.0))
+            .max_size(picker_size)
             .show(context, |ui| {
                 ui.label(match self.purpose {
                     DirectoryPickerPurpose::OpenWorkspace => {
-                        "Choose a folder containing Workspace.vapor.toml."
+                        "Choose a folder containing a Vapor project."
                     }
                     DirectoryPickerPurpose::WorkspaceParent => {
-                        "Studio will create a new workspace folder inside this location."
+                        "Studio will create a new project folder inside this location."
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
@@ -150,7 +157,7 @@ impl DirectoryPicker {
                     }
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.path_draft)
-                            .desired_width(ui.available_width().max(160.0))
+                            .desired_width(ui.available_width().min(480.0).max(1.0))
                             .hint_text("Folder path"),
                     );
                     let go = ui.button("Go").clicked()
@@ -168,9 +175,9 @@ impl DirectoryPicker {
                 let recognized_workspace = self.path.join("Workspace.vapor.toml").is_file();
                 if matches!(self.purpose, DirectoryPickerPurpose::OpenWorkspace) {
                     if recognized_workspace {
-                        status_text(ui, "Vapor workspace found here", StatusTone::Positive);
+                        status_text(ui, "Vapor project found here", StatusTone::Positive);
                     } else {
-                        ui.weak("This folder does not contain a Vapor workspace manifest.");
+                        ui.weak("This folder does not contain a Vapor project definition.");
                     }
                 }
                 ui.separator();
@@ -180,7 +187,7 @@ impl DirectoryPicker {
                         .hint_text("Filter folders in this location"),
                 );
                 egui::ScrollArea::vertical()
-                    .max_height(300.0)
+                    .max_height(folders_height)
                     .show(ui, |ui| {
                         let filter = self.folder_filter.trim().to_lowercase();
                         let mut visible_directories = 0;
@@ -227,7 +234,7 @@ impl DirectoryPicker {
                         DirectoryPickerPurpose::WorkspaceParent => self.error.is_none(),
                     };
                     let label = match self.purpose {
-                        DirectoryPickerPurpose::OpenWorkspace => "Open this workspace",
+                        DirectoryPickerPurpose::OpenWorkspace => "Open this project folder",
                         DirectoryPickerPurpose::WorkspaceParent => "Choose this location",
                     };
                     if ui

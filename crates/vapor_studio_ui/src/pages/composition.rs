@@ -18,172 +18,75 @@ impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
         page_header(
             ui,
-            "Author",
-            "Compose",
-            "Build a content package by choosing its compatible projects and versions.",
+            "Game setup",
+            "Choose what this profile launches",
+            "Choose the game engine, game, and add-ons that belong in this playable setup.",
         );
         ui.weak(
-            "Saving checks the selected content and updates its source manifest through Vapor.",
+            "This chooses what the selected play profile launches. Your project files stay in their project folders.",
         );
+        if let Some(error) = self.catalog.source_discovery_error.as_deref() {
+            status_text(
+                ui,
+                &format!(
+                    "The project list could not refresh, so some results may be out of date. Refresh it before loading dependencies, reviewing this setup, or changing the active profile. {error}"
+                ),
+                StatusTone::Caution,
+            );
+        }
         let composition_has_changes = self.authoring.composition_has_unsaved_changes();
         let composition_role_change_pending =
             self.authoring.pending_composition_role_change.is_some();
 
-        let source_query = self
-            .authoring
-            .composition_source_search
-            .trim()
-            .to_lowercase();
-        let source_match_count = self
-            .catalog
-            .sources
-            .iter()
-            .filter(|content| source_content_matches_query(content, &source_query))
-            .count();
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Source project");
-            ui.add_enabled_ui(
-                !self.operation.running
-                    && !composition_has_changes
-                    && !composition_role_change_pending,
-                |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(
-                                &mut self.authoring.composition_source_search,
-                            )
-                            .desired_width(250.0)
-                            .hint_text("Find a source project"),
-                        );
-                        if !self.authoring.composition_source_search.is_empty()
-                            && ui.small_button("Clear").clicked()
-                        {
-                            self.authoring.composition_source_search.clear();
-                        }
-                        egui::ComboBox::from_id_salt("composition-source-project")
-                            .selected_text(if self.authoring.composition_edit_selector.is_empty() {
-                                "Select content".to_owned()
-                            } else {
-                                self.authoring.composition_edit_selector.clone()
-                            })
-                            .show_ui(ui, |ui| {
-                                for content in self.catalog.sources.iter().filter(|content| {
-                                    source_content_matches_query(content, &source_query)
-                                }) {
-                                    let selector = super::super::source_content_selector(content);
-                                    if ui
-                                        .selectable_label(
-                                            self.authoring.composition_edit_selector == selector,
-                                            format!("{selector} · {}", content.kind),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.authoring.composition_edit_selector = selector;
-                                        self.authoring.composition_source_search.clear();
-                                        self.authoring.composition_edit = None;
-                                        self.authoring.composition_original_links = None;
-                                        self.authoring.composition_link_candidate.clear();
-                                        self.authoring.composition_link_search.clear();
-                                        self.authoring.packagepack_engine_search.clear();
-                                        self.authoring.packagepack_game_search.clear();
-                                    }
-                                }
-                            });
-                    });
-                },
-            );
-            if ui
-                .add_enabled(
-                    !self.operation.running
-                        && !self.has_unsaved_workspace_edits()
-                        && !composition_role_change_pending
-                        && !self.authoring.composition_edit_selector.trim().is_empty(),
-                    egui::Button::new("Load dependencies"),
-                )
-                .clicked()
-            {
-                self.load_source_composition();
-            }
-        });
-        if !self.catalog.sources.is_empty() {
-            ui.small(format!(
-                "{source_match_count} source project{}",
-                if source_match_count == 1 { "" } else { "s" }
-            ));
-            if source_match_count == 0 {
-                ui.weak("No source projects match this search.");
-            }
-        }
-        if composition_has_changes {
-            ui.weak("Save or discard this draft before loading another source project.");
-        }
+        self.draw_composition_source_selector(
+            ui,
+            composition_has_changes,
+            composition_role_change_pending,
+        );
 
         if self.catalog.sources.is_empty() {
-            let candidates = self.workspace.unregistered_projects.candidates.len();
-            let card_style = ui.style().clone();
-            egui::Frame::group(&card_style).show(ui, |ui| {
-                if candidates > 0 {
-                    ui.heading(format!("{candidates} workspace project{} need adoption", if candidates == 1 { "" } else { "s" }));
-                    ui.label("These manifests are already on this device. Adopt them into Vapor's content index to make them available in compositions and profiles.");
-                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Review and adopt projects")).clicked() {
-                        self.navigate_to_workspace_content();
-                    }
-                } else if self.workspace.root.trim().is_empty() {
-                    ui.heading("Open a workspace to compose content");
-                    ui.label("Compositions connect authored Engine, Game, pack, and extension projects from one workspace.");
-                    ui.horizontal(|ui| {
-                        if ui.button("Open workspace").clicked() {
-                            self.open_workspace_picker();
-                        }
-                        if ui.button("Create workspace").clicked() {
-                            self.activate_navigation_section(super::super::Section::Create);
-                        }
-                    });
-                } else if !self.workspace.unregistered_scan_completed {
-                    ui.heading("Check this workspace for content");
-                    ui.label("A project scan has not completed yet. Scanning only reads manifests; it does not change workspace files.");
-                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Find workspace projects")).clicked() {
-                        self.scan_unregistered_content_projects();
-                    }
-                } else {
-                    ui.heading("No authored projects to compose yet");
-                    ui.label("Create content in this workspace or scan again after adding a role manifest.");
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
-                            self.activate_navigation_section(super::super::Section::Create);
-                        }
-                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Scan again")).clicked() {
-                            self.scan_unregistered_content_projects();
-                        }
-                    });
-                }
-            });
+            self.draw_composition_empty_state(ui);
         }
 
         let mut remove_link = None;
         let mut use_profile_root = false;
+        let mut review_profile_plan = false;
         let mut preview_source_selector = None;
         let mut stage_source_selector = None;
         let mut save_dependencies = false;
         let mut discard_dependencies = false;
         let mut source_graph_saved = false;
         let operation_running = self.operation.running;
+        let workspace_manifest_saved =
+            !self.workspace.editor.has_dirty_documents() && !self.authoring.manifest_metadata_dirty;
+        let active_profile_root = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .and_then(|profile| profile.root_package.clone());
         let source_contents = &self.catalog.sources;
         if let Some(composition) = self.authoring.composition_edit.as_mut() {
             ui.separator();
-            ui.label(format!("Editing {} · {}", composition.id, composition.kind));
-            ui.small(format!("Source file: {}", composition.manifest.display()));
+            ui.label(format!(
+                "Editing {} · {}",
+                composition.id,
+                super::super::display_content_kind(&composition.kind)
+            ));
+            egui::CollapsingHeader::new("Project file details")
+                .default_open(false)
+                .show(ui, |ui| ui.small(format!("Definition file: {}", composition.manifest.display())));
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.add_enabled_ui(!operation_running && !composition_role_change_pending, |ui| {
                     ui.group(|ui| {
                         ui.heading("Playable content");
-                        ui.label("Choose the Engine that runs this composition and, optionally, the Game it contains.");
+                        ui.label("Choose one game engine and one game for this setup.");
                         draw_packagepack_role_slot(
                             ui,
                             &mut composition.links,
                             &source_contents,
                             "engine-choice",
-                            "Engine · required",
+                            "Game engine · required",
+                            "Choose an Engine",
                             false,
                             &mut self.authoring.packagepack_engine_search,
                             &mut self.authoring.pending_composition_role_change,
@@ -193,12 +96,13 @@ impl StudioApp {
                             &mut composition.links,
                             &source_contents,
                             "game-choice",
-                            "Game · optional",
-                            true,
+                            "Game · required",
+                            "Choose a Game",
+                            false,
                             &mut self.authoring.packagepack_game_search,
                             &mut self.authoring.pending_composition_role_change,
                         );
-                        ui.small("Save validates the complete composition through Vapor before writing its manifest.");
+                        ui.small("Save checks that both required roles are available before updating this setup.");
                     });
                 },
             );
@@ -270,12 +174,13 @@ impl StudioApp {
             }
 
             ui.separator();
-            ui.label("Add additional workspace content");
+            ui.label("Add other content from these project folders");
             ui.horizontal_wrapped(|ui| {
+            let search_width = super::super::components::design::search_field_width(ui);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.authoring.composition_link_search)
-                        .desired_width(320.0)
-                        .hint_text("Find compatible content by ID, role, or version"),
+                    .desired_width(search_width)
+                        .hint_text("Search by name, role, or version"),
                 );
                 if !self.authoring.composition_link_search.is_empty()
                     && ui.small_button("Clear").clicked()
@@ -292,17 +197,17 @@ impl StudioApp {
                 })
                 .count();
             ui.small(format!(
-                "{compatible_candidates} compatible workspace project{}",
+                "{compatible_candidates} compatible project{}",
                 if compatible_candidates == 1 { "" } else { "s" }
             ));
             if compatible_candidates == 0 {
                 ui.weak(if link_query.is_empty() {
-                    "No additional content roles are compatible with this source."
+                    "No additional content roles are compatible with this project."
                 } else {
-                    "No compatible workspace content matches this search."
+                    "No compatible projects match this search."
                 });
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.add_enabled_ui(
                     !operation_running && !composition_role_change_pending,
                     |ui| {
@@ -322,7 +227,7 @@ impl StudioApp {
                                     let selector = super::super::source_content_selector(content);
                                     let label = format!(
                                         "{selector} · {} · {}",
-                                        content.kind,
+                                        super::super::display_content_kind(&content.kind),
                                         content.version.as_deref().unwrap_or("unversioned")
                                     );
                                     if ui
@@ -396,9 +301,9 @@ impl StudioApp {
             status_text(
                 ui,
                 if source_graph_saved {
-                    "Dependencies match the saved manifest"
+                    "Included content matches the saved project"
                 } else {
-                    "Unsaved dependency changes"
+                    "Unsaved content changes"
                 },
                 if source_graph_saved {
                     StatusTone::Positive
@@ -410,7 +315,7 @@ impl StudioApp {
                 ui.add_enabled_ui(
                     !self.operation.running && !composition_role_change_pending,
                     |ui| {
-                        save_dependencies = primary_button(ui, "Save dependency changes").clicked();
+                        save_dependencies = primary_button(ui, "Save content choices").clicked();
                     },
                 );
                 if !self.authoring.composition_discard_confirmation_open {
@@ -427,28 +332,86 @@ impl StudioApp {
                     let source_selector = composition.version.as_ref()
                         .map(|version| format!("{}@{version}", composition.id))
                         .unwrap_or_else(|| composition.id.clone());
-                    if ui.add_enabled(!self.operation.running && !composition_role_change_pending && source_graph_saved, egui::Button::new("Preview availability")).clicked() {
+                    if ui
+                        .add_enabled(
+                            !operation_running
+                                && !composition_role_change_pending
+                                && source_graph_saved
+                                && workspace_manifest_saved
+                                && self.catalog.source_snapshot_current(),
+                            egui::Button::new("Preview availability"),
+                        )
+                        .on_disabled_hover_text(if !workspace_manifest_saved {
+                            "Save or reload dirty workspace files and structured manifest changes first; the preview reads saved files."
+                        } else {
+                            "Save the content choices and confirm the pending game role before previewing."
+                        })
+                        .clicked()
+                    {
                         preview_source_selector = Some(source_selector);
                     }
-                    if ui.add_enabled(!self.operation.running && !composition_role_change_pending && source_graph_saved, egui::Button::new("Use as active profile root"))
-                        .on_disabled_hover_text("Save this composition before resolving it into a profile.")
+                    let already_profile_root = active_profile_root.as_ref().is_some_and(|root| {
+                        root.id == composition.id && root.version == composition.version
+                    });
+                    if already_profile_root {
+                        ui.strong("Already selected for the active profile");
+                        if ui
+                            .add_enabled(
+                                !operation_running
+                                    && !composition_role_change_pending
+                                    && source_graph_saved
+                                    && workspace_manifest_saved,
+                                egui::Button::new("Review play setup"),
+                            )
+                            .on_disabled_hover_text(if !workspace_manifest_saved {
+                                "Save or reload dirty workspace files and structured manifest changes before resolving the profile."
+                            } else {
+                                "Resolve the pending role choice and save composition changes first."
+                            })
+                            .clicked()
+                        {
+                            review_profile_plan = true;
+                        }
+                    } else if ui
+                        .add_enabled(
+                            !operation_running
+                                && !composition_role_change_pending
+                                && source_graph_saved
+                                && workspace_manifest_saved
+                                && self.catalog.source_snapshot_current(),
+                            egui::Button::new("Use as active profile's game setup"),
+                        )
+                        .on_disabled_hover_text(if !workspace_manifest_saved {
+                            "Save or reload dirty workspace files and structured manifest changes before changing the profile's game setup."
+                        } else {
+                            "Save this composition before resolving it into a profile."
+                        })
                         .clicked()
                     {
                         use_profile_root = true;
                     }
-                    ui.weak("This selects the source Packagepack and refreshes its resolved plan after save.");
+                    ui.weak("Choosing a different game setup refreshes what this profile will install and launch.");
                 });
             }
             if ui
                 .add_enabled(
                     !self.operation.running
                         && !composition_role_change_pending
-                        && source_graph_saved,
+                        && source_graph_saved
+                        && workspace_manifest_saved
+                        && self.catalog.source_snapshot_current()
+                        && self.catalog.local_catalog_current(),
                     egui::Button::new("Stage Workshop review"),
                 )
-                .on_disabled_hover_text(
-                    "Save this composition before staging its source content for review.",
-                )
+                .on_disabled_hover_text(if !self.catalog.source_snapshot_current() {
+                    "Refresh workspace sources successfully before staging from the last-known project list."
+                } else if !self.catalog.local_catalog_current() {
+                    "Refresh the on-device content list before preparing this for Steam Workshop; Studio cannot check for conflicts using out-of-date information."
+                } else if !workspace_manifest_saved {
+                    "Save or reload dirty workspace files and structured manifest changes before staging this source."
+                } else {
+                    "Save this composition before staging its source content for review."
+                })
                 .clicked()
             {
                 stage_source_selector = Some(
@@ -461,7 +424,7 @@ impl StudioApp {
             }
         } else {
             ui.separator();
-            ui.weak("Load a source content project to inspect and edit its dependencies. Cache and installed copies remain read-only here.");
+            ui.weak("Choose a project to review what it includes. Downloaded and installed copies are managed separately.");
         }
         if let Some(change) = self.authoring.pending_composition_role_change.clone() {
             let proposal_available = change.proposed.as_ref().is_none_or(|proposal| {
@@ -492,7 +455,7 @@ impl StudioApp {
                 .collect::<Vec<_>>()
                 .join(", ");
             let proposed = change.proposed.as_ref().map_or_else(
-                || "No Game".to_owned(),
+                || "No selection".to_owned(),
                 |link| format!("{} · {}", link.relationship, link.id),
             );
             let role = if change.group == "engine-choice" {
@@ -508,11 +471,11 @@ impl StudioApp {
             };
             let description = if proposal_available {
                 format!(
-                    "Change {previous} to {proposed}? Other dependency roles stay as they are. This updates the unsaved draft only; save the composition afterward to write the manifest."
+                    "Change {previous} to {proposed}? Other required content stays as it is. This updates the draft only; save the project afterward to keep the change."
                 )
             } else {
                 format!(
-                    "{proposed} is no longer available at the reviewed version. Keep the current choice, refresh the workspace catalog, and choose it again."
+                    "{proposed} is no longer available at the reviewed version. Keep the current choice, refresh the project list, and choose it again."
                 )
             };
             if let Some(confirm) = super::super::components::design::confirmation_card(
@@ -549,8 +512,8 @@ impl StudioApp {
         if self.authoring.composition_discard_confirmation_open {
             if let Some(discard) = discard_confirmation(
                 ui,
-                "Discard dependency changes?",
-                "The current dependency selections will be restored from the saved source manifest.",
+                "Discard content changes?",
+                "The current content choices will return to the values saved in this project.",
             ) {
                 if discard {
                     self.discard_source_composition_changes();
@@ -564,6 +527,10 @@ impl StudioApp {
         }
         if use_profile_root {
             self.use_edited_composition_for_profile();
+        }
+        if review_profile_plan {
+            self.activate_navigation_section(super::super::Section::Library);
+            self.preview_selected_composition();
         }
         if let Some(selector) = stage_source_selector {
             self.catalog.selected = Some(selector.clone());
@@ -584,7 +551,9 @@ impl StudioApp {
         {
             let published_file_ids =
                 super::super::components::composition_preview::draw_composition_preview(
-                    ui, &preview,
+                    ui,
+                    &preview,
+                    !operation_running && workspace_manifest_saved,
                 );
             if !published_file_ids.is_empty() {
                 self.download_source_composition_dependencies(
@@ -599,6 +568,169 @@ impl StudioApp {
             "Workspace: {}",
             PathBuf::from(self.workspace.root.trim()).display()
         ));
+    }
+
+    fn draw_composition_empty_state(&mut self, ui: &mut egui::Ui) {
+        let candidates = self.workspace.unregistered_projects.candidates.len();
+        let card_style = ui.style().clone();
+        egui::Frame::group(&card_style).show(ui, |ui| {
+                if candidates > 0 {
+                    ui.heading(format!("{candidates} project{} to add", if candidates == 1 { "" } else { "s" }));
+                    ui.label("These projects are already in the open folder. Add them to Studio to use them in a game setup; their files will stay where they are.");
+                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Review projects")).clicked() {
+                        self.navigate_to_workspace_content();
+                    }
+                } else if self.workspace.root.trim().is_empty() {
+                    ui.heading("Open a project folder to set up a game");
+                    ui.label("A game setup combines an engine, a game, and optional add-ons from your project folders.");
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Open project folder").clicked() {
+                            self.open_workspace_picker();
+                        }
+                        if ui.button("Create project folder").clicked() {
+                            self.activate_navigation_section(super::super::Section::Create);
+                        }
+                    });
+                } else if !self.workspace.unregistered_scan_completed {
+                    ui.heading("Find projects in this folder");
+                    ui.label("Studio only checks project information; it does not change your files.");
+                    if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Find projects")).clicked() {
+                        self.scan_unregistered_content_projects();
+                    }
+                } else {
+                    ui.heading("No game content projects found yet");
+                    ui.label("Create a project from a template, or add an existing one to this folder.");
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
+                            self.activate_navigation_section(super::super::Section::Create);
+                        }
+                        if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Scan again")).clicked() {
+                            self.scan_unregistered_content_projects();
+                        }
+                    });
+                }
+            });
+    }
+
+    fn draw_composition_source_selector(
+        &mut self,
+        ui: &mut egui::Ui,
+        composition_has_changes: bool,
+        composition_role_change_pending: bool,
+    ) {
+        let source_query = self
+            .authoring
+            .composition_source_search
+            .trim()
+            .to_lowercase();
+        let source_match_count = self
+            .catalog
+            .sources
+            .iter()
+            .filter(|content| source_content_matches_query(content, &source_query))
+            .count();
+        let selected_project_label = self
+            .catalog
+            .sources
+            .iter()
+            .find(|content| {
+                super::super::source_content_selector(content)
+                    == self.authoring.composition_edit_selector
+            })
+            .map(|content| {
+                format!(
+                    "{} · {}",
+                    content.id,
+                    super::super::display_content_kind(&content.kind)
+                )
+            })
+            .unwrap_or_else(|| {
+                if self.authoring.composition_edit_selector.trim().is_empty() {
+                    "Choose a project".to_owned()
+                } else {
+                    self.authoring.composition_edit_selector.clone()
+                }
+            });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Project to edit");
+            ui.add_enabled_ui(
+                !self.operation.running
+                    && self.catalog.source_snapshot_current()
+                    && !composition_has_changes
+                    && !composition_role_change_pending,
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(
+                                &mut self.authoring.composition_source_search,
+                            )
+                            .desired_width(super::super::components::design::search_field_width(ui))
+                            .hint_text("Find a project"),
+                        );
+                        if !self.authoring.composition_source_search.is_empty()
+                            && ui.small_button("Clear").clicked()
+                        {
+                            self.authoring.composition_source_search.clear();
+                        }
+                        egui::ComboBox::from_id_salt("composition-source-project")
+                            .selected_text(selected_project_label)
+                            .show_ui(ui, |ui| {
+                                for content in self.catalog.sources.iter().filter(|content| {
+                                    source_content_matches_query(content, &source_query)
+                                }) {
+                                    let selector = super::super::source_content_selector(content);
+                                    if ui
+                                        .selectable_label(
+                                            self.authoring.composition_edit_selector == selector,
+                                            format!("{selector} · {}", super::super::display_content_kind(&content.kind)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.authoring.composition_edit_selector = selector;
+                                        self.authoring.composition_source_search.clear();
+                                        self.authoring.composition_edit = None;
+                                        self.authoring.composition_original_links = None;
+                                        self.authoring.composition_link_candidate.clear();
+                                        self.authoring.composition_link_search.clear();
+                                        self.authoring.packagepack_engine_search.clear();
+                                        self.authoring.packagepack_game_search.clear();
+                                    }
+                                }
+                            });
+                    });
+                },
+            );
+            if ui
+                .add_enabled(
+                    !self.operation.running
+                        && self.catalog.source_snapshot_current()
+                        && !self.has_unsaved_workspace_edits()
+                        && !composition_role_change_pending
+                        && !self.authoring.composition_edit_selector.trim().is_empty(),
+                    egui::Button::new("Edit included content"),
+                )
+                .on_disabled_hover_text(if !self.catalog.source_snapshot_current() {
+                    "Refresh the project list before choosing a project from the previous results."
+                } else {
+                    "Save or discard project edits and resolve the pending content choice first."
+                })
+                .clicked()
+            {
+                self.load_source_composition();
+            }
+        });
+        if !self.catalog.sources.is_empty() {
+            ui.small(format!(
+                "{source_match_count} project{}",
+                if source_match_count == 1 { "" } else { "s" }
+            ));
+            if source_match_count == 0 {
+                ui.weak("No projects match this search.");
+            }
+        }
+        if composition_has_changes {
+            ui.weak("Save or discard this draft before loading another project.");
+        }
     }
 }
 
@@ -648,6 +780,7 @@ fn draw_packagepack_role_slot(
     sources: &[vapor_studio_core::SourceContent],
     group: &'static str,
     label: &str,
+    empty_label: &str,
     optional: bool,
     search: &mut String,
     pending_change: &mut Option<super::super::source_authoring::PendingCompositionRoleChange>,
@@ -729,10 +862,8 @@ fn draw_packagepack_role_slot(
             .find(|choice| &choice.0 == selector)
             .map(|choice| packagepack_choice_label(&choice.0, &choice.1, choice.2.as_deref()))
             .unwrap_or_else(|| selector.clone()),
-        (Some(_), PackagepackRoleSelection::Empty) if optional => "No Game".to_owned(),
-        (Some(_), PackagepackRoleSelection::Empty) => "Choose an Engine".to_owned(),
-        (None, _) if optional => "No Game".to_owned(),
-        (None, _) => "Choose an Engine".to_owned(),
+        (Some(_), PackagepackRoleSelection::Empty) => empty_label.to_owned(),
+        (None, _) => empty_label.to_owned(),
     };
 
     let query = search.trim().to_lowercase();
@@ -759,7 +890,7 @@ fn draw_packagepack_role_slot(
             ui.horizontal_wrapped(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(search)
-                        .desired_width(260.0)
+                        .desired_width(super::super::components::design::search_field_width(ui))
                         .hint_text(if optional {
                             "Find a Game"
                         } else {
@@ -848,14 +979,15 @@ fn draw_packagepack_role_slot(
     }
 
     if choices.is_empty() && !optional {
-        ui.weak("No Engine or Enginepack is registered in this workspace yet. Create or adopt one first.");
+        ui.weak("No game engine project is available yet. Create one from a template or add an existing project folder.");
     }
 }
 
 fn packagepack_choice_label(selector: &str, kind: &str, version: Option<&str>) -> String {
     format!(
-        "{} · {kind} · {}",
+        "{} · {} · {}",
         selector.split('@').next().unwrap_or(selector),
+        super::super::display_content_kind(kind),
         version.map_or_else(|| "unversioned".to_owned(), |value| format!("v{value}")),
     )
 }

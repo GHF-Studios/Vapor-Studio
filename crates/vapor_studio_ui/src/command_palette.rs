@@ -40,8 +40,8 @@ impl StudioApp {
 
         let entries = [
             (
-                "Home",
-                "launcher start profiles",
+                "Play",
+                "launch game setup current profile",
                 CommandPaletteAction::Navigate(Section::Home),
             ),
             (
@@ -50,8 +50,8 @@ impl StudioApp {
                 CommandPaletteAction::Navigate(Section::Library),
             ),
             (
-                "Discover",
-                "local content catalog workshop browse",
+                "Browse content",
+                "local content catalog workshop browse search",
                 CommandPaletteAction::Navigate(Section::Discover),
             ),
             (
@@ -65,13 +65,13 @@ impl StudioApp {
                 CommandPaletteAction::Workshop(WorkshopTab::Subscriptions),
             ),
             (
-                "Recent Workshop imports",
-                "cache imported acquisition",
+                "Downloaded content",
+                "cache imported workshop launch",
                 CommandPaletteAction::Workshop(WorkshopTab::Imports),
             ),
             (
-                "Validate workspace content",
-                "manifest references",
+                "Check project folder",
+                "check project setup and required content",
                 CommandPaletteAction::ValidateWorkspace,
             ),
             (
@@ -105,17 +105,17 @@ impl StudioApp {
                 CommandPaletteAction::Navigate(Section::Create),
             ),
             (
-                "Workspace",
+                "Projects",
                 "source projects files build",
                 CommandPaletteAction::Navigate(Section::Workspace),
             ),
             (
-                "Compose",
-                "packagepack dependencies graph",
+                "Game setup",
+                "packagepack dependencies profile composition",
                 CommandPaletteAction::Navigate(Section::Compose),
             ),
             (
-                "Publish",
+                "Share content",
                 "steam workshop review upload",
                 CommandPaletteAction::Navigate(Section::Publish),
             ),
@@ -125,12 +125,12 @@ impl StudioApp {
                 CommandPaletteAction::Navigate(Section::Diagnostics),
             ),
             (
-                "Open workspace",
+                "Open project folder",
                 "folder select source",
                 CommandPaletteAction::OpenWorkspace,
             ),
             (
-                "Open workspace files",
+                "Open project files",
                 "project editor source code",
                 CommandPaletteAction::OpenWorkspaceFiles,
             ),
@@ -145,13 +145,23 @@ impl StudioApp {
         let mut close_requested = false;
         let mut request_focus = self.command_palette_focus_search;
         self.command_palette_focus_search = false;
+        let viewport = ui.ctx().content_rect().size();
+        let popup_size = egui::vec2(
+            (viewport.x - 24.0).max(1.0),
+            (viewport.y - 24.0).max(1.0),
+        );
+        let results_height = (viewport.y - 250.0).clamp(40.0, 340.0);
 
         egui::Window::new("Command palette")
             .id(egui::Id::new("studio-command-palette"))
             .collapsible(false)
             .resizable(false)
-            .default_width(ui.ctx().content_rect().width().min(560.0))
-            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 72.0))
+            .default_width((viewport.x - 24.0).clamp(1.0, 560.0))
+            .max_size(popup_size)
+            .anchor(
+                egui::Align2::CENTER_TOP,
+                egui::vec2(0.0, if viewport.y < 600.0 { 12.0 } else { 72.0 }),
+            )
             .open(&mut window_open)
             .show(ui.ctx(), |ui| {
                 let response = ui.add(
@@ -327,11 +337,11 @@ impl StudioApp {
                             .take(8)
                             .map(|candidate| {
                                 (
-                                    format!("{} · {} · ready to adopt", candidate.id, candidate.kind),
+                                    format!("{} · {} · add to Studio", candidate.id, super::display_content_kind(&candidate.kind.to_string())),
                                     format!(
-                                        "workspace source content {} {} {} adopt",
+                                        "project folder content {} {} {} add",
                                         candidate.id,
-                                        candidate.kind,
+                                        super::display_content_kind(&candidate.kind.to_string()),
                                         candidate.path.display(),
                                     ),
                                     CommandPaletteAction::WorkspaceCandidate(candidate.id.clone()),
@@ -379,7 +389,7 @@ impl StudioApp {
                     .map(|(_, _, action)| (*action).clone());
                 let mut match_count = 0;
                 egui::ScrollArea::vertical()
-                    .max_height(340.0)
+                    .max_height(results_height)
                     .show(ui, |ui| {
                         for (title, _terms, action) in matching_entries {
                             match_count += 1;

@@ -162,10 +162,10 @@ pub fn download_workshop_item(
         .ok_or_else(|| "Workshop download returned no artifact".to_owned())
 }
 
-/// Download multiple public Workshop items in one Vapor Shell operation.
+/// Download multiple Workshop items through the signed-in Steam client.
 ///
-/// Keeping the acquisition batch intact lets SteamCMD authenticate once and
-/// gives the UI one coherent result set to review and compose from.
+/// The items are downloaded for this operation without changing the user's
+/// subscription list, then copied into Vapor's app-owned cache.
 pub fn download_workshop_items(
     application_executable: &Path,
     published_file_ids: &[String],
@@ -189,27 +189,70 @@ pub fn download_workshop_items(
         }
     }
     let installation = InstallationPaths::from_application_executable(application_executable)?;
-    let reports = content::download_many(&installation, None, &normalized_ids, None)?;
-    if reports.is_empty() {
-        return Err("Workshop download returned no artifacts".to_owned());
+    let mut grouped = std::collections::BTreeMap::<u32, Vec<(usize, String)>>::new();
+    for (index, id) in normalized_ids.iter().enumerate() {
+        let app_id = content::workshop_app_id(&installation, None, id, id)?;
+        grouped
+            .entry(app_id)
+            .or_default()
+            .push((index, id.clone()));
     }
-    reports
-        .into_iter()
-        .map(|report| {
-            let cached = content::cached_artifact(&installation, report.artifact_id())?;
-            Ok(WorkshopAcquisition {
-                id: report.artifact_id().to_owned(),
-                version: cached.version().map(ToOwned::to_owned),
-                kind: cached.kind().to_owned(),
-                cache_root: report.cache_root().to_path_buf(),
-                fingerprint: format!(
-                    "{}:{}",
-                    report.fingerprint().algorithm(),
-                    report.fingerprint().hash()
-                ),
+    let mut acquisitions = Vec::with_capacity(normalized_ids.len());
+    for (app_id, items) in grouped {
+        let ids = items
+            .iter()
+            .map(|(_, id)| {
+                id.parse::<u64>()
+                    .map_err(|_| format!("Workshop item ID '{id}' is not a valid number"))
             })
-        })
-        .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        let positions = items
+            .iter()
+            .map(|(index, id)| {
+                id.parse::<u64>()
+                    .map(|published_file_id| (published_file_id, *index))
+                    .map_err(|_| format!("Workshop item ID '{id}' is not a valid number"))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let imported = vapor_steam::with_downloaded_workshop_items(
+            app_id,
+            &ids,
+            |published_file_id, root| {
+                let id = published_file_id.to_string();
+                let report = content::import_workshop_item_from_provider(
+                    &installation,
+                    app_id,
+                    &id,
+                    root,
+                )?;
+                let cached = content::cached_artifact(&installation, report.artifact_id())?;
+                Ok((
+                    *positions.get(&published_file_id).ok_or_else(|| {
+                        format!("Steam returned an unexpected Workshop item {id}")
+                    })?,
+                    WorkshopAcquisition {
+                        id: report.artifact_id().to_owned(),
+                        version: cached.version().map(ToOwned::to_owned),
+                        kind: cached.kind().to_owned(),
+                        cache_root: report.cache_root().to_path_buf(),
+                        fingerprint: format!(
+                            "{}:{}",
+                            report.fingerprint().algorithm(),
+                            report.fingerprint().hash()
+                        ),
+                    },
+                ))
+            },
+        )?;
+        acquisitions.extend(imported);
+    }
+    acquisitions.sort_by_key(|(index, _)| *index);
+    Ok(acquisitions
+        .into_iter()
+        .map(|(_, acquisition)| acquisition)
+        .collect())
 }
 
 pub fn verify_installation(
@@ -288,6 +331,7 @@ pub fn repair_profile_composition(
     let paths = workspace_root
         .map(|root| EnvironmentPaths::from_installation_and_source_path(installation.clone(), root))
         .transpose()?;
+    acquire_root_seed_closure(&installation, paths.as_ref(), selector)?;
     let identities = if graph_selectors.is_empty() {
         vec![selector.to_owned()]
     } else {
@@ -314,8 +358,69 @@ pub fn install_profile_composition(
     let paths = workspace_root
         .map(|root| EnvironmentPaths::from_installation_and_source_path(installation.clone(), root))
         .transpose()?;
+    acquire_root_seed_closure(&installation, paths.as_ref(), selector)?;
     content::install(&installation, paths.as_ref(), selector)?;
     installed_composition(&installation, selector)
+}
+
+fn acquire_root_seed_closure(
+    installation: &InstallationPaths,
+    paths: Option<&EnvironmentPaths>,
+    selector: &str,
+) -> Result<(), String> {
+    let mut acquired = std::collections::BTreeSet::new();
+    loop {
+        let plan = content::preview_install(installation, paths, selector)?;
+        let mut pending = std::collections::BTreeMap::<u32, Vec<String>>::new();
+        for node in &plan.nodes {
+            if node.source != content::InstallPlanSource::RootSeed {
+                continue;
+            }
+            let Some(published_file_id) = node.published_file_id.as_deref() else {
+                continue;
+            };
+            let app_id = content::workshop_app_id(
+                installation,
+                paths,
+                &node.id,
+                published_file_id,
+            )?;
+            let key = (app_id, published_file_id.to_owned());
+            if acquired.insert(key) {
+                pending
+                    .entry(app_id)
+                    .or_default()
+                    .push(published_file_id.to_owned());
+            }
+        }
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        for (app_id, published_file_ids) in pending {
+            let numeric_ids = published_file_ids
+                .iter()
+                .map(|id| {
+                    id.parse::<u64>().map_err(|_| {
+                        format!("Workshop item ID '{id}' is not a valid number")
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            vapor_steam::with_downloaded_workshop_items(
+                app_id,
+                &numeric_ids,
+                |published_file_id, root| {
+                    content::import_workshop_item_from_provider(
+                        installation,
+                        app_id,
+                        &published_file_id.to_string(),
+                        root,
+                    )
+                    .map(|_| ())
+                },
+            )?;
+        }
+    }
 }
 
 /// Update one profile root from its current workspace source or Vapor cache.
@@ -332,6 +437,19 @@ pub fn update_profile_composition(
     installed_composition(&installation, selector)
 }
 
+fn graph_content_selectors(graph: &crate::ResolvedCompositionGraph) -> Vec<String> {
+    graph
+        .nodes
+        .iter()
+        .map(|node| {
+            node.content.version.as_deref().map_or_else(
+                || node.content.id.clone(),
+                |version| format!("{}@{version}", node.content.id),
+            )
+        })
+        .collect()
+}
+
 /// Launch one installed profile composition without changing Shell's global selection.
 pub fn run_installed_profile(
     application_executable: &Path,
@@ -341,21 +459,37 @@ pub fn run_installed_profile(
     arguments: &[String],
 ) -> Result<ProfileRunResult, String> {
     let installation = InstallationPaths::from_application_executable(application_executable)?;
-    if !content::has_installed_artifact(&installation, selector)? {
-        if expected_graph.is_some() {
-            return Err(
-                "This profile's saved composition is not installed. Install or restore the saved graph before playing it."
-                    .to_owned(),
-            );
+    let installed = content::has_installed_artifact(&installation, selector)?;
+    let composition = if installed {
+        match installed_composition(&installation, selector) {
+            Ok(composition) => composition,
+            Err(_error) => {
+                if let Some(graph) = expected_graph {
+                    let selectors = graph_content_selectors(graph);
+                    repair_profile_composition(
+                        application_executable,
+                        workspace_root,
+                        selector,
+                        &selectors,
+                    )?
+                } else {
+                    // A root-only install is not launchable. With no saved graph yet,
+                    // let Shell install the root's complete dependency closure.
+                    install_profile_composition(application_executable, workspace_root, selector)?
+                }
+            }
         }
-        let paths = workspace_root
-            .map(|root| {
-                EnvironmentPaths::from_installation_and_source_path(installation.clone(), root)
-            })
-            .transpose()?;
-        content::install(&installation, paths.as_ref(), selector)?;
-    }
-    let composition = installed_composition(&installation, selector)?;
+    } else if let Some(graph) = expected_graph {
+        let selectors = graph_content_selectors(graph);
+        repair_profile_composition(
+            application_executable,
+            workspace_root,
+            selector,
+            &selectors,
+        )?
+    } else {
+        install_profile_composition(application_executable, workspace_root, selector)?
+    };
     let profile_graph_matches = expected_graph
         .is_none_or(|expected| crate::resolved_graph_matches(expected, &composition.graph));
     let launch_error = if profile_graph_matches {
@@ -461,7 +595,7 @@ fn snapshot_installed_graph(
     crate::ResolvedCompositionGraph {
         root: identity(graph.root()),
         effective_engine: identity(graph.engine()),
-        effective_game: graph.game().map(identity),
+        effective_game: Some(identity(graph.game())),
         nodes,
     }
 }

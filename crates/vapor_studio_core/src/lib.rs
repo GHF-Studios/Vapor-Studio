@@ -53,6 +53,6 @@ pub use workspace::{
     remember_workspace, save_source_composition, save_source_runtime_outputs,
     save_source_workshop_metadata, scan_unregistered_content_projects, source_dependency_allowed,
     source_dependency_choice_group, source_dependency_relationship,
-    source_required_dependency_choice_group, unregister_workspace_content_project,
+    source_required_dependency_choice_groups, unregister_workspace_content_project,
     validate_profile_source, validate_workspace_source,
 };

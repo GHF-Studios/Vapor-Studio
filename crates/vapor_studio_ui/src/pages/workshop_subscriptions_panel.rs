@@ -1,5 +1,6 @@
 use super::super::StudioApp;
-use super::super::components::design::{empty_state, section_header};
+use super::super::components::design::{StatusTone, empty_state, section_header, status_text};
+use super::super::workshop::WorkshopTab;
 use eframe::egui;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -8,14 +9,18 @@ struct LocalWorkshopContent {
     available: bool,
     conflicted: bool,
     included_in_active_profile: bool,
+    selected_as_profile_root: bool,
     packagepack_available: bool,
 }
 
 enum SubscriptionAction {
     SetSelected(String, bool),
     SetManySelected(Vec<String>, bool),
+    ImportMany(Vec<String>),
+    UnsubscribeMany(Vec<String>),
     ReviewLocal(String),
     UseAsProfileRoot(String),
+    LaunchAsProfileRoot(String),
     ReviewProfile,
     Import(String),
     Unsubscribe(String),
@@ -26,7 +31,7 @@ impl StudioApp {
         section_header(
             ui,
             "Your Steam subscriptions",
-            "Steam subscription downloads and imports to Vapor's local cache are separate steps.",
+            "Steam keeps track of subscriptions. Download a copy here to make an item available to this installation.",
         );
         ui.horizontal(|ui| {
             if ui
@@ -43,6 +48,13 @@ impl StudioApp {
                 self.refresh_workshop_subscriptions();
             }
         });
+        if self.workshop.subscriptions_stale {
+            status_text(
+                ui,
+                "Showing the last known subscription state. Refresh failed, so Steam changes may not be reflected.",
+                StatusTone::Caution,
+            );
+        }
         if !self.workshop.subscriptions_loaded {
             empty_state(
                 ui,
@@ -51,12 +63,18 @@ impl StudioApp {
                 |_| {},
             );
         } else if self.workshop.subscriptions.is_empty() {
+            let mut browse_workshop = false;
             empty_state(
                 ui,
                 "No Vapor Workshop subscriptions",
                 "Items you subscribe to in Steam Workshop will appear here.",
-                |_| {},
+                |ui| {
+                    browse_workshop = ui.button("Browse Steam Workshop").clicked();
+                },
             );
+            if browse_workshop {
+                self.workshop.tab = WorkshopTab::Browse;
+            }
         }
         if !self.workshop.subscriptions.is_empty() {
             // Build the local/profile view once. The old row renderer scanned the
@@ -89,15 +107,19 @@ impl StudioApp {
                 status.conflicted |= !content.is_unambiguous();
                 status.included_in_active_profile |=
                     active_content.contains(&(content.id.as_str(), content.version.as_deref()));
+                status.selected_as_profile_root |=
+                    self.is_active_profile_root(&content.id, content.version.as_deref());
                 status.packagepack_available |= content.kind
                     == vapor_core::ContentKind::Packagepack.as_str()
                     && content.is_unambiguous();
             }
             ui.horizontal_wrapped(|ui| {
+                let search_width =
+                    super::super::components::design::search_field_width(ui);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.workshop.subscription_search_query)
-                        .desired_width(320.0)
-                        .hint_text("Find subscription by title or Workshop ID"),
+                        .desired_width(search_width)
+                        .hint_text("Find a subscription by title or item ID"),
                 );
                 if !self.workshop.subscription_search_query.is_empty()
                     && ui.small_button("Clear").clicked()
@@ -110,7 +132,7 @@ impl StudioApp {
                 .subscription_search_query
                 .trim()
                 .to_lowercase();
-            let matching_subscriptions = self
+            let visible_ids = self
                 .workshop
                 .subscriptions
                 .iter()
@@ -122,21 +144,17 @@ impl StudioApp {
                         &results_by_id,
                     )
                 })
-                .count();
-            let selected_visible = self
-                .workshop
-                .subscriptions
+                .cloned()
+                .collect::<Vec<_>>();
+            let matching_subscriptions = visible_ids.len();
+            let visible_selected_ids = visible_ids
                 .iter()
-                .filter(|id| {
-                    self.workshop.selected_items.contains(*id)
-                        && subscription_matches_query(
-                            id,
-                            &query,
-                            &self.workshop.subscription_details,
-                            &results_by_id,
-                        )
-                })
-                .count();
+                .filter(|id| self.workshop.selected_items.contains(*id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let selected_visible = visible_selected_ids.len();
+            let subscription_batch_supported =
+                selected_visible <= vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH;
             let all_visible_selected =
                 matching_subscriptions > 0 && selected_visible == matching_subscriptions;
             let mut action = None;
@@ -156,30 +174,82 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    let ids = self.workshop.subscriptions.iter().filter(|id| {
-                        subscription_matches_query(
-                            id,
-                            &query,
-                            &self.workshop.subscription_details,
-                            &results_by_id,
-                        )
-                    }).cloned().collect();
                     action = Some(SubscriptionAction::SetManySelected(
-                        ids,
+                        visible_ids.clone(),
                         !all_visible_selected,
                     ));
                 }
-            });
-            egui::CollapsingHeader::new(format!("My subscriptions ({matching_subscriptions})"))
-                .default_open(true)
-                .show(ui, |ui| {
-                if matching_subscriptions == 0 {
-                    ui.weak(if query.is_empty() {
-                        "No subscriptions are available to show."
-                    } else {
-                        "No subscriptions match this search."
-                    });
+                if selected_visible > 0
+                    && ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::Button::new(format!("Download selected · {selected_visible}")),
+                        )
+                        .on_hover_text("Download only the selected items currently visible in this view to this installation.")
+                        .clicked()
+                {
+                    action = Some(SubscriptionAction::ImportMany(
+                        visible_selected_ids.clone(),
+                    ));
                 }
+                if selected_visible > 0
+                    && ui
+                        .add_enabled(
+                            !self.operation.running && subscription_batch_supported,
+                            egui::Button::new(format!("Unsubscribe visible · {selected_visible}")),
+                        )
+                        .on_disabled_hover_text(format!(
+                            "Select at most {} visible items for one Steam subscription change.",
+                            vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH
+                        ))
+                        .clicked()
+                {
+                    action = Some(SubscriptionAction::UnsubscribeMany(
+                        visible_selected_ids.clone(),
+                    ));
+                }
+            });
+            let visible_subscription_ids = visible_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            let selected_outside_view = self
+                .workshop
+                .subscriptions
+                .iter()
+                .filter(|id| {
+                    self.workshop.selected_items.contains(*id)
+                        && !visible_subscription_ids.contains(id.as_str())
+                })
+                .count();
+            if selected_outside_view > 0 {
+                ui.weak(format!(
+                    "{selected_outside_view} additional selections are outside this view. These batch actions affect only visible selections."
+                ));
+            }
+            if matching_subscriptions == 0 {
+                empty_state(
+                    ui,
+                    if query.is_empty() {
+                        "No subscriptions are available to show"
+                    } else {
+                        "No subscriptions match this search"
+                    },
+                    if query.is_empty() {
+                        "Refresh subscriptions from Steam to check for new items."
+                    } else {
+                        "Clear or change the search to see your other subscriptions."
+                    },
+                    |ui| {
+                        if !query.is_empty() && ui.button("Clear search").clicked() {
+                            self.workshop.subscription_search_query.clear();
+                        }
+                    },
+                );
+            } else {
+                egui::CollapsingHeader::new(format!("My subscriptions ({matching_subscriptions})"))
+                    .default_open(true)
+                    .show(ui, |ui| {
                 for id in self.workshop.subscriptions.iter().filter(|id| {
                     subscription_matches_query(
                         id,
@@ -225,9 +295,9 @@ impl StudioApp {
                                 ui.weak(state);
                             }
                             if local.available {
-                                ui.weak("In Vapor cache");
+                                ui.weak("Downloaded to this app");
                                 if local.conflicted {
-                                    ui.colored_label(egui::Color32::YELLOW, "Local conflict");
+                                    status_text(ui, "Local conflict", StatusTone::Caution);
                                 }
                             }
                         });
@@ -242,9 +312,10 @@ impl StudioApp {
                                 ));
                             }
                             if local.available && local.conflicted {
-                                ui.colored_label(
-                                    egui::Color32::YELLOW,
+                                status_text(
+                                    ui,
                                     "Local records disagree. Review them in Discover before using this item.",
+                                    StatusTone::Caution,
                                 );
                                 if ui
                                     .add_enabled(
@@ -259,17 +330,23 @@ impl StudioApp {
                             if local.packagepack_available && !local.conflicted {
                                 let create_draft_blocks_assignment = self
                                     .workshop_root_change_blocked_by_create_draft(id);
-                                if ui
+                                let local_catalog_current = self.catalog.local_catalog_current();
+                                if local.selected_as_profile_root {
+                                    ui.strong("Used as this profile's game setup");
+                                } else if ui
                                     .add_enabled(
                                         !self.operation.running
+                                            && local_catalog_current
                                             && !self.has_unsaved_workspace_edits()
                                             && !create_draft_blocks_assignment,
                                         egui::Button::new(format!(
-                                            "Set {} root",
+                                            "Set {}'s game setup",
                                             self.profile.items[self.profile.active_index].name
                                         )),
                                     )
-                                    .on_disabled_hover_text(if create_draft_blocks_assignment {
+                                    .on_disabled_hover_text(if !local_catalog_current {
+                                        "Refresh the on-device content list before choosing this as your profile's game setup."
+                                    } else if create_draft_blocks_assignment {
                                         "Discard the Create draft before changing the profile to this item's workspace."
                                     } else if self.has_unsaved_workspace_edits() {
                                         "Save or discard workspace edits before changing the active profile."
@@ -280,15 +357,38 @@ impl StudioApp {
                                 {
                                     action = Some(SubscriptionAction::UseAsProfileRoot(id.clone()));
                                 }
-                                if local.included_in_active_profile
+                                if ui
+                                    .add_enabled(
+                                        !self.operation.running
+                                            && local_catalog_current
+                                            && !self.has_unsaved_workspace_edits()
+                                            && !create_draft_blocks_assignment,
+                                        egui::Button::new("Launch this game setup"),
+                                    )
+                                    .on_disabled_hover_text(
+                                        if !local_catalog_current {
+                                            "Refresh the on-device content list before launching this game setup."
+                                        } else if create_draft_blocks_assignment {
+                                            "Discard the Create draft before switching this profile."
+                                        } else if self.has_unsaved_workspace_edits() {
+                                            "Save or discard project edits before switching this profile."
+                                        } else {
+                                            "Wait for the current operation to finish."
+                                        },
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(SubscriptionAction::LaunchAsProfileRoot(id.clone()));
+                                }
+                                if (local.included_in_active_profile || local.selected_as_profile_root)
                                     && ui
                                         .add_enabled(
                                             !self.operation.running
                                                 && !self.has_unsaved_workspace_edits(),
-                                            egui::Button::new("Review active profile plan"),
+                                            egui::Button::new("Review game setup"),
                                         )
                                         .on_hover_text(
-                                            "Resolve this profile again using the current local cache.",
+                                            "Check that every item in this game setup is available here.",
                                         )
                                         .clicked()
                                 {
@@ -300,15 +400,16 @@ impl StudioApp {
                                     .root_package
                                     .is_some()
                                 && !local.included_in_active_profile
+                                && !local.selected_as_profile_root
                             {
                                 ui.small(
-                                    "Available locally · not included in the active profile's composition",
+                                    "Available here · not included in this profile's game setup",
                                 );
                             }
                             let import_label = if local.available {
-                                "Refresh cached copy"
+                                "Update local copy"
                             } else {
-                                "Import to Vapor cache"
+                                "Download to this app"
                             };
                             ui.horizontal_wrapped(|ui| {
                                 if ui
@@ -337,7 +438,7 @@ impl StudioApp {
                                     ui.label(&item.description);
                                 });
                             }
-                            ui.small(format!("PublishedFileId {id}"));
+                            ui.small(format!("Workshop item ID · {id}"));
                             if let Some(url) = details.and_then(|item| item.preview_url.as_ref()) {
                                 ui.hyperlink_to("Open Workshop item", url);
                             }
@@ -345,6 +446,7 @@ impl StudioApp {
                     });
                 }
             });
+            }
             match action {
                 Some(SubscriptionAction::SetSelected(id, selected)) => {
                     if selected {
@@ -362,9 +464,18 @@ impl StudioApp {
                         }
                     }
                 }
+                Some(SubscriptionAction::ImportMany(ids)) => {
+                    self.import_workshop_items(ids);
+                }
+                Some(SubscriptionAction::UnsubscribeMany(ids)) => {
+                    self.set_workshop_subscriptions(ids, false);
+                }
                 Some(SubscriptionAction::ReviewLocal(id)) => self.review_workshop_content(&id),
                 Some(SubscriptionAction::UseAsProfileRoot(id)) => {
                     self.use_available_workshop_package_as_profile_root(&id);
+                }
+                Some(SubscriptionAction::LaunchAsProfileRoot(id)) => {
+                    self.launch_workshop_package_as_profile_root(&id);
                 }
                 Some(SubscriptionAction::ReviewProfile) => {
                     self.activate_navigation_section(super::super::Section::Library);

@@ -4,6 +4,22 @@ use vapor_studio_core::InstallationState;
 pub(crate) const ACCENT: egui::Color32 = egui::Color32::from_rgb(112, 190, 213);
 pub(crate) const ACCENT_FILL: egui::Color32 = egui::Color32::from_rgb(34, 92, 116);
 pub(crate) const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(157, 174, 190);
+pub(crate) const TWO_PANE_MIN_WIDTH: f32 = 860.0;
+pub(crate) const FORM_GRID_MIN_WIDTH: f32 = 640.0;
+pub(crate) const LIST_ROW_HEIGHT: f32 = 34.0;
+pub(crate) const SEARCH_FIELD_MAX_WIDTH: f32 = 360.0;
+
+pub(crate) fn use_stacked_panels(ui: &egui::Ui) -> bool {
+    ui.available_width() < TWO_PANE_MIN_WIDTH
+}
+
+pub(crate) fn use_stacked_form(ui: &egui::Ui) -> bool {
+    ui.available_width() < FORM_GRID_MIN_WIDTH
+}
+
+pub(crate) fn search_field_width(ui: &egui::Ui) -> f32 {
+    ui.available_width().min(SEARCH_FIELD_MAX_WIDTH)
+}
 
 /// A compact shared heading pattern for first-level pages.
 pub(crate) fn page_header(ui: &mut egui::Ui, eyebrow: &str, title: &str, description: &str) {
@@ -60,7 +76,7 @@ pub(crate) fn confirmation_card(
     let style = ui.style().clone();
     egui::Frame::group(&style)
         .show(ui, |ui| {
-            ui.colored_label(egui::Color32::YELLOW, title);
+            status_text(ui, title, StatusTone::Caution);
             ui.label(description);
             let mut decision = None;
             ui.horizontal_wrapped(|ui| {
@@ -94,14 +110,17 @@ pub(crate) fn discard_confirmation(
     )
 }
 
-pub(crate) fn status_text(ui: &mut egui::Ui, text: &str, tone: StatusTone) {
-    let color = match tone {
+pub(crate) fn status_text(ui: &mut egui::Ui, text: &str, tone: StatusTone) -> egui::Response {
+    ui.colored_label(status_color(tone), text)
+}
+
+fn status_color(tone: StatusTone) -> egui::Color32 {
+    match tone {
         StatusTone::Neutral => egui::Color32::from_rgb(177, 190, 204),
         StatusTone::Positive => egui::Color32::from_rgb(118, 207, 164),
         StatusTone::Caution => egui::Color32::from_rgb(242, 193, 91),
         StatusTone::Error => egui::Color32::from_rgb(248, 117, 117),
-    };
-    ui.colored_label(color, text);
+    }
 }
 
 /// A single, wide call to action for the most likely next step on a screen.

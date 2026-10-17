@@ -1,6 +1,8 @@
-use super::super::components::design::page_header;
+use super::super::StudioApp;
+use super::super::components::design::{
+    StatusTone, page_header, status_text, use_stacked_form,
+};
 use super::super::root_publishing::{PublishTab, root_publish_confirmation};
-use super::super::{Section, StudioApp};
 use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
@@ -15,10 +17,10 @@ impl StudioApp {
             ui,
             "Share",
             "Publish",
-            "Review the destination and exact payload before sending anything outside this device.",
+            "Choose where to share your content, then review exactly what will be sent before you publish.",
         );
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui
                 .add(egui::Button::selectable(
                     self.root_publishing.tab == PublishTab::WorkshopContent,
@@ -69,6 +71,8 @@ impl StudioApp {
                 .sources
                 .iter()
                 .any(|content| content.id == preview.id && content.version == preview.version);
+            let source_snapshot_current = self.catalog.source_snapshot_current();
+            let catalog_snapshot_current = self.catalog.local_catalog_current();
             let conflicted = self.catalog.items.iter().any(|content| {
                 content.id == preview.id
                     && content.version == preview.version
@@ -114,15 +118,31 @@ impl StudioApp {
             }
 
             if !local_source {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
+                status_text(
+                    ui,
                     "The authored source is no longer available in the active workspace. Restage it from Discover.",
+                    StatusTone::Caution,
+                );
+            }
+            if !source_snapshot_current {
+                status_text(
+                    ui,
+                    "The project list could not refresh. Refresh it before publishing this staged version.",
+                    StatusTone::Caution,
+                );
+            }
+            if !catalog_snapshot_current {
+                status_text(
+                    ui,
+                    "Studio could not confirm that this version is conflict-free. Refresh the on-device content list before publishing.",
+                    StatusTone::Caution,
                 );
             }
             if conflicted {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "Local records for this exact version disagree. Resolve the catalog conflict before publishing.",
+                status_text(
+                    ui,
+                    "On-device copies of this version disagree. Review the content details before publishing.",
+                    StatusTone::Caution,
                 );
             }
 
@@ -158,12 +178,14 @@ impl StudioApp {
                 egui::TextEdit::singleline(&mut self.workshop.confirmation)
                     .hint_text(&publish_phrase),
             );
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
                         !self.operation.running
                             && !self.has_unsaved_workspace_edits()
                             && local_source
+                            && source_snapshot_current
+                            && catalog_snapshot_current
                             && !conflicted
                             && !self.workshop.publisher_account.trim().is_empty()
                             && self.workshop.confirmation.trim() == publish_phrase,
@@ -173,6 +195,19 @@ impl StudioApp {
                             "Create Workshop item"
                         }),
                     )
+                    .on_disabled_hover_text(if !source_snapshot_current {
+                        "Refresh the project list before publishing this staged version."
+                    } else if !catalog_snapshot_current {
+                        "Refresh the on-device content list before publishing; Studio cannot check for conflicts using out-of-date information."
+                    } else if !local_source {
+                        "The authored version is no longer in the project list available to Studio. Restage it first."
+                    } else if conflicted {
+                        "Review and fix the conflicting on-device copies before publishing."
+                    } else if self.has_unsaved_workspace_edits() {
+                        "Save or discard workspace changes before publishing."
+                    } else {
+                        "Finish the current operation or complete the publishing confirmation."
+                    })
                     .clicked()
                 {
                     action = Some(WorkshopPublishAction::Publish(identity.clone(), preview.clone()));
@@ -201,42 +236,85 @@ impl StudioApp {
             ));
 
             let mut settings_changed = false;
-            let field_width = (ui.available_width() - 160.0).clamp(180.0, 420.0);
-            egui::Grid::new("root-publish-settings")
-                .num_columns(2)
-                .spacing([14.0, 9.0])
-                .show(ui, |ui| {
-                    ui.label("Publisher account");
-                    settings_changed |= ui.add_enabled(
+            if use_stacked_form(ui) {
+                ui.label("Publisher account");
+                let field_width = ui.available_width();
+                settings_changed |= ui
+                    .add_enabled(
                         !self.operation.running,
                         egui::TextEdit::singleline(&mut self.root_publishing.account)
                             .desired_width(field_width)
                             .hint_text("Steamworks account name"),
-                    ).changed();
-                    ui.end_row();
-                    ui.label("Build description");
-                    settings_changed |= ui.add_enabled(
+                    )
+                    .changed();
+                ui.label("Build description");
+                let field_width = ui.available_width();
+                settings_changed |= ui
+                    .add_enabled(
                         !self.operation.running,
                         egui::TextEdit::singleline(&mut self.root_publishing.description)
                             .desired_width(field_width)
                             .hint_text("Vapor root package"),
-                    ).changed();
-                    ui.end_row();
-                    ui.label("Beta branch");
-                    settings_changed |= ui.add_enabled(
+                    )
+                    .changed();
+                ui.label("Beta branch");
+                let field_width = ui.available_width();
+                settings_changed |= ui
+                    .add_enabled(
                         !self.operation.running,
                         egui::TextEdit::singleline(&mut self.root_publishing.set_live_branch)
                             .desired_width(field_width)
                             .hint_text("Leave empty to upload without changing a branch"),
-                    ).changed();
-                    ui.end_row();
-                });
+                    )
+                    .changed();
+            } else {
+                let field_width = (ui.available_width() - 160.0).clamp(180.0, 420.0);
+                egui::Grid::new("root-publish-settings")
+                    .num_columns(2)
+                    .spacing([14.0, 9.0])
+                    .show(ui, |ui| {
+                        ui.label("Publisher account");
+                        settings_changed |= ui
+                            .add_enabled(
+                                !self.operation.running,
+                                egui::TextEdit::singleline(&mut self.root_publishing.account)
+                                    .desired_width(field_width)
+                                    .hint_text("Steamworks account name"),
+                            )
+                            .changed();
+                        ui.end_row();
+                        ui.label("Build description");
+                        settings_changed |= ui
+                            .add_enabled(
+                                !self.operation.running,
+                                egui::TextEdit::singleline(
+                                    &mut self.root_publishing.description,
+                                )
+                                .desired_width(field_width)
+                                .hint_text("Vapor root package"),
+                            )
+                            .changed();
+                        ui.end_row();
+                        ui.label("Beta branch");
+                        settings_changed |= ui
+                            .add_enabled(
+                                !self.operation.running,
+                                egui::TextEdit::singleline(
+                                    &mut self.root_publishing.set_live_branch,
+                                )
+                                .desired_width(field_width)
+                                .hint_text("Leave empty to upload without changing a branch"),
+                            )
+                            .changed();
+                        ui.end_row();
+                    });
+            }
             ui.weak("SteamCMD handles password and Steam Guard prompts locally. Leaving the branch empty keeps this upload from changing what players receive.");
             if settings_changed {
                 self.invalidate_root_publish_review();
             }
 
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.add_enabled(
                     !self.operation.running && !self.root_publishing.account.trim().is_empty(),
                     egui::Button::new("Review Steam upload"),
@@ -271,9 +349,9 @@ impl StudioApp {
                 });
                 if preview.planned {
                     let confirmation = root_publish_confirmation(preview.set_live.as_deref());
-                    ui.colored_label(egui::Color32::YELLOW, "This sends the reviewed build to Steamworks. SteamCMD may prompt for your password or Steam Guard code.");
+                    status_text(ui, "This sends the reviewed build to Steamworks. SteamCMD may prompt for your password or Steam Guard code.", StatusTone::Caution);
                     if preview.set_live.is_some() {
-                        ui.colored_label(egui::Color32::YELLOW, "The selected beta branch will be changed after upload.");
+                        status_text(ui, "The selected beta branch will be changed after upload.", StatusTone::Caution);
                     }
                     ui.label(format!("Type {confirmation} to authorize this upload."));
                     ui.add_enabled(
@@ -288,9 +366,9 @@ impl StudioApp {
                     }
                 } else if let Some(status) = preview.status.as_ref() {
                     if status.success() {
-                        ui.colored_label(egui::Color32::GREEN, "SteamCMD reported a successful upload.");
+                        status_text(ui, "SteamCMD reported a successful upload.", StatusTone::Positive);
                     } else {
-                        ui.colored_label(egui::Color32::RED, format!("SteamCMD exited with {status}."));
+                        status_text(ui, &format!("SteamCMD exited with {status}."), StatusTone::Error);
                     }
                 }
             }

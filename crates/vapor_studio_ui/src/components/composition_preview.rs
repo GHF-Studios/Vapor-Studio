@@ -1,3 +1,4 @@
+use super::design::{StatusTone, status_text};
 use eframe::egui;
 use vapor_studio_core::{CompositionPreview, CompositionPreviewSource};
 
@@ -5,38 +6,47 @@ use vapor_studio_core::{CompositionPreview, CompositionPreviewSource};
 pub(crate) fn draw_composition_preview(
     ui: &mut egui::Ui,
     preview: &CompositionPreview,
+    can_import_missing_items: bool,
 ) -> Vec<String> {
     let mut workshop_downloads = Vec::new();
     ui.group(|ui| {
         ui.horizontal(|ui| {
-            ui.heading("Install plan");
+            ui.heading("Setup requirements");
             if preview.ready() {
-                ui.colored_label(egui::Color32::LIGHT_GREEN, "Ready");
+                status_text(ui, "Ready", StatusTone::Positive);
             } else {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    format!("{} blocker(s)", preview.blockers.len()),
+                status_text(
+                    ui,
+                    &format!("{} things to fix", preview.blockers.len()),
+                    StatusTone::Caution,
                 );
             }
         });
         ui.weak("This is a read-only plan. It has not downloaded or installed anything.");
+        if !can_import_missing_items {
+            status_text(
+                ui,
+                "Downloads are paused until Studio finishes its current task and your saved project files are up to date.",
+                StatusTone::Caution,
+            );
+        }
         for node in &preview.nodes {
             let source = match (node.source, node.already_installed) {
                 (CompositionPreviewSource::Workspace, true) => {
-                    "Workspace source · already installed"
+                    "Project folder copy · already installed"
                 }
-                (CompositionPreviewSource::Workspace, false) => "Workspace source",
-                (CompositionPreviewSource::Cache, true) => "Vapor cache · already installed",
-                (CompositionPreviewSource::Cache, false) => "Vapor cache",
+                (CompositionPreviewSource::Workspace, false) => "Project folder copy",
+                (CompositionPreviewSource::Cache, true) => "Downloaded here · already ready",
+                (CompositionPreviewSource::Cache, false) => "Downloaded here",
                 (CompositionPreviewSource::Installed, _) => {
                     "Already installed · no source to update"
                 }
-                (CompositionPreviewSource::DownloadRequired, _) => "Workshop acquisition needed",
+                (CompositionPreviewSource::DownloadRequired, _) => "Download needed",
             };
             ui.horizontal(|ui| {
                 ui.label(format!(
                     "{} · {}{}",
-                    node.kind,
+                    super::super::display_content_kind(&node.kind),
                     node.id,
                     node.version
                         .as_ref()
@@ -74,21 +84,29 @@ pub(crate) fn draw_composition_preview(
         if !workshop_downloads.is_empty() {
             ui.separator();
             ui.label(format!(
-                "{} required Workshop item(s) are missing from Vapor's cache.",
-                workshop_downloads.len()
+                "{} required Workshop item{} need to be downloaded before this setup can be installed.",
+                workshop_downloads.len(),
+                if workshop_downloads.len() == 1 { "" } else { "s" }
             ));
             let import_clicked = ui
-                .button(format!(
-                    "Import {} missing Workshop item(s)",
-                    workshop_downloads.len()
-                ))
+                .add_enabled(
+                    can_import_missing_items,
+                    egui::Button::new(format!(
+                        "Download {} missing item{}",
+                        workshop_downloads.len(),
+                        if workshop_downloads.len() == 1 { "" } else { "s" }
+                    )),
+                )
+                .on_disabled_hover_text(
+                    "Finish the current task and save or reload project edits before downloading these items.",
+                )
                 .clicked();
             if !import_clicked {
                 workshop_downloads.clear();
             }
         }
         for blocker in &preview.blockers {
-            ui.colored_label(egui::Color32::LIGHT_RED, blocker);
+            status_text(ui, blocker, StatusTone::Error);
         }
         for warning in &preview.warnings {
             ui.weak(warning);

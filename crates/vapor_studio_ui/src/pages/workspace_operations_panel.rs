@@ -11,7 +11,7 @@ impl StudioApp {
                     && !self.has_unsaved_workspace_edits()
                     && !self.workspace.root.trim().is_empty()
                     && self.workspace.pending_clean_confirmation.is_none(), egui::Button::new("Validate content"))
-                .on_disabled_hover_text("Save or discard workspace file and structured metadata drafts first; validation reads workspace files from disk.")
+                .on_disabled_hover_text("Save or discard your open edits first; checks use the saved project files.")
                 .clicked()
             {
                 self.validate_workspace_source();
@@ -32,9 +32,9 @@ impl StudioApp {
                         egui::Button::new(label),
                     )
                     .on_disabled_hover_text(if has_workspace {
-                        "Save or discard workspace file and structured metadata drafts first; workspace operations read files from disk."
+                        "Save or discard your open edits first; these actions use the saved project files."
                     } else {
-                        "Open a Vapor Workspace before running workspace operations."
+                        "Open a project folder before using these actions."
                     })
                     .clicked()
                 {

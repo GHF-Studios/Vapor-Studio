@@ -1,11 +1,15 @@
 use super::super::StudioApp;
-use super::super::components::design::confirmation_card;
+use super::super::components::design::{StatusTone, confirmation_card, status_text};
 use super::super::workspace_editor::{WorkspaceTreeChild, WorkspaceTreeNode};
 use eframe::egui;
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 impl StudioApp {
     pub(super) fn draw_workspace_files_panel(&mut self, ui: &mut egui::Ui) {
+        let editor_width = ui.available_width();
         let save_shortcut = ui.input(|input| {
             input.modifiers.command && input.key_pressed(egui::Key::S) && !input.modifiers.shift
         });
@@ -28,16 +32,48 @@ impl StudioApp {
                 self.save_workspace_file();
             }
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Workspace files");
             ui.weak(&self.workspace.root);
+            if quick_open_requested {
+                self.workspace.editor.show_project_tree = Some(true);
+            }
+            let show_project_tree = self.workspace.editor.project_tree_visible(editor_width);
+            let show_inspector = self.workspace.editor.inspector_visible(editor_width);
+            if ui
+                .add(egui::Button::selectable(show_project_tree, "Project tree"))
+                .on_hover_text("Show or hide the project file tree. Ctrl/Cmd+P finds a file.")
+                .clicked()
+            {
+                self.workspace.editor.toggle_project_tree(editor_width);
+            }
+            if ui
+                .add(egui::Button::selectable(show_inspector, "Inspector"))
+                .on_hover_text("Show or hide file details and guidance.")
+                .clicked()
+            {
+                self.workspace.editor.toggle_inspector(editor_width);
+            }
         });
-        ui.horizontal(|ui| {
+        if let Some(error) = self.workspace.editor.files_refresh_error.as_deref() {
+            status_text(ui, error, StatusTone::Caution);
+        }
+        if !self.workspace.editor.files_loaded
+            && self.workspace.editor.draft_recovery.is_some()
+        {
+            status_text(
+                ui,
+                "Editor drafts were saved from this workspace. Refresh the file list to restore tabs and unsaved edits.",
+                StatusTone::Caution,
+            );
+        }
+        ui.horizontal_wrapped(|ui| {
             ui.label("New file");
+            let input_width = ui.available_width().min(360.0);
             ui.add_enabled(
                 !self.operation.running && !self.has_unsaved_workspace_edits(),
                 egui::TextEdit::singleline(&mut self.workspace.editor.new_file_path)
-                    .desired_width(280.0)
+                    .desired_width(input_width)
                     .hint_text("scripts/example.rhai"),
             );
             if ui
@@ -51,6 +87,7 @@ impl StudioApp {
             }
         });
         ui.weak("Creates a new text file inside this workspace, making missing parent folders as needed; existing files are never overwritten.");
+        ui.weak("Project configuration files such as .gitignore, .github, and .vapor are shown; version-control history and generated folders are hidden.");
         ui.horizontal_wrapped(|ui| {
             ui.heading("Files");
             if ui
@@ -99,7 +136,7 @@ impl StudioApp {
                 }
             }
             if self.workspace.editor.active_document_is_dirty() {
-                ui.colored_label(egui::Color32::YELLOW, "Unsaved");
+                status_text(ui, "Unsaved", StatusTone::Caution);
             }
             if ui
                 .add_enabled(
@@ -188,11 +225,14 @@ impl StudioApp {
             self.close_workspace_document(&path);
         }
         let mut open_file = None;
-        egui::Panel::left("workspace-project-tree")
-            .resizable(true)
-            .default_size(270.0)
-            .size_range(190.0..=440.0)
-            .show(ui, |ui| {
+        let show_project_tree = self.workspace.editor.project_tree_visible(editor_width);
+        let show_inspector = self.workspace.editor.inspector_visible(editor_width);
+        if show_project_tree {
+            egui::Panel::left("workspace-project-tree")
+                .resizable(true)
+                .default_size(270.0)
+                .size_range(190.0..=440.0)
+                .show(ui, |ui| {
                 ui.heading("Project");
                 let filter_response = ui.add(
                     egui::TextEdit::singleline(&mut self.workspace.editor.file_filter)
@@ -249,13 +289,22 @@ impl StudioApp {
                             (filter.is_empty() || key.contains(&filter)).then(|| path.clone())
                         });
                 }
-            });
+                });
+        }
         if let Some(path) = open_file {
             self.open_workspace_file(path);
         }
 
         let selected_path = self.workspace.editor.selected_file.clone();
-        let (active_line_count, active_character_count, diagnostic) = self
+        if let Some(path) = selected_path.as_deref()
+            && let Some(document) = self.workspace.editor.documents.get_mut(path)
+        {
+            document.refresh_inspection_if_due(path, Instant::now());
+            if document.inspection_due.is_some() {
+                ui.ctx().request_repaint_after(Duration::from_millis(360));
+            }
+        }
+        let (active_line_count, active_character_count, diagnostic, inspection_pending) = self
             .workspace
             .editor
             .active_document()
@@ -264,16 +313,18 @@ impl StudioApp {
                     document.line_count,
                     document.character_count,
                     document.toml_diagnostic.clone(),
+                    document.inspection_due.is_some(),
                 )
             })
             .unwrap_or_default();
         let active_dirty = self.workspace.editor.active_document_is_dirty();
 
-        egui::Panel::right("workspace-inspector")
-            .resizable(true)
-            .default_size(270.0)
-            .size_range(210.0..=440.0)
-            .show(ui, |ui| {
+        if show_inspector {
+            egui::Panel::right("workspace-inspector")
+                .resizable(true)
+                .default_size(270.0)
+                .size_range(210.0..=440.0)
+                .show(ui, |ui| {
                 ui.heading("Inspector");
                 ui.small(format!("Workspace\n{}", self.workspace.root));
                 if let Some(path) = &selected_path {
@@ -290,13 +341,15 @@ impl StudioApp {
                     } else {
                         "Saved"
                     });
-                    if let Some(diagnostic) = &diagnostic {
+                    if inspection_pending {
+                        status_text(ui, "Updating document analysis…", StatusTone::Neutral);
+                    } else if let Some(diagnostic) = &diagnostic {
                         match diagnostic {
                             Ok(()) => {
-                                ui.colored_label(egui::Color32::LIGHT_GREEN, "TOML syntax valid");
+                                status_text(ui, "TOML syntax valid", StatusTone::Positive);
                             }
                             Err(error) => {
-                                ui.colored_label(egui::Color32::LIGHT_RED, "TOML syntax error")
+                                status_text(ui, "TOML syntax error", StatusTone::Error)
                                     .on_hover_text(error);
                             }
                         }
@@ -308,7 +361,8 @@ impl StudioApp {
                 } else {
                     ui.weak("Select a file to inspect and edit it.");
                 }
-            });
+                });
+        }
 
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading(
@@ -330,7 +384,8 @@ impl StudioApp {
                         if response.response.changed()
                             && let Some(path) = selected_path.as_deref()
                         {
-                            document.refresh_inspection(path);
+                            document.schedule_inspection(path);
+                            ui.ctx().request_repaint_after(Duration::from_millis(360));
                         }
                         response
                     });

@@ -7,14 +7,18 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 use vapor_studio_core::OperationKind;
+
+const DOCUMENT_INSPECTION_DELAY: Duration = Duration::from_millis(350);
 
 #[derive(Default)]
 pub(super) struct WorkspaceEditorState {
     pub(super) new_file_path: String,
     pub(super) files: Vec<PathBuf>,
     pub(super) files_loaded: bool,
+    pub(super) files_refresh_error: Option<String>,
     file_search_keys: Vec<String>,
     pub(super) file_tree: WorkspaceTreeNode,
     pub(super) file_filter: String,
@@ -23,6 +27,26 @@ pub(super) struct WorkspaceEditorState {
     pub(super) documents: BTreeMap<PathBuf, WorkspaceDocument>,
     pub(super) draft_recovery: Option<String>,
     pub(super) files_open: bool,
+    pub(super) show_project_tree: Option<bool>,
+    pub(super) show_inspector: Option<bool>,
+}
+
+impl WorkspaceEditorState {
+    pub(super) fn project_tree_visible(&self, editor_width: f32) -> bool {
+        self.show_project_tree.unwrap_or(editor_width >= 760.0)
+    }
+
+    pub(super) fn inspector_visible(&self, editor_width: f32) -> bool {
+        self.show_inspector.unwrap_or(editor_width >= 1120.0)
+    }
+
+    pub(super) fn toggle_project_tree(&mut self, editor_width: f32) {
+        self.show_project_tree = Some(!self.project_tree_visible(editor_width));
+    }
+
+    pub(super) fn toggle_inspector(&mut self, editor_width: f32) {
+        self.show_inspector = Some(!self.inspector_visible(editor_width));
+    }
 }
 
 #[derive(Default)]
@@ -132,6 +156,7 @@ pub(super) struct WorkspaceDocument {
     pub(super) line_count: usize,
     pub(super) character_count: usize,
     pub(super) toml_diagnostic: Option<Result<(), String>>,
+    pub(super) inspection_due: Option<Instant>,
 }
 
 impl WorkspaceDocument {
@@ -148,6 +173,7 @@ impl WorkspaceDocument {
             line_count: 0,
             character_count: 0,
             toml_diagnostic: None,
+            inspection_due: None,
         };
         document.refresh_inspection(path);
         document
@@ -157,24 +183,46 @@ impl WorkspaceDocument {
         self.dirty = self.contents != self.original;
         self.line_count = self.contents.lines().count();
         self.character_count = self.contents.chars().count();
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-        self.toml_diagnostic = (name == "Vapor.toml"
-            || name.ends_with(".vapor.toml")
-            || name == "Cargo.toml")
-            .then(|| {
-                self.contents
-                    .parse::<toml::Value>()
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            });
+        self.inspect_toml_now(path);
+    }
+
+    pub(super) fn schedule_inspection(&mut self, _path: &Path) {
+        // Keep the editor responsive for large files: all document-wide work is
+        // deferred until typing pauses. Mark dirty immediately so save and
+        // navigation safeguards remain conservative while the counts/diagnostic
+        // catch up.
+        self.dirty = true;
+        self.toml_diagnostic = None;
+        self.inspection_due = Some(Instant::now() + DOCUMENT_INSPECTION_DELAY);
+    }
+
+    pub(super) fn refresh_inspection_if_due(&mut self, path: &Path, now: Instant) {
+        if self.inspection_due.is_some_and(|deadline| deadline <= now) {
+            self.refresh_inspection(path);
+        }
+    }
+
+    fn inspect_toml_now(&mut self, path: &Path) {
+        self.inspection_due = None;
+        self.toml_diagnostic = is_toml_file(path).then(|| {
+            self.contents
+                .parse::<toml::Value>()
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        });
     }
 
     pub(super) fn is_dirty(&self) -> bool {
         self.dirty
     }
+}
+
+fn is_toml_file(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    name == "Vapor.toml" || name.ends_with(".vapor.toml") || name == "Cargo.toml"
 }
 
 impl WorkspaceEditorState {
@@ -205,7 +253,11 @@ impl WorkspaceEditorState {
             .values()
             .filter(|document| document.is_dirty())
             .count();
-        format!("Recovered {open} editor tab(s), including {dirty} unsaved draft(s).")
+        format!(
+            "Recovered {open} editor tab{}, including {dirty} unsaved draft{}.",
+            if open == 1 { "" } else { "s" },
+            if dirty == 1 { "" } else { "s" }
+        )
     }
 
     pub(super) fn save_editor_drafts(&self, root: &str) -> Option<String> {
@@ -278,6 +330,7 @@ impl WorkspaceEditorState {
     pub(super) fn clear_context(&mut self) {
         self.files.clear();
         self.files_loaded = false;
+        self.files_refresh_error = None;
         self.file_search_keys.clear();
         self.file_tree = WorkspaceTreeNode::default();
         self.file_filter.clear();
@@ -303,6 +356,7 @@ impl StudioApp {
     pub(super) fn apply_workspace_files(&mut self, files: Vec<PathBuf>) {
         self.workspace.editor.files = files;
         self.workspace.editor.files_loaded = true;
+        self.workspace.editor.files_refresh_error = None;
         self.workspace.editor.rebuild_file_index();
         let restored = self
             .workspace
@@ -318,6 +372,18 @@ impl StudioApp {
             self.status
                 .push_str(&self.workspace.editor.recovery_summary());
         }
+    }
+
+    pub(super) fn apply_workspace_files_error(&mut self, error: String) {
+        let message = if self.workspace.editor.files_loaded {
+            format!(
+                "Could not refresh the workspace file list: {error}. The last successful list remains available."
+            )
+        } else {
+            format!("Could not read workspace files: {error}")
+        };
+        self.workspace.editor.files_refresh_error = Some(message.clone());
+        self.status = message;
     }
 
     pub(super) fn apply_workspace_file_created(&mut self, path: PathBuf) {
@@ -376,11 +442,16 @@ impl StudioApp {
             self.invalidate_workshop_review();
         }
         self.status = if failures.is_empty() {
-            format!("Saved {saved} workspace file(s).")
+            format!(
+                "Saved {saved} project file{}.",
+                if saved == 1 { "" } else { "s" }
+            )
         } else {
             format!(
-                "Saved {saved} file(s); {} remain unsaved: {}",
+                "Saved {saved} file{}; {} file{} remain unsaved: {}",
+                if saved == 1 { "" } else { "s" },
                 failures.len(),
+                if failures.len() == 1 { "" } else { "s" },
                 failures.join("; ")
             )
         };

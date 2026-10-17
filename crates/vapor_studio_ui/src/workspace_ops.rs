@@ -23,12 +23,16 @@ pub(super) struct WorkspaceState {
     pub(super) starter_path: String,
     pub(super) starter_organization: String,
     pub(super) starter_name: String,
+    pub(super) workspace_validation_error: Option<String>,
     pub(super) unregistered_projects: vapor_studio_core::UnregisteredProjectScan,
     pub(super) unregistered_scan_completed: bool,
+    pub(super) unregistered_scan_error: Option<String>,
     pub(super) pending_unregistration: Option<vapor_studio_core::SourceContent>,
     pub(super) pending_clean_confirmation: Option<PathBuf>,
     pub(super) registered_sources: Vec<PathBuf>,
     pub(super) active_source: Option<PathBuf>,
+    pub(super) registered_sources_loaded: bool,
+    pub(super) registered_sources_error: Option<String>,
     pub(super) overview_panel: WorkspacePanel,
     pub(super) content_search: String,
     pub(super) editor: WorkspaceEditorState,
@@ -43,12 +47,16 @@ impl WorkspaceState {
             starter_path: String::new(),
             starter_organization: "my-workshop".to_owned(),
             starter_name: "my-game".to_owned(),
+            workspace_validation_error: None,
             unregistered_projects: vapor_studio_core::UnregisteredProjectScan::default(),
             unregistered_scan_completed: false,
+            unregistered_scan_error: None,
             pending_unregistration: None,
             pending_clean_confirmation: None,
             registered_sources: Vec::new(),
             active_source: None,
+            registered_sources_loaded: false,
+            registered_sources_error: None,
             overview_panel: WorkspacePanel::default(),
             content_search: String::new(),
             editor: WorkspaceEditorState::default(),
@@ -150,9 +158,14 @@ impl StudioApp {
             }
         };
         self.spawn(OperationKind::Discover, move |_context| {
-            let (source, catalog, unregistered) =
+            let (source, catalog, unregistered, workspace_validation_error) =
                 discover_workspace_and_catalog(&executable, root.as_deref());
-            OperationResult::Discovery(source, catalog, unregistered)
+            OperationResult::Discovery(
+                source,
+                catalog,
+                unregistered,
+                workspace_validation_error,
+            )
         });
         self.status = "Refreshing the local content catalog through Vapor Shell…".to_owned();
     }
@@ -168,6 +181,7 @@ impl StudioApp {
         let WorkspaceOpenSnapshot {
             root,
             landing_section,
+            workspace_validation_error,
             source_content,
             unregistered_projects,
             local_catalog,
@@ -177,10 +191,26 @@ impl StudioApp {
             .workspace
             .as_ref()
             .is_none_or(|workspace| workspace.root != root);
+        let source_error = source_content.as_ref().err().cloned();
         let catalog_error = local_catalog.as_ref().err().cloned();
         let project_scan_error = unregistered_projects.as_ref().err().cloned();
+        let files_error = workspace_files.as_ref().err().cloned();
+        let keep_previous_source_snapshot = !workspace_changed
+            && source_error.is_some()
+            && self.catalog.source_discovery_loaded;
+        let keep_previous_catalog_snapshot = !workspace_changed
+            && catalog_error.is_some()
+            && self.catalog.catalog_discovery_loaded;
+        let keep_previous_project_scan = !workspace_changed
+            && project_scan_error.is_some()
+            && self.workspace.unregistered_scan_completed;
+        let previous_files = (!workspace_changed
+            && files_error.is_some()
+            && self.workspace.editor.files_loaded)
+            .then(|| self.workspace.editor.files.clone());
         self.workspace.root = root.display().to_string();
         self.workspace.root_draft = self.workspace.root.clone();
+        self.workspace.workspace_validation_error = workspace_validation_error.clone();
         self.authoring.clear_workspace_context();
         let profile = &mut self.profile.items[self.profile.active_index];
         profile.workspace = Some(WorkspaceAssociation { root });
@@ -190,36 +220,117 @@ impl StudioApp {
             profile.installation = vapor_studio_core::InstallationState::Unknown;
         }
         self.workspace.clear_file_context();
-        self.catalog.sources = source_content;
-        self.catalog.items = local_catalog.unwrap_or_default();
-        self.workspace.unregistered_scan_completed = unregistered_projects.is_ok();
-        self.workspace.unregistered_projects = unregistered_projects.unwrap_or_default();
+        match source_content {
+            Ok(contents) => {
+                self.catalog.sources = contents;
+                self.catalog.source_discovery_loaded = true;
+                self.catalog.source_discovery_error = None;
+            }
+            Err(error) => {
+                if !keep_previous_source_snapshot {
+                    self.catalog.sources.clear();
+                }
+                self.catalog.source_discovery_loaded = keep_previous_source_snapshot;
+                self.catalog.source_discovery_error = Some(error);
+            }
+        }
+        match local_catalog {
+            Ok(items) => {
+                self.catalog.items = items;
+                self.catalog.catalog_discovery_loaded = true;
+                self.catalog.catalog_discovery_error = None;
+            }
+            Err(error) => {
+                if !keep_previous_catalog_snapshot {
+                    self.catalog.items.clear();
+                }
+                self.catalog.catalog_discovery_loaded = keep_previous_catalog_snapshot;
+                self.catalog.catalog_discovery_error = Some(error);
+            }
+        }
+        match unregistered_projects {
+            Ok(scan) => {
+                self.workspace.unregistered_projects = scan;
+                self.workspace.unregistered_scan_completed = true;
+                self.workspace.unregistered_scan_error = None;
+            }
+            Err(error) => {
+                if !keep_previous_project_scan {
+                    self.workspace.unregistered_projects =
+                        vapor_studio_core::UnregisteredProjectScan::default();
+                }
+                self.workspace.unregistered_scan_completed = keep_previous_project_scan;
+                self.workspace.unregistered_scan_error = Some(error);
+            }
+        }
         self.catalog.selected = None;
         self.profile_composition.clear_context();
         self.invalidate_workshop_review();
-        self.workspace.editor.files = workspace_files;
-        self.workspace.editor.files_loaded = true;
+        self.workspace.editor.files = match workspace_files {
+            Ok(files) => files,
+            Err(_) => previous_files.clone().unwrap_or_default(),
+        };
+        self.workspace.editor.files_loaded = files_error.is_none() || previous_files.is_some();
+        self.workspace.editor.files_refresh_error = files_error
+            .as_ref()
+            .map(|error| format!("Could not read workspace files: {error}"));
         self.workspace.editor.rebuild_file_index();
-        let restored_editor_drafts = self
-            .workspace
-            .editor
-            .restore_editor_drafts(&PathBuf::from(self.workspace.root.trim()));
+        let restored_editor_drafts = self.workspace.editor.files_loaded
+            && self
+                .workspace
+                .editor
+                .restore_editor_drafts(&PathBuf::from(self.workspace.root.trim()));
         self.workspace.pending_unregistration = None;
         self.activate_navigation_section(landing_section);
-        self.status = catalog_error.map_or_else(
-            || format!(
-                "Opened workspace {} · {} registered content projects · {} local catalog entries · {} projects ready to adopt.",
-                self.workspace.root,
-                self.catalog.sources.len(),
-                self.catalog.items.len(),
-                self.workspace.unregistered_projects.candidates.len(),
-            ),
-            |error| format!("Opened workspace {} · {} source items. Local cache/install catalog could not load: {error}", self.workspace.root, self.catalog.sources.len()),
-        );
+        self.status = format!("Opened project folder {}", self.workspace.root);
+        if let Some(error) = workspace_validation_error {
+            self.status.push_str(&format!(
+                " This folder is open for editing, but Vapor needs a valid project setup for managed actions: {error}. Save fixes and refresh the project list before continuing."
+            ));
+        }
+        if self.catalog.source_snapshot_current() {
+            self.status.push_str(&format!(
+                " · {} projects available in this folder",
+                self.catalog.sources.len()
+            ));
+        }
+        if self.catalog.local_catalog_current() {
+            self.status.push_str(&format!(
+                " · {} local catalog entries",
+                self.catalog.items.len()
+            ));
+        }
+        if self.workspace.unregistered_scan_error.is_none() {
+            self.status.push_str(&format!(
+                " · {} other projects found",
+                self.workspace.unregistered_projects.candidates.len()
+            ));
+        }
+        if let Some(error) = source_error {
+            self.status.push_str(&format!(
+                " Content manifests could not all be read; the workspace remains open for repair: {error}"
+            ));
+        }
+        if let Some(error) = catalog_error {
+            self.status.push_str(&format!(
+                " Local cache/install catalog could not load: {error}"
+            ));
+        }
         if let Some(error) = project_scan_error {
             self.status.push_str(&format!(
                 " Content project scan could not complete: {error}"
             ));
+        }
+        if let Some(error) = files_error {
+            if previous_files.is_some() {
+                self.status.push_str(&format!(
+                    " Workspace file listing could not complete; showing its last successful list: {error}"
+                ));
+            } else {
+                self.status.push_str(&format!(
+                    " Workspace file listing could not complete; the workspace remains open, but the editor list is unavailable: {error}"
+                ));
+            }
         }
         if restored_editor_drafts {
             self.status.push(' ');
@@ -276,21 +387,26 @@ impl StudioApp {
             let result = fs::canonicalize(&selected)
                 .map_err(|error| format!("{}: {error}", selected.display()))
                 .and_then(|root| {
-                    VaporWorkspace::load(&root).map_err(|error| {
-                        format!("{} is not a valid Vapor Workspace: {error}", root.display())
-                    })?;
-                    let contents = vapor_studio_core::discover_source_content(&executable, &root)?;
+                    if !root.is_dir() {
+                        return Err(format!("{} is not a workspace folder", root.display()));
+                    }
+                    let workspace_validation_error = VaporWorkspace::load(&root)
+                        .err()
+                        .map(|error| format!("{}: {error}", root.display()));
+                    let contents = vapor_studio_core::discover_source_content(&executable, &root);
                     let unregistered_projects =
                         vapor_studio_core::scan_unregistered_content_projects(&executable, &root);
                     let catalog =
                         vapor_studio_core::discover_content_catalog(&executable, Some(&root));
-                    discover_workspace_files(&root).map(|files| WorkspaceOpenSnapshot {
+                    let workspace_files = discover_workspace_files(&root);
+                    Ok(WorkspaceOpenSnapshot {
                         root,
                         landing_section,
+                        workspace_validation_error,
                         source_content: contents,
                         unregistered_projects,
                         local_catalog: catalog,
-                        workspace_files: files,
+                        workspace_files,
                     })
                 });
             OperationResult::WorkspaceSelection(result)

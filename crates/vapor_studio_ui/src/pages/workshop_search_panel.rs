@@ -1,11 +1,15 @@
 use super::super::StudioApp;
-use super::super::components::design::empty_state;
+use super::super::components::design::{
+    LIST_ROW_HEIGHT, StatusTone, empty_state, search_field_width, status_text,
+    use_stacked_panels,
+};
 use eframe::egui;
 
 enum WorkshopSearchAction {
     ReviewLocal(String),
     Import(String),
     UseAsProfileRoot(String),
+    LaunchAsProfileRoot(String),
     ReviewProfile,
     ChangeSubscription(String, bool),
     RefreshCache(String),
@@ -15,11 +19,12 @@ impl StudioApp {
     pub(super) fn draw_workshop_search_panel(&mut self, ui: &mut egui::Ui) {
         let mut run_search = false;
         ui.horizontal_wrapped(|ui| {
+            let search_width = search_field_width(ui);
             let response = ui.add_enabled(
                 !self.operation.running,
                 egui::TextEdit::singleline(&mut self.workshop.search_query)
                     .hint_text("Search Workshop items")
-                    .desired_width(300.0),
+                    .desired_width(search_width),
             );
             run_search |= (response.has_focus() || response.lost_focus())
                 && ui.input(|input| input.key_pressed(egui::Key::Enter));
@@ -30,6 +35,7 @@ impl StudioApp {
                 )
                 .clicked();
         });
+        ui.weak("Download a copy to this device. Studio can add playable game setups to your profile and launch them; subscribe to let Steam track updates.");
         if run_search && !self.operation.running {
             self.search_workshop();
         }
@@ -112,7 +118,8 @@ impl StudioApp {
             let mut subscription_action = None;
             ui.horizontal_wrapped(|ui| {
                 ui.small(format!(
-                    "Selected across pages and searches · {count} item(s)"
+                    "Selected across pages and searches · {count} item{}",
+                    if count == 1 { "" } else { "s" }
                 ));
                 if ui
                     .add_enabled(
@@ -126,7 +133,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running,
-                        egui::Button::new(format!("Import {count} to Vapor cache")),
+                        egui::Button::new(format!("Download {count} items")),
                     )
                     .clicked()
                 {
@@ -183,7 +190,7 @@ impl StudioApp {
                 empty_state(
                     ui,
                     "Find content in Steam Workshop",
-                    "Search public Workshop items, review their details, then subscribe or import them into Vapor's cache.",
+                    "Search Steam Workshop for community content. Download a copy to use in a game setup, or subscribe to let Steam keep it updated. Neither action changes your current game setup.",
                     |ui| {
                         if ui.button("Search Workshop").clicked() {
                             run_search = true;
@@ -197,7 +204,7 @@ impl StudioApp {
             return;
         }
 
-        let narrow_layout = ui.available_width() < 820.0;
+        let narrow_layout = use_stacked_panels(ui);
         let mut action = None;
         ui.columns(if narrow_layout { 1 } else { 2 }, |columns| {
             {
@@ -208,7 +215,7 @@ impl StudioApp {
                     .id_salt("workshop-search-results")
                     .show(list, |ui| {
                     for item in &self.workshop.results {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             let mut selected = self
                                 .workshop
                                 .selected_items
@@ -231,7 +238,7 @@ impl StudioApp {
                             let focused = self.workshop.focused_result.as_deref()
                                 == Some(item.published_file_id.as_str());
                             if ui.add_sized(
-                                [ui.available_width(), 42.0],
+                                [ui.available_width(), LIST_ROW_HEIGHT],
                                 egui::Button::selectable(focused, egui::RichText::new(&item.title).strong()),
                             ).clicked() {
                                 self.workshop.focused_result = Some(item.published_file_id.clone());
@@ -255,14 +262,20 @@ impl StudioApp {
             if let Some(item) = focused_item {
                 details.strong(&item.title);
                 details.collapsing("Workshop item ID", |ui| {
-                    ui.small(format!("PublishedFileId {}", item.published_file_id));
+                    ui.monospace(&item.published_file_id);
                 });
                 if !item.description.is_empty() {
                     details.add_space(8.0);
                     details.label(&item.description);
                 }
                 let subscribed = self.workshop.subscriptions.contains(&item.published_file_id);
-                details.weak(if !self.workshop.subscriptions_loaded {
+                details.weak(if self.workshop.subscriptions_stale {
+                    if subscribed {
+                        "Last known as subscribed through Steam · refresh status"
+                    } else {
+                        "Last known as not subscribed through Steam · refresh status"
+                    }
+                } else if !self.workshop.subscriptions_loaded {
                     "Steam subscription status has not been loaded."
                 } else if subscribed {
                     "Subscribed through Steam"
@@ -274,9 +287,9 @@ impl StudioApp {
                 let mut local_conflict = false;
                 let mut available_packagepack = false;
                 let mut included_in_active_profile = false;
-                let active_graph = self.profile.items[self.profile.active_index]
-                    .resolved_graph
-                    .as_ref();
+                let mut selected_as_profile_root = false;
+                let active_profile = &self.profile.items[self.profile.active_index];
+                let active_graph = active_profile.resolved_graph.as_ref();
                 for content in &self.catalog.items {
                     if content.published_file_id.as_deref()
                         != Some(item.published_file_id.as_str())
@@ -288,6 +301,10 @@ impl StudioApp {
                     available_packagepack |= content.kind
                         == vapor_core::ContentKind::Packagepack.as_str()
                         && content.is_unambiguous();
+                    selected_as_profile_root |= self.is_active_profile_root(
+                        &content.id,
+                        content.version.as_deref(),
+                    );
                     included_in_active_profile |= active_graph.is_some_and(|graph| {
                         graph.nodes.iter().any(|node| {
                             node.content.id == content.id
@@ -297,10 +314,12 @@ impl StudioApp {
                 }
                 let create_draft_blocks_assignment = self
                     .workshop_root_change_blocked_by_create_draft(&item.published_file_id);
+                let local_catalog_current = self.catalog.local_catalog_current();
                 if local_conflict {
-                    details.colored_label(
-                        egui::Color32::YELLOW,
+                    status_text(
+                        details,
                         "Local records disagree about this Workshop item. Review them in Discover before assigning it to a profile.",
+                        StatusTone::Caution,
                     );
                     if details.button("Review local records").clicked() {
                         action = Some(WorkshopSearchAction::ReviewLocal(
@@ -312,7 +331,7 @@ impl StudioApp {
                     details.add_enabled_ui(!self.operation.running, |ui| {
                         clicked = super::super::components::design::primary_button(
                             ui,
-                            "Import to Vapor cache",
+                            "Download to this app",
                         )
                         .clicked();
                     });
@@ -321,11 +340,28 @@ impl StudioApp {
                             item.published_file_id.clone(),
                         ));
                     }
+                } else if selected_as_profile_root {
+                    details.strong("Used as this profile's game setup");
+                    let mut clicked = false;
+                    details.add_enabled_ui(
+                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        |ui| {
+                            clicked = super::super::components::design::primary_button(
+                                ui,
+                                "Review game setup",
+                            )
+                            .clicked();
+                        },
+                    );
+                    if clicked {
+                        action = Some(WorkshopSearchAction::ReviewProfile);
+                    }
                 } else if available_packagepack {
                     details.label("Available in local content");
                     let mut clicked = false;
                     details.add_enabled_ui(
                         !self.operation.running
+                            && local_catalog_current
                             && !self.has_unsaved_workspace_edits()
                             && !create_draft_blocks_assignment,
                         |ui| {
@@ -337,7 +373,9 @@ impl StudioApp {
                         },
                     )
                     .response
-                    .on_disabled_hover_text(if create_draft_blocks_assignment {
+                    .on_disabled_hover_text(if !local_catalog_current {
+                        "Refresh the on-device content list before choosing this as your profile's game setup."
+                    } else if create_draft_blocks_assignment {
                         "Discard the Create draft before changing the profile to this item's workspace."
                     } else if self.has_unsaved_workspace_edits() {
                         "Save or discard workspace edits before changing the active profile."
@@ -349,6 +387,40 @@ impl StudioApp {
                             item.published_file_id.clone(),
                         ));
                     }
+                    let mut launch_clicked = false;
+                    details.add_enabled_ui(
+                        !self.operation.running
+                            && local_catalog_current
+                            && !local_conflict
+                            && !self.has_unsaved_workspace_edits()
+                            && !create_draft_blocks_assignment,
+                        |ui| {
+                            launch_clicked = super::super::components::design::primary_button(
+                                ui,
+                                "Launch this game setup",
+                            )
+                            .clicked();
+                        },
+                    )
+                    .response
+                    .on_disabled_hover_text(if !local_catalog_current {
+                        "Refresh the on-device content list before launching this game setup."
+                    } else if local_conflict {
+                        "Review local content records before launching this game setup."
+                    } else if create_draft_blocks_assignment {
+                        "Discard the Create draft before switching this profile."
+                    } else if self.has_unsaved_workspace_edits() {
+                        "Save or discard project edits before switching this profile."
+                    } else if self.operation.running {
+                        "Wait for the current operation to finish."
+                    } else {
+                        "Launch this game setup."
+                    });
+                    if launch_clicked {
+                        action = Some(WorkshopSearchAction::LaunchAsProfileRoot(
+                            item.published_file_id.clone(),
+                        ));
+                    }
                 } else if included_in_active_profile {
                     details.label("Available in local content");
                     let mut clicked = false;
@@ -357,7 +429,7 @@ impl StudioApp {
                         |ui| {
                             clicked = super::super::components::design::primary_button(
                                 ui,
-                                "Review active profile plan",
+                                "Review game setup",
                             )
                             .clicked();
                         },
@@ -416,6 +488,9 @@ impl StudioApp {
             }
             Some(WorkshopSearchAction::UseAsProfileRoot(id)) => {
                 self.use_available_workshop_package_as_profile_root(&id);
+            }
+            Some(WorkshopSearchAction::LaunchAsProfileRoot(id)) => {
+                self.launch_workshop_package_as_profile_root(&id);
             }
             Some(WorkshopSearchAction::ReviewProfile) => {
                 self.activate_navigation_section(super::super::Section::Library);

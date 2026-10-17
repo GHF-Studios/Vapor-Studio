@@ -1,4 +1,5 @@
 use super::super::{CatalogFilter, StudioApp};
+use super::design::{LIST_ROW_HEIGHT, StatusTone, status_text};
 use eframe::egui;
 
 impl StudioApp {
@@ -13,7 +14,7 @@ impl StudioApp {
                 .all(|candidate| !filter.matches_workspace(candidate))
             {
                 ui.weak(
-                    "No workspace, cached, or installed content matches this search and filter.",
+                    "Nothing on this device or in the open project folder matches this search and filter.",
                 );
             }
             return;
@@ -30,23 +31,27 @@ impl StudioApp {
             let selected = self.catalog.selected.as_deref().is_some_and(|identity| {
                 super::super::catalog_content_selector_matches(content, identity)
             });
-            ui.horizontal(|ui| {
+            let conflicted = !content.is_unambiguous();
+            ui.horizontal_wrapped(|ui| {
+                let marker_width = if conflicted { 92.0 } else { 0.0 };
+                let row_width = (ui.available_width() - marker_width).max(1.0);
+                let label = format!(
+                    "{} · {} · {}",
+                    content.id,
+                    super::super::display_content_kind(&content.kind),
+                    content.version.as_deref().unwrap_or("unversioned"),
+                );
                 if ui
-                    .selectable_label(
-                        selected,
-                        format!(
-                            "{} · {} · {}",
-                            content.id,
-                            content.kind,
-                            content.version.as_deref().unwrap_or("unversioned"),
-                        ),
+                    .add(
+                        egui::Button::selectable(selected, label)
+                            .min_size(egui::vec2(row_width, LIST_ROW_HEIGHT)),
                     )
                     .clicked()
                 {
                     newly_selected = Some(super::super::catalog_content_selector(content));
                 }
-                if !content.is_unambiguous() {
-                    ui.colored_label(egui::Color32::YELLOW, "Conflict");
+                if conflicted {
+                    status_text(ui, "Conflict", StatusTone::Caution);
                 }
             });
             ui.horizontal_wrapped(|ui| {
@@ -82,17 +87,17 @@ impl StudioApp {
             .filter(|candidate| filter.matches_workspace(candidate))
         {
             if !found_candidate {
-                ui.heading("Authored in this workspace · needs adoption");
-                ui.label("These projects are on this device but are not in the workspace content index yet. Adopt keeps their files in place and makes them available to Compose and profile setup.");
+                ui.heading("Projects in this folder · not added yet");
+                ui.label("Add a project to make it available in Vapor Studio. Its files stay where they are.");
                 found_candidate = true;
             }
             egui::Frame::group(&card_style).show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.vertical(|ui| {
                         ui.strong(&candidate.id);
                         ui.small(format!(
                             "{} · {}",
-                            candidate.kind,
+                            super::super::display_content_kind(&candidate.kind.to_string()),
                             candidate
                                 .path
                                 .strip_prefix(std::path::Path::new(self.workspace.root.trim()))
@@ -103,9 +108,20 @@ impl StudioApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add_enabled(
-                                !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                egui::Button::new("Adopt into workspace"),
+                                !self.operation.running
+                                    && self.workspace.unregistered_scan_error.is_none()
+                                    && self.catalog.source_snapshot_current()
+                                    && !self.has_unsaved_workspace_edits(),
+                                egui::Button::new("Add this project"),
                             )
+                            .on_hover_text("Adds this project to Studio without moving or changing its files.")
+                            .on_disabled_hover_text(if self.workspace.unregistered_scan_error.is_some() {
+                                "Refresh the project list before adding one; the current results may be out of date."
+                            } else if !self.catalog.source_snapshot_current() {
+                                "Refresh the project list before adding one; it may already be available in Studio."
+                            } else {
+                                "Save or discard your unsaved edits before adding this project."
+                            })
                             .clicked()
                         {
                             adoption_path = Some(candidate.path.clone());

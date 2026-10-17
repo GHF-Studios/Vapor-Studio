@@ -75,7 +75,7 @@ impl StudioApp {
             )
         } else {
             format!(
-                "Resolved {} available nodes with {} blocker(s). Review the plan before installing.",
+                "Found {} available content items; {} need attention. Review the plan before installing.",
                 preview.nodes.len(),
                 preview.blockers.len()
             )
@@ -464,6 +464,13 @@ impl StudioApp {
         let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
+        if matches!(
+            &profile.installation,
+            vapor_studio_core::InstallationState::OutOfDate { .. }
+        ) {
+            self.status = "Review or update this profile's game setup before launching.".to_owned();
+            return;
+        }
         let Some(root_package) = profile.root_package else {
             return;
         };
@@ -487,33 +494,43 @@ impl StudioApp {
                 &arguments,
             ))
         });
-        self.status = "Launching the installed composition for this profile…".to_owned();
+        self.status = concat!(
+            "Preparing game setup. Steam must be open and signed in if Workshop items need downloading…",
+        )
+        .to_owned();
+    }
+
+    pub(super) fn ensure_default_profile_root(&mut self) -> bool {
+        if self.profile.items[self.profile.active_index]
+            .root_package
+            .is_some()
+        {
+            return true;
+        }
+        let executable = match std::env::current_exe() {
+            Ok(value) => value,
+            Err(error) => {
+                self.status = format!("Could not locate the Studio executable: {error}");
+                return false;
+            }
+        };
+        match vapor_studio_core::default_packagepack_selector(&executable, "default") {
+            Ok(id) => {
+                self.profile.items[self.profile.active_index].root_package =
+                    Some(ContentIdentity { id, version: None });
+                true
+            }
+            Err(error) => {
+                self.status = format!("This app has no default playable composition: {error}");
+                false
+            }
+        }
     }
 
     pub(super) fn launch_default_profile(&mut self) {
-        if self.profile.items[self.profile.active_index]
-            .root_package
-            .is_none()
-        {
-            let executable = match std::env::current_exe() {
-                Ok(value) => value,
-                Err(error) => {
-                    self.status = format!("Could not locate the Studio executable: {error}");
-                    return;
-                }
-            };
-            match vapor_studio_core::default_packagepack_selector(&executable, "default") {
-                Ok(id) => {
-                    self.profile.items[self.profile.active_index].root_package =
-                        Some(ContentIdentity { id, version: None })
-                }
-                Err(error) => {
-                    self.status = format!("This app has no default playable composition: {error}");
-                    return;
-                }
-            }
+        if self.ensure_default_profile_root() {
+            self.run_installed_selected();
         }
-        self.run_installed_selected();
     }
 
     pub(super) fn run_selected(&mut self) {
@@ -546,8 +563,11 @@ impl StudioApp {
                 &arguments,
             ))
         });
-        self.status =
-            "Installing source changes and launching this profile through Vapor Shell…".to_owned();
+        self.status = concat!(
+            "Building this project and starting the game. ",
+            "Open and sign in to Steam if missing Workshop items are needed…",
+        )
+        .to_owned();
     }
 }
 

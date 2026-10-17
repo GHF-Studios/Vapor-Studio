@@ -44,7 +44,7 @@ mod workspace_ops;
 use crate::navigation::Section;
 use catalog::{
     CatalogFilter, CatalogState, catalog_content_selector, catalog_content_selector_matches,
-    content_selector, source_content_kind, source_content_selector,
+    content_selector, content_kind_title, display_content_kind, source_content_kind, source_content_selector,
     source_content_selector_matches,
 };
 use composition_lifecycle::ProfileCompositionState;
@@ -180,6 +180,13 @@ impl StudioApp {
             command_palette_selected_index: 0,
         };
         app.refresh_registered_sources();
+        if !play_mode
+            && app.profile.items[app.profile.active_index].id == "default"
+            && app.profile.items[app.profile.active_index].root_package.is_none()
+            && app.profile.items[app.profile.active_index].workspace.is_none()
+        {
+            app.ensure_default_profile_root();
+        }
         if play_mode {
             app.launch_default_profile();
         } else if let Some(workspace) = requested_workspace {

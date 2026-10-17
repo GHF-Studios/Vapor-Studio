@@ -11,22 +11,32 @@ pub(super) fn discover_workspace_and_catalog(
     Result<Vec<vapor_studio_core::SourceContent>, String>,
     Result<Vec<vapor_studio_core::CatalogContent>, String>,
     Result<vapor_studio_core::UnregisteredProjectScan, String>,
+    Option<String>,
 ) {
+    let workspace_validation_error = workspace_root.and_then(|root| {
+        vapor_core::VaporWorkspace::load(root)
+            .err()
+            .map(|error| format!("{}: {error}", root.display()))
+    });
     let source = workspace_root
         .map(|root| vapor_studio_core::discover_source_content(executable, root))
-        .unwrap_or_else(|| Err("Open a workspace to browse authored source content.".to_owned()));
+        .unwrap_or_else(|| Ok(Vec::new()));
     let catalog = vapor_studio_core::discover_content_catalog(executable, workspace_root);
     let unregistered = workspace_root
         .map(|root| vapor_studio_core::scan_unregistered_content_projects(executable, root))
         .unwrap_or_else(|| Ok(vapor_studio_core::UnregisteredProjectScan::default()));
-    (source, catalog, unregistered)
+    (source, catalog, unregistered, workspace_validation_error)
 }
 
 pub(super) struct CatalogState {
     pub(super) discover_tab: DiscoverTab,
     pub(super) search_query: String,
     pub(super) sources: Vec<vapor_studio_core::SourceContent>,
+    pub(super) source_discovery_loaded: bool,
+    pub(super) source_discovery_error: Option<String>,
     pub(super) items: Vec<vapor_studio_core::CatalogContent>,
+    pub(super) catalog_discovery_loaded: bool,
+    pub(super) catalog_discovery_error: Option<String>,
     pub(super) source_filter: CatalogSourceFilter,
     pub(super) kind_filter: Option<String>,
     pub(super) selected: Option<String>,
@@ -45,7 +55,11 @@ impl Default for CatalogState {
             discover_tab: DiscoverTab::Local,
             search_query: String::new(),
             sources: Vec::new(),
+            source_discovery_loaded: false,
+            source_discovery_error: None,
             items: Vec::new(),
+            catalog_discovery_loaded: false,
+            catalog_discovery_error: None,
             source_filter: CatalogSourceFilter::All,
             kind_filter: None,
             selected: None,
@@ -54,9 +68,21 @@ impl Default for CatalogState {
 }
 
 impl CatalogState {
+    pub(super) fn source_snapshot_current(&self) -> bool {
+        self.source_discovery_loaded && self.source_discovery_error.is_none()
+    }
+
+    pub(super) fn local_catalog_current(&self) -> bool {
+        self.catalog_discovery_loaded && self.catalog_discovery_error.is_none()
+    }
+
     pub(super) fn clear_workspace_content(&mut self) {
         self.sources.clear();
+        self.source_discovery_loaded = false;
+        self.source_discovery_error = None;
         self.items.clear();
+        self.catalog_discovery_loaded = false;
+        self.catalog_discovery_error = None;
         self.selected = None;
     }
 }
@@ -80,9 +106,14 @@ impl StudioApp {
         self.spawn(
             vapor_studio_core::OperationKind::Discover,
             move |_context| {
-                let (source, catalog, unregistered) =
+                let (source, catalog, unregistered, workspace_validation_error) =
                     discover_workspace_and_catalog(&executable, root.as_deref());
-                OperationResult::Discovery(source, catalog, unregistered)
+                OperationResult::Discovery(
+                    source,
+                    catalog,
+                    unregistered,
+                    workspace_validation_error,
+                )
             },
         );
     }
@@ -92,81 +123,90 @@ impl StudioApp {
         source_result: Result<Vec<vapor_studio_core::SourceContent>, String>,
         catalog_result: Result<Vec<vapor_studio_core::CatalogContent>, String>,
         unregistered_result: Result<vapor_studio_core::UnregisteredProjectScan, String>,
+        workspace_validation_error: Option<String>,
     ) {
-        let source_error = match source_result {
+        self.workspace.workspace_validation_error = workspace_validation_error;
+        match source_result {
             Ok(contents) => {
                 self.catalog.sources = contents;
-                None
+                self.catalog.source_discovery_loaded = true;
+                self.catalog.source_discovery_error = None;
             }
-            Err(error) => {
-                self.catalog.sources.clear();
-                Some(error)
-            }
-        };
+            Err(error) => self.catalog.source_discovery_error = Some(error),
+        }
         match catalog_result {
             Ok(catalog) => {
-                let count = catalog.len();
                 self.catalog.items = catalog;
-                self.status = if self.profile.items[self.profile.active_index]
-                    .workspace
-                    .is_some()
-                {
-                    source_error.map(|error| format!("Found {count} local items, but workspace sources could not load: {error}"))
-                        .unwrap_or_else(|| format!("Discovered {count} local content identities across workspace, cache, and installation."))
-                } else {
-                    format!("Discovered {count} cached and installed content identities.")
-                };
+                self.catalog.catalog_discovery_loaded = true;
+                self.catalog.catalog_discovery_error = None;
             }
-            Err(error) => {
-                self.catalog.items.clear();
-                self.catalog.selected = None;
-                self.status = source_error.map_or_else(
-                    || format!("Could not refresh the local content catalog: {error}"),
-                    |source_error| format!("Workspace sources failed: {source_error}. Local catalog failed: {error}"),
-                );
-            }
+            Err(error) => self.catalog.catalog_discovery_error = Some(error),
         }
         match unregistered_result {
             Ok(scan) => {
                 self.workspace.unregistered_scan_completed = true;
+                self.workspace.unregistered_scan_error = None;
                 self.workspace.unregistered_projects = scan;
             }
-            Err(error) => {
-                self.workspace.unregistered_scan_completed = false;
-                self.workspace.unregistered_projects =
-                    vapor_studio_core::UnregisteredProjectScan::default();
-                if !self.status.is_empty() {
-                    self.status.push(' ');
-                }
-                self.status.push_str(&format!(
-                    "Workspace project scan could not complete: {error}"
-                ));
+            Err(error) => self.workspace.unregistered_scan_error = Some(error),
+        }
+        let source_count = self.catalog.sources.len();
+        let catalog_count = self.catalog.items.len();
+        self.status = match (
+            self.catalog.source_discovery_error.as_deref(),
+            self.catalog.catalog_discovery_error.as_deref(),
+        ) {
+            (None, None) if self.profile.items[self.profile.active_index].workspace.is_some() => {
+                format!("Discovered {source_count} workspace projects and {catalog_count} local content identities.")
             }
+            (None, None) => {
+                format!("Discovered {catalog_count} cached and installed content identities.")
+            }
+            (Some(source_error), None) => format!(
+                "Local catalog refreshed with {catalog_count} items, but workspace sources could not refresh: {source_error}"
+            ),
+            (None, Some(catalog_error)) => format!(
+                "Workspace sources refreshed with {source_count} projects, but the local catalog could not refresh: {catalog_error}"
+            ),
+            (Some(source_error), Some(catalog_error)) => format!(
+                "Workspace sources and local catalog refresh failed: {source_error}; {catalog_error}"
+            ),
+        };
+        if let Some(error) = self.workspace.unregistered_scan_error.as_deref() {
+            self.status.push_str(&format!(" Workspace project scan could not complete: {error}"));
         }
         if self.workspace.unregistered_scan_completed {
             let candidates = self.workspace.unregistered_projects.candidates.len();
             if candidates > 0 {
                 self.status.push_str(&format!(
-                    " Found {candidates} existing content project{} ready to adopt.",
+                    " Found {candidates} existing project{} you can add to Studio.",
                     if candidates == 1 { "" } else { "s" },
                 ));
             }
         }
-        match self.profile_composition.take_repreview_request() {
-            Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::ActiveProfile) => {
-                self.preview_selected_composition();
-            }
-            Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::Source {
-                selector,
-                workspace_root,
-            }) => {
-                self.preview_composition(
+        if let Some(error) = self.workspace.workspace_validation_error.as_deref() {
+            self.status.push_str(&format!(
+                " Workspace validation needs repair; save fixes and refresh workspace content before running workspace operations. {error}"
+            ));
+        }
+        if self.catalog.local_catalog_current() && self.catalog.source_snapshot_current()
+        {
+            match self.profile_composition.take_repreview_request() {
+                Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::ActiveProfile) => {
+                    self.preview_selected_composition();
+                }
+                Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::Source {
                     selector,
-                    Some(workspace_root),
-                    "Re-resolving the source composition against the refreshed cache…",
-                );
+                    workspace_root,
+                }) => {
+                    self.preview_composition(
+                        selector,
+                        Some(workspace_root),
+                        "Re-resolving the source composition against the refreshed cache…",
+                    );
+                }
+                None => {}
             }
-            None => {}
         }
         if self.catalog.selected.as_ref().is_some_and(|identity| {
             !self
@@ -239,6 +279,28 @@ pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {
         "extension-mod" => ContentKind::ExtensionMod,
         _ => return None,
     })
+}
+
+pub(crate) fn content_kind_title(kind: ContentKind) -> &'static str {
+    match kind {
+        ContentKind::Packagepack => "Playable game setup",
+        ContentKind::Enginepack => "Engine setup",
+        ContentKind::Gamepack => "Game setup collection",
+        ContentKind::Modpack => "Add-on collection",
+        ContentKind::Engine => "Game engine",
+        ContentKind::Game => "Game content",
+        ContentKind::EngineMod => "Engine add-on",
+        ContentKind::GameMod => "Game add-on",
+        ContentKind::ExtensionMod => "General add-on",
+        ContentKind::Library => "Content project",
+    }
+}
+
+pub(crate) fn display_content_kind(kind: &str) -> String {
+    source_content_kind(kind)
+        .map(content_kind_title)
+        .unwrap_or(kind)
+        .to_owned()
 }
 
 pub(super) struct CatalogFilter {

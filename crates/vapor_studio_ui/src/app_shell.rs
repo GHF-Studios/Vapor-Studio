@@ -1,4 +1,4 @@
-use super::components::design::{ACCENT, MUTED_TEXT};
+use super::components::design::{ACCENT, MUTED_TEXT, StatusTone, status_text};
 use super::directory_picker::{DirectoryPickerPurpose, DirectoryPickerResult};
 use super::workshop::WorkshopTab;
 use super::workspace_ops::WorkspacePanel;
@@ -24,15 +24,18 @@ impl StudioApp {
                     }
                 })
         });
-        if !can_switch {
-            selector.response.on_hover_text(if self.operation.running {
+        let hover_text = if !can_switch {
+            if self.operation.running {
                 "Wait for the current operation to finish before switching profiles."
             } else if self.authoring.pending_composition_role_change.is_some() {
                 "Resolve the pending composition role choice before switching profiles."
             } else {
                 "Save or discard the Create draft and workspace edits before switching profiles."
-            });
-        }
+            }
+        } else {
+            "A play profile remembers the game setup and launch settings you want to use."
+        };
+        let _ = selector.response.on_hover_text(hover_text);
         if let Some(requested_profile) = requested_profile {
             self.select_profile(requested_profile);
         }
@@ -40,20 +43,22 @@ impl StudioApp {
 
     fn navigation_section_label(&self, section: Section) -> String {
         match section {
-            Section::Create if self.authoring.create.is_dirty() => "Create · draft".to_owned(),
+            Section::Create if self.authoring.create.is_dirty() => {
+                format!("{} · draft", Section::Create.label())
+            }
             Section::Workspace if self.has_unsaved_workspace_edits() => {
-                "Workspace · unsaved".to_owned()
+                format!("{} · unsaved", Section::Workspace.label())
             }
             Section::Compose if self.authoring.pending_composition_role_change.is_some() => {
-                "Compose · choice pending".to_owned()
+                format!("{} · choice pending", Section::Compose.label())
             }
             Section::Compose if self.authoring.composition_has_unsaved_changes() => {
-                "Compose · unsaved".to_owned()
+                format!("{} · unsaved", Section::Compose.label())
             }
             Section::Publish
                 if self.workshop.preview.is_some() || self.root_publishing.preview.is_some() =>
             {
-                "Publish · review ready".to_owned()
+                format!("{} · review ready", Section::Publish.label())
             }
             _ => section.label().to_owned(),
         }
@@ -95,13 +100,25 @@ impl StudioApp {
     }
 
     fn select_navigation_section(&mut self, ui: &mut egui::Ui, section: Section) {
-        let response = ui.add_sized(
-            [ui.available_width(), 32.0],
-            egui::Button::selectable(
-                self.section == section,
-                self.navigation_section_label(section),
-            ),
-        );
+        let explanation = match section {
+            Section::Home => "Launch your selected game setup.",
+            Section::Library => "Manage game profiles and the setups they use.",
+            Section::Discover => "Browse content on this device or in Steam Workshop.",
+            Section::Create => "Start a new content project from a template.",
+            Section::Workspace => "Open and edit your project files and content.",
+            Section::Compose => "Choose the game engine, game, and add-ons for a play profile.",
+            Section::Publish => "Review your content before sharing it.",
+            Section::Diagnostics => "Check the app and its available tools.",
+        };
+        let response = ui
+            .add_sized(
+                [ui.available_width(), 32.0],
+                egui::Button::selectable(
+                    self.section == section,
+                    self.navigation_section_label(section),
+                ),
+            )
+            .on_hover_text(explanation);
         if response.clicked() {
             self.activate_navigation_section(section);
         }
@@ -130,18 +147,18 @@ impl StudioApp {
             .auto_shrink([false, false])
             .max_height((ui.available_height() - 150.0).max(100.0))
             .show(ui, |ui| {
-                self.select_navigation_section(ui, Section::Home);
-                ui.add_space(12.0);
                 ui.label(
                     egui::RichText::new("PLAY")
                         .small()
                         .strong()
                         .color(MUTED_TEXT),
                 );
+                self.select_navigation_section(ui, Section::Home);
                 self.select_navigation_section(ui, Section::Library);
+                self.select_navigation_section(ui, Section::Compose);
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("EXPLORE")
+                    egui::RichText::new("DISCOVER")
                         .small()
                         .strong()
                         .color(MUTED_TEXT),
@@ -156,7 +173,6 @@ impl StudioApp {
                 );
                 self.select_navigation_section(ui, Section::Create);
                 self.select_navigation_section(ui, Section::Workspace);
-                self.select_navigation_section(ui, Section::Compose);
                 ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new("SHARE")
@@ -167,7 +183,7 @@ impl StudioApp {
                 self.select_navigation_section(ui, Section::Publish);
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("TOOLS")
+                    egui::RichText::new("APP")
                         .small()
                         .strong()
                         .color(MUTED_TEXT),
@@ -189,7 +205,7 @@ impl StudioApp {
             let style = ui.style().clone();
             egui::Frame::group(&style).show(ui, |ui| {
                 ui.label(
-                    egui::RichText::new("CURRENT WORKSPACE")
+                    egui::RichText::new("CURRENT PROJECT FOLDER")
                         .small()
                         .strong()
                         .color(MUTED_TEXT),
@@ -199,19 +215,23 @@ impl StudioApp {
                     ui.small(&self.workspace.root);
                 }
                 if self.has_unsaved_context_switch_edits() {
-                    ui.colored_label(egui::Color32::from_rgb(242, 193, 91), "Unsaved edits");
+                    status_text(ui, "Unsaved edits", StatusTone::Caution);
                 } else if !self.workspace.root.trim().is_empty() {
-                    ui.weak("Workspace open");
+                    ui.weak("Project folder open");
                 }
                 if ui
                     .button(if self.workspace.root.trim().is_empty() {
-                        "Open workspace"
+                        "Open project folder"
                     } else {
-                        "Manage workspace"
+                        "Manage project folder"
                     })
                     .clicked()
                 {
-                    self.activate_navigation_section(Section::Workspace);
+                    if self.workspace.root.trim().is_empty() {
+                        self.open_workspace_picker();
+                    } else {
+                        self.activate_navigation_section(Section::Workspace);
+                    }
                 }
             });
         });
@@ -234,10 +254,10 @@ impl StudioApp {
                     for section in [
                         Section::Home,
                         Section::Library,
+                        Section::Compose,
                         Section::Discover,
                         Section::Create,
                         Section::Workspace,
-                        Section::Compose,
                         Section::Publish,
                         Section::Diagnostics,
                     ] {
@@ -284,18 +304,30 @@ impl StudioApp {
                 self.section,
                 Section::Discover | Section::Create | Section::Workspace | Section::Compose
             );
-        let show_profile_picker = matches!(
-            self.section,
-            Section::Home | Section::Discover | Section::Compose
-        );
+        let show_profile_picker = true;
         let show_profile_create = matches!(self.section, Section::Home | Section::Library);
-        ui.horizontal(|ui| {
+        let active_profile_launch_state = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .map(|profile| {
+                (
+                    profile.root_package.is_some(),
+                    matches!(
+                        &profile.installation,
+                        vapor_studio_core::InstallationState::OutOfDate { .. }
+                    ),
+                )
+            })
+            .unwrap_or_default();
+        let show_launch_button = self.section != Section::Home;
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("VAPOR STUDIO").small().strong().color(MUTED_TEXT));
             if show_workspace {
                 ui.separator();
-                ui.label(egui::RichText::new("WORKSPACE").small().strong().color(MUTED_TEXT));
+                ui.label(egui::RichText::new("PROJECT FOLDER").small().strong().color(MUTED_TEXT));
                 let workspace_label = if self.workspace.root.trim().is_empty() {
-                    "Choose workspace"
+                    "Choose folder"
                 } else {
                     std::path::Path::new(&self.workspace.root)
                         .file_name()
@@ -312,17 +344,38 @@ impl StudioApp {
             }
             if show_profile_picker {
                 if self.profile.recovery.is_some() {
-                    ui.colored_label(egui::Color32::from_rgb(242, 193, 91), "Profile recovery needed");
+                    status_text(ui, "Profile recovery needed", StatusTone::Caution);
                 }
                 ui.separator();
-                ui.label(egui::RichText::new("PROFILE").small().strong().color(MUTED_TEXT));
+                ui.label(egui::RichText::new("PLAY PROFILE").small().strong().color(MUTED_TEXT));
                 self.draw_profile_target_selector(ui);
+            }
+            if show_launch_button {
+                if active_profile_launch_state.0 {
+                    let launch_enabled = !self.operation.running && !active_profile_launch_state.1;
+                    if ui
+                        .add_enabled(
+                            launch_enabled,
+                            egui::Button::new(egui::RichText::new("Launch").strong()),
+                        )
+                        .on_disabled_hover_text(if self.operation.running {
+                            "Wait for the current operation to finish."
+                        } else {
+                            "Review or update this profile's game setup before launching."
+                        })
+                        .clicked()
+                    {
+                        self.run_installed_selected();
+                    }
+                } else if ui.button("Choose game setup").clicked() {
+                    self.activate_navigation_section(Section::Library);
+                }
             }
             if show_profile_create {
                 if ui
                     .add_enabled(
                         !self.operation.running && !self.has_unsaved_context_switch_edits(),
-                        egui::Button::new("+ Profile"),
+                        egui::Button::new("+ Play profile"),
                     )
                     .on_disabled_hover_text(
                         "Discard the Create draft or save/discard workspace edits before creating a profile.",

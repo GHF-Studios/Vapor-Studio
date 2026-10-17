@@ -1,5 +1,7 @@
 use super::super::StudioApp;
-use super::super::components::design::discard_confirmation;
+use super::super::components::design::{
+    StatusTone, discard_confirmation, status_text, use_stacked_form,
+};
 use super::super::source_authoring::PendingManifestDraftDiscard;
 use eframe::egui;
 
@@ -26,15 +28,15 @@ impl StudioApp {
             ui.add_enabled_ui(!operation_running && !discard_pending, |ui| {
                 ui.group(|ui| {
                 ui.heading(format!("Workshop metadata · {}", metadata.id));
-                ui.label("Edit the publication intent saved in this role manifest. This action does not upload to Steam.");
+                ui.label("Edit the details for a future Workshop upload. Saving here does not publish or upload anything.");
                 let mut changed = false;
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Steam AppID");
                     changed |= ui.text_edit_singleline(&mut self.authoring.workshop_metadata_app_id).changed();
                     ui.label("PublishedFileId");
                     changed |= ui.text_edit_singleline(&mut self.authoring.workshop_metadata_published_file_id).changed();
                 });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Visibility");
                     egui::ComboBox::from_id_salt("edit-source-workshop-visibility")
                         .selected_text(if self.authoring.workshop_metadata_visibility.is_empty() {
@@ -61,14 +63,14 @@ impl StudioApp {
                         .desired_rows(3)
                         .desired_width(f32::INFINITY),
                 ).changed();
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Tags · comma separated");
                     changed |= ui.text_edit_singleline(&mut self.authoring.workshop_metadata_tags).changed();
                     ui.label("Change note");
                     changed |= ui.text_edit_singleline(&mut self.authoring.workshop_metadata_change_note).changed();
                 });
                 self.authoring.manifest_metadata_dirty |= changed;
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.add_enabled(
                         !operation_running
                             && !discard_pending
@@ -91,7 +93,7 @@ impl StudioApp {
                         workshop_action = Some(WorkshopMetadataAction::Close);
                     }
                     if self.authoring.manifest_metadata_dirty {
-                        ui.colored_label(egui::Color32::YELLOW, "Unsaved metadata draft");
+                        status_text(ui, "Unsaved metadata draft", StatusTone::Caution);
                     }
                 });
                 });
@@ -115,24 +117,59 @@ impl StudioApp {
                 ui.group(|ui| {
                 ui.heading(format!("Runtime outputs · {}", outputs.id));
                 ui.label("Declare Cargo build outputs copied into the deployed artifact's bin/ and lib/ directories. Enter one file name per line; paths are not accepted.");
-                ui.columns(2, |columns| {
-                    columns[0].label("Executables");
-                    let binaries_changed = columns[0].add(
-                        egui::TextEdit::multiline(&mut self.authoring.runtime_binaries_text)
+                if use_stacked_form(ui) {
+                    ui.label("Executables");
+                    let binaries_changed = ui
+                        .add(
+                            egui::TextEdit::multiline(
+                                &mut self.authoring.runtime_binaries_text,
+                            )
                             .desired_rows(4)
                             .desired_width(f32::INFINITY)
                             .hint_text("spacetime-engine"),
-                    ).changed();
-                    columns[1].label("Libraries");
-                    let libraries_changed = columns[1].add(
-                        egui::TextEdit::multiline(&mut self.authoring.runtime_libraries_text)
+                        )
+                        .changed();
+                    ui.label("Libraries");
+                    let libraries_changed = ui
+                        .add(
+                            egui::TextEdit::multiline(
+                                &mut self.authoring.runtime_libraries_text,
+                            )
                             .desired_rows(4)
                             .desired_width(f32::INFINITY)
                             .hint_text("libexample.so"),
-                    ).changed();
+                        )
+                        .changed();
                     self.authoring.manifest_metadata_dirty |= binaries_changed || libraries_changed;
-                });
-                ui.horizontal(|ui| {
+                } else {
+                    ui.columns(2, |columns| {
+                        columns[0].label("Executables");
+                        let binaries_changed = columns[0]
+                            .add(
+                                egui::TextEdit::multiline(
+                                    &mut self.authoring.runtime_binaries_text,
+                                )
+                                .desired_rows(4)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("spacetime-engine"),
+                            )
+                            .changed();
+                        columns[1].label("Libraries");
+                        let libraries_changed = columns[1]
+                            .add(
+                                egui::TextEdit::multiline(
+                                    &mut self.authoring.runtime_libraries_text,
+                                )
+                                .desired_rows(4)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("libexample.so"),
+                            )
+                            .changed();
+                        self.authoring.manifest_metadata_dirty |=
+                            binaries_changed || libraries_changed;
+                    });
+                }
+                ui.horizontal_wrapped(|ui| {
                     if ui.add_enabled(
                         !operation_running
                             && !discard_pending
@@ -155,7 +192,7 @@ impl StudioApp {
                         outputs_action = Some(RuntimeOutputsAction::Close);
                     }
                     if self.authoring.manifest_metadata_dirty {
-                        ui.colored_label(egui::Color32::YELLOW, "Unsaved runtime output changes");
+                        status_text(ui, "Unsaved runtime output changes", StatusTone::Caution);
                     }
                 });
                 });
