@@ -86,12 +86,15 @@ enum RepreviewRequest {
 
 impl StudioApp {
     pub(super) fn review_workshop_content(&mut self, published_file_id: &str) {
-        self.catalog.selected = self
+        if let Some(selector) = self
             .catalog
             .items
             .iter()
             .find(|content| content.published_file_id.as_deref() == Some(published_file_id))
-            .map(catalog_content_selector);
+            .map(catalog_content_selector)
+        {
+            self.select_catalog_identity(selector);
+        }
         self.catalog.source_filter = CatalogSourceFilter::Workshop;
         self.catalog.kind_filter = None;
         self.catalog.search_query = published_file_id.to_owned();
@@ -179,8 +182,7 @@ impl StudioApp {
             }
         } else {
             self.status = super::operation_protocol::partial_workshop_acquisition_message(
-                imported,
-                requested,
+                imported, requested,
             );
             self.workshop.pending_acquisition_ids.clear();
         }
@@ -397,7 +399,8 @@ impl StudioApp {
             return;
         }
         if !published_file_id.bytes().all(|byte| byte.is_ascii_digit()) {
-            self.status = "Enter the number from the Workshop item's link, not its full URL.".to_owned();
+            self.status =
+                "Enter the number from the Workshop item's link, not its full URL.".to_owned();
             return;
         }
         self.download_workshop_items(vec![published_file_id], None);

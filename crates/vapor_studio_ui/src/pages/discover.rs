@@ -78,14 +78,27 @@ impl StudioApp {
         }
         ui.horizontal_wrapped(|ui| {
             let search_width = search_field_width(ui);
-            ui.add(egui::TextEdit::singleline(&mut self.catalog.search_query)
-                .desired_width(search_width)
-                .hint_text("Search on-device content"));
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut self.catalog.search_query)
+                    .desired_width(search_width)
+                    .hint_text("Search on-device content"),
+            );
+            if search.changed() {
+                self.submit_service_action(vapor_studio_protocol::StudioAction::Catalog(
+                    vapor_studio_protocol::CatalogAction::Search {
+                        query: self.catalog.search_query.clone(),
+                    },
+                ));
+            }
             egui::ComboBox::from_id_salt("catalog-source-filter")
                 .selected_text(self.catalog.source_filter.label())
                 .show_ui(ui, |ui| {
                     for filter in CatalogSourceFilter::ALL {
-                        ui.selectable_value(&mut self.catalog.source_filter, filter, filter.label());
+                        ui.selectable_value(
+                            &mut self.catalog.source_filter,
+                            filter,
+                            filter.label(),
+                        );
                     }
                 });
             let mut kinds = self
@@ -94,10 +107,20 @@ impl StudioApp {
                 .iter()
                 .map(|content| content.kind.clone())
                 .collect::<std::collections::BTreeSet<_>>();
-            kinds.extend(self.workspace.unregistered_projects.candidates.iter()
-                .map(|candidate| candidate.kind.to_string()));
+            kinds.extend(
+                self.workspace
+                    .unregistered_projects
+                    .candidates
+                    .iter()
+                    .map(|candidate| candidate.kind.to_string()),
+            );
             egui::ComboBox::from_id_salt("catalog-kind-filter")
-                .selected_text(self.catalog.kind_filter.as_deref().unwrap_or("All content types"))
+                .selected_text(
+                    self.catalog
+                        .kind_filter
+                        .as_deref()
+                        .unwrap_or("All content types"),
+                )
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.catalog.kind_filter, None, "All content types");
                     for kind in kinds {
@@ -108,8 +131,14 @@ impl StudioApp {
                         );
                     }
                 });
-            if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Refresh on-device content"))
-                .on_disabled_hover_text("Save or discard your open edits first; Studio reads saved project details.")
+            if ui
+                .add_enabled(
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                    egui::Button::new("Refresh on-device content"),
+                )
+                .on_disabled_hover_text(
+                    "Save or discard your open edits first; Studio reads saved project details.",
+                )
                 .clicked()
             {
                 self.discover();
@@ -122,6 +151,11 @@ impl StudioApp {
                 self.catalog.search_query.clear();
                 self.catalog.source_filter = CatalogSourceFilter::All;
                 self.catalog.kind_filter = None;
+                self.submit_service_action(vapor_studio_protocol::StudioAction::Catalog(
+                    vapor_studio_protocol::CatalogAction::Search {
+                        query: String::new(),
+                    },
+                ));
             }
         });
         let filter = CatalogFilter::new(
@@ -260,13 +294,21 @@ impl StudioApp {
             self.draw_selected_content_detail(ui, selected_is_visible, selected_is_hidden);
         } else {
             ui.columns(2, |columns| {
-                section_header(&mut columns[0], "On this device", "Content already downloaded or included in an open project folder.");
+                section_header(
+                    &mut columns[0],
+                    "On this device",
+                    "Content already downloaded or included in an open project folder.",
+                );
                 egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
                     self.draw_workspace_candidates(ui, &filter);
                     self.draw_catalog_list(ui, &filter);
                 });
 
-                section_header(&mut columns[1], "Details", "Select an item to see what it needs and what you can do with it.");
+                section_header(
+                    &mut columns[1],
+                    "Details",
+                    "Select an item to see what it needs and what you can do with it.",
+                );
                 self.draw_selected_content_detail(
                     &mut columns[1],
                     selected_is_visible,

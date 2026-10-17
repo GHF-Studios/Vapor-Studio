@@ -121,7 +121,10 @@ impl StudioApp {
                 });
             });
         } else {
-            ui.heading(format!("Projects in this folder · {}", self.catalog.sources.len()));
+            ui.heading(format!(
+                "Projects in this folder · {}",
+                self.catalog.sources.len()
+            ));
             ui.label("Choose a project to check its files, change the content it needs, or prepare it for sharing.");
             let mut visible_projects = 0;
             let mut action = None;
@@ -223,17 +226,16 @@ impl StudioApp {
                             {
                                 action = Some(SourceContentAction::Validate(content.clone()));
                             }
-                            if let Some(relative_manifest) = relative_manifest {
-                                if ui
+                            if let Some(relative_manifest) = relative_manifest
+                                && ui
                                     .add_enabled(
                                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Edit project file"),
                                     )
                                     .on_disabled_hover_text("Save or discard the current file before opening the project definition.")
                                     .clicked()
-                                {
-                                    action = Some(SourceContentAction::OpenManifest(relative_manifest));
-                                }
+                            {
+                                action = Some(SourceContentAction::OpenManifest(relative_manifest));
                             }
                             if ui
                                     .add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Choose included content"))
@@ -372,7 +374,7 @@ impl StudioApp {
             unregistration_confirmation = confirmation_card(
                 ui,
                 &title,
-                &description,
+                description,
                 "Remove from Studio",
                 "Keep project",
                 !self.operation.running && !self.has_unsaved_workspace_edits(),
@@ -404,12 +406,12 @@ impl StudioApp {
                     .collect::<Vec<_>>();
                 let has_candidates = !candidates.is_empty();
                 if !matching_candidates.is_empty() {
-                ui.heading(format!(
-                    "Projects to add · {} of {}",
+                    ui.heading(format!(
+                        "Projects to add · {} of {}",
                         matching_candidates.len(),
                         candidates.len()
                     ));
-                ui.weak("Add a project to make it available in Studio. Its files stay where they are.");
+                    ui.weak("Add a project to make it available in Studio. Its files stay where they are.");
                 }
                 let mut adoption_path = None;
                 for candidate in &matching_candidates {

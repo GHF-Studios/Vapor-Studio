@@ -57,3 +57,20 @@ The terminal simulator is a developer-facing client for the same service, not a 
 - Automated scenarios cannot publish or mutate a real Steam account.
 - The GUI contains no duplicate workflow orchestration or direct calls to Studio content operations after migration.
 - A human can assess presentation separately while relying on service traces to establish functional state.
+
+## Implementation status
+
+The initial implementation slice provides the typed protocol, bounded child
+process client, stdio server, fixture simulator, service-owned local catalog
+refresh/search/selection, workspace-root activation, and active-profile ID
+selection. Other action families are declared in the protocol but still return
+a structured unavailable-action error. Profiles and operation history remain
+in their existing GUI storage, several workspace scans and all long-running
+operations still use the GUI worker dispatcher, and provider fixture ports,
+service persistence, and complete GUI migration remain future slices in the
+implementation plan. `vapor validate --project vapor-studio` passes, and the
+managed service binary runs checked-in scenarios through a child process. A
+host application-root build was attempted, but currently stops at `vapor-gui`:
+its ignored local `Cargo.lock` needs regeneration while the managed build
+enforces `--locked`; the service's promotion beside `vapor-gui` is therefore
+not yet verified.

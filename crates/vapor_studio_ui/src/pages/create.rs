@@ -25,18 +25,18 @@ impl StudioApp {
         {
             self.authoring.create.discard_confirmation_open = true;
         }
-        if self.authoring.create.discard_confirmation_open {
-            if let Some(discard) = discard_confirmation(
+        if self.authoring.create.discard_confirmation_open
+            && let Some(discard) = discard_confirmation(
                 ui,
                 "Discard this new-content draft?",
                 "This clears the project identity and selected content in this draft. No project files have been created yet.",
-            ) {
-                if discard {
-                    self.authoring.create.reset();
-                    self.status = "Discarded the new content project draft.".to_owned();
-                } else {
-                    self.authoring.create.discard_confirmation_open = false;
-                }
+            )
+        {
+            if discard {
+                self.authoring.create.reset();
+                self.status = "Discarded the new content project draft.".to_owned();
+            } else {
+                self.authoring.create.discard_confirmation_open = false;
             }
         }
         self.draw_create_flow(ui);
@@ -71,7 +71,7 @@ impl StudioApp {
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(
-                    self.authoring.create.pending_dependency_clear == false
+                    !self.authoring.create.pending_dependency_clear
                         && self.authoring.create.pending_role_replacement.is_none(),
                     egui::Button::new("← Templates"),
                 )
@@ -97,7 +97,9 @@ impl StudioApp {
                 "Choose one game engine and one game for this setup."
             }
             vapor_core::ContentKind::Game => "Choose one game engine for this game to run on.",
-            vapor_core::ContentKind::Enginepack => "Choose one game engine to include in this setup.",
+            vapor_core::ContentKind::Enginepack => {
+                "Choose one game engine to include in this setup."
+            }
             vapor_core::ContentKind::Gamepack => "Choose one game to include in this setup.",
             _ => "Required content is checked against the type of project you are creating.",
         };
@@ -139,13 +141,13 @@ impl StudioApp {
                     })
             })
         };
-        let required_role_selected = required_role_groups
-            .iter()
-            .all(|required_group| selected_in_role_group(required_group));
+        let required_role_selected = required_role_groups.iter().all(selected_in_role_group);
         if let Some(error) = self.catalog.source_discovery_error.as_deref() {
             status_text(
                 ui,
-                &format!("Workspace content refresh failed. The last successful list is shown, but creating with these dependencies is disabled until refresh succeeds: {error}"),
+                &format!(
+                    "Workspace content refresh failed. The last successful list is shown, but creating with these dependencies is disabled until refresh succeeds: {error}"
+                ),
                 StatusTone::Caution,
             );
         }
@@ -336,7 +338,7 @@ impl StudioApp {
                     let query = self.authoring.create.dependency_search.trim().to_lowercase();
                     let mut visible_dependencies = 0;
                     egui::ScrollArea::vertical()
-                        .max_height(ui.available_height().min(240.0).max(0.0))
+                .max_height(ui.available_height().clamp(0.0, 240.0))
                         .show(ui, |ui| {
                             for content in &self.catalog.sources {
                                 let child_kind =
@@ -593,7 +595,7 @@ impl StudioApp {
                     ui.horizontal_wrapped(|ui| {
                         for (_, kind, title, description) in templates.iter().filter(|(family, ..)| *family == group) {
                             egui::Frame::group(&card_style).show(ui, |ui| {
-                                let card_width = ui.available_width().min(220.0).max(1.0);
+            let card_width = ui.available_width().clamp(1.0, 220.0);
                                 ui.set_min_width(card_width);
                                 ui.set_max_width(card_width);
                                 let selected = self.authoring.create.content_kind == *kind;

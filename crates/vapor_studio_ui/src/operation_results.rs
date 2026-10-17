@@ -26,12 +26,10 @@ impl StudioApp {
             }
             OperationResult::Discovery(
                 source_result,
-                catalog_result,
                 unregistered_result,
                 workspace_validation_error,
-            ) => self.apply_catalog_discovery(
+            ) => self.apply_workspace_discovery(
                 source_result,
-                catalog_result,
                 unregistered_result,
                 workspace_validation_error,
             ),
@@ -52,9 +50,7 @@ impl StudioApp {
                     self.status = error;
                 }
             }
-            OperationResult::WorkspaceFiles(Err(error)) => {
-                self.apply_workspace_files_error(error)
-            }
+            OperationResult::WorkspaceFiles(Err(error)) => self.apply_workspace_files_error(error),
             OperationResult::CompositionPreview(Err(error))
             | OperationResult::WorkspaceFileCreated(Err(error))
             | OperationResult::FileContents(Err(error))

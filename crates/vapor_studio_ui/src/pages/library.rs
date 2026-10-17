@@ -43,7 +43,11 @@ impl StudioApp {
             }
             self.draw_profile_selector_panel(ui);
             ui.separator();
-            section_header(ui, "Current game setup", "Launch this profile or prepare its game setup.");
+            section_header(
+                ui,
+                "Current game setup",
+                "Launch this profile or prepare its game setup.",
+            );
             {
                 let profile = &self.profile.items[profile_index];
                 installation_action = self.draw_profile_installation_panel(ui, profile);

@@ -6,7 +6,7 @@ impl StudioApp {
     pub(super) fn draw_profile_selector_panel(&mut self, ui: &mut eframe::egui::Ui) {
         let can_switch = !self.operation.running && !self.has_unsaved_context_switch_edits();
         let mut requested_profile = None;
-        let profile_list_height = ui.available_height().min(560.0).max(1.0);
+        let profile_list_height = ui.available_height().clamp(1.0, 560.0);
         egui::ScrollArea::vertical()
             .max_height(profile_list_height)
             .show(ui, |ui| {
@@ -63,7 +63,7 @@ impl StudioApp {
                 ui.weak("Name and launch configuration");
             });
             ui.horizontal_wrapped(|ui| {
-                let name_width = (ui.available_width() - 160.0).max(140.0).min(360.0);
+                let name_width = (ui.available_width() - 160.0).clamp(140.0, 360.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.profile.name_draft)
                         .desired_width(name_width),

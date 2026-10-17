@@ -44,8 +44,8 @@ mod workspace_ops;
 use crate::navigation::Section;
 use catalog::{
     CatalogFilter, CatalogState, catalog_content_selector, catalog_content_selector_matches,
-    content_selector, content_kind_title, display_content_kind, source_content_kind, source_content_selector,
-    source_content_selector_matches,
+    content_kind_title, content_selector, display_content_kind, source_content_kind,
+    source_content_selector, source_content_selector_matches,
 };
 use composition_lifecycle::ProfileCompositionState;
 use directory_picker::DirectoryPicker;
@@ -55,7 +55,9 @@ use profiles::ProfileState;
 use root_publishing::RootPublishingState;
 use source_authoring::AuthoringState;
 use std::path::PathBuf;
+use vapor_studio_client::{ServiceBootstrap, StudioClient, service_sibling_path};
 use vapor_studio_core::decode_profiles;
+use vapor_studio_protocol::StudioAction;
 use workshop::WorkshopState;
 use workspace_ops::WorkspaceState;
 
@@ -70,6 +72,8 @@ pub struct StudioApp {
     root_publishing: RootPublishingState,
     status: String,
     operation: OperationState,
+    service: Option<StudioClient>,
+    service_error: Option<String>,
     diagnostics: vapor_devtools::app::DevtoolsApp,
     directory_picker: Option<DirectoryPicker>,
     command_palette_open: bool,
@@ -172,6 +176,8 @@ impl StudioApp {
             profile_composition: ProfileCompositionState::default(),
             status: "Choose a workspace or discover content in this folder.".to_owned(),
             operation,
+            service: None,
+            service_error: None,
             diagnostics: vapor_devtools::connect(None),
             directory_picker: None,
             command_palette_open: false,
@@ -179,15 +185,30 @@ impl StudioApp {
             command_palette_focus_search: false,
             command_palette_selected_index: 0,
         };
+        let service_workspace = app.profile.items[app.profile.active_index]
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root.clone());
+        app.start_service(
+            service_workspace,
+            Some(app.profile.items[app.profile.active_index].id.clone()),
+        );
         app.refresh_registered_sources();
         if !play_mode
             && app.profile.items[app.profile.active_index].id == "default"
-            && app.profile.items[app.profile.active_index].root_package.is_none()
-            && app.profile.items[app.profile.active_index].workspace.is_none()
+            && app.profile.items[app.profile.active_index]
+                .root_package
+                .is_none()
+            && app.profile.items[app.profile.active_index]
+                .workspace
+                .is_none()
         {
             app.ensure_default_profile_root();
         }
         if play_mode {
+            app.submit_service_action(StudioAction::Catalog(
+                vapor_studio_protocol::CatalogAction::Refresh,
+            ));
             app.launch_default_profile();
         } else if let Some(workspace) = requested_workspace {
             app.open_workspace_path_to(workspace, Section::Home);
@@ -195,6 +216,43 @@ impl StudioApp {
             app.discover();
         }
         app
+    }
+
+    fn start_service(
+        &mut self,
+        workspace_root: Option<PathBuf>,
+        active_profile_id: Option<String>,
+    ) {
+        let executable = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(error) => {
+                self.service_error =
+                    Some(format!("Could not locate the Studio executable: {error}"));
+                self.catalog.catalog_discovery_error = self.service_error.clone();
+                return;
+            }
+        };
+        let service_path = service_sibling_path(&executable);
+        match StudioClient::spawn(
+            &service_path,
+            ServiceBootstrap {
+                application_executable: executable,
+                workspace_root,
+                active_profile_id,
+                fixture_mode: false,
+            },
+        ) {
+            Ok(client) => {
+                self.service = Some(client);
+                self.service_error = None;
+            }
+            Err(error) => {
+                let message = format!("Studio service is unavailable: {error}");
+                self.catalog.catalog_discovery_loaded = false;
+                self.catalog.catalog_discovery_error = Some(message.clone());
+                self.service_error = Some(message);
+            }
+        }
     }
 }
 

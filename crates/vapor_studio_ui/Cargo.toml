@@ -12,3 +12,5 @@ vapor_core = { path = "../../../Vapor/crates/vapor_core" }
 vapor_devtools = { path = "../../../Vapor/crates/vapor_devtools" }
 vapor_sdk_core = { path = "../../../Vapor/crates/vapor_sdk_core" }
 vapor_studio_core = { path = "../vapor_studio_core" }
+vapor_studio_client = { path = "../vapor_studio_client" }
+vapor_studio_protocol = { path = "../vapor_studio_protocol" }

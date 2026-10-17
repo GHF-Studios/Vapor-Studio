@@ -9,6 +9,7 @@ pub(super) enum PendingManifestDraftDiscard {
     RuntimeOutputs,
 }
 
+#[derive(Default)]
 pub(super) struct AuthoringState {
     pub(super) create: CreateDraft,
     pub(super) composition_discard_confirmation_open: bool,
@@ -92,37 +93,6 @@ impl Default for CreateDraft {
             workshop_description: String::new(),
             workshop_tags: String::new(),
             workshop_change_note: String::new(),
-        }
-    }
-}
-
-impl Default for AuthoringState {
-    fn default() -> Self {
-        Self {
-            create: CreateDraft::default(),
-            composition_discard_confirmation_open: false,
-            pending_composition_role_change: None,
-            composition_edit_selector: String::new(),
-            composition_source_search: String::new(),
-            composition_edit: None,
-            composition_original_links: None,
-            composition_link_candidate: String::new(),
-            composition_link_search: String::new(),
-            packagepack_engine_search: String::new(),
-            packagepack_game_search: String::new(),
-            workshop_metadata_edit: None,
-            manifest_metadata_dirty: false,
-            pending_manifest_discard: None,
-            runtime_outputs_edit: None,
-            runtime_binaries_text: String::new(),
-            runtime_libraries_text: String::new(),
-            workshop_metadata_app_id: String::new(),
-            workshop_metadata_published_file_id: String::new(),
-            workshop_metadata_visibility: String::new(),
-            workshop_metadata_title: String::new(),
-            workshop_metadata_description: String::new(),
-            workshop_metadata_tags: String::new(),
-            workshop_metadata_change_note: String::new(),
         }
     }
 }
@@ -572,7 +542,8 @@ impl StudioApp {
             return;
         };
         if composition.kind != vapor_core::ContentKind::Packagepack.as_str() {
-            self.status = "Only a playable game setup can be assigned to a play profile.".to_owned();
+            self.status =
+                "Only a playable game setup can be assigned to a play profile.".to_owned();
             return;
         }
         let root = ContentIdentity {

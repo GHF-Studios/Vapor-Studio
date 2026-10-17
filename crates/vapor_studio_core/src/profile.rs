@@ -49,7 +49,7 @@ pub struct ResolvedCompositionGraph {
 pub fn fingerprint_resolved_graph(graph: &ResolvedCompositionGraph) -> Option<String> {
     if graph.nodes.is_empty()
         || graph.nodes.iter().any(|node| {
-            node.fingerprint.is_none() || node.source.as_deref().map_or(true, str::is_empty)
+            node.fingerprint.is_none() || node.source.as_deref().is_none_or(str::is_empty)
         })
     {
         return None;

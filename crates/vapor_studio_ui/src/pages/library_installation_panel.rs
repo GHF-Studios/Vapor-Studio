@@ -28,9 +28,7 @@ fn identity_label(identity: &ContentIdentity) -> String {
     )
 }
 
-fn canonical_dependencies<'a>(
-    node: &'a ResolvedNodeIdentity,
-) -> Vec<(&'a str, &'a ContentIdentity)> {
+fn canonical_dependencies(node: &ResolvedNodeIdentity) -> Vec<(&str, &ContentIdentity)> {
     let mut dependencies = node
         .dependencies
         .iter()
@@ -144,9 +142,8 @@ impl StudioApp {
                 .filter(|preview| preview.selector == selector)
         });
         let root_plan_node = profile.root_package.as_ref().and_then(|root| {
-            selected_preview.and_then(|preview| {
-                preview.nodes.iter().find(|node| node.id == root.id)
-            })
+            selected_preview
+                .and_then(|preview| preview.nodes.iter().find(|node| node.id == root.id))
         });
         let plan_needs_install = selected_preview.is_some_and(|preview| {
             preview.nodes.iter().any(|node| {
@@ -191,7 +188,10 @@ impl StudioApp {
             } else if installed {
                 ("Launch", ProfileInstallationAction::Play)
             } else if root_is_workspace_source && has_source {
-                ("Build and launch project", ProfileInstallationAction::BuildAndPlay)
+                (
+                    "Build and launch project",
+                    ProfileInstallationAction::BuildAndPlay,
+                )
             } else {
                 ("Install game setup", ProfileInstallationAction::Install)
             };
@@ -266,8 +266,9 @@ impl StudioApp {
                     );
                 }
                 InstallationState::Unknown => {
-                    ui.weak("Not checked")
-                        .on_hover_text("Studio has not inspected this profile's installed content.");
+                    ui.weak("Not checked").on_hover_text(
+                        "Studio has not inspected this profile's installed content.",
+                    );
                 }
                 InstallationState::NotInstalled if root_installed && plan_needs_install => {
                     status_text(ui, "Game setup incomplete", StatusTone::Caution);
@@ -286,10 +287,7 @@ impl StudioApp {
                     ui.weak("Not installed");
                 }
                 InstallationState::Installed { artifacts, .. } => {
-                    ui.label(format!(
-                        "{} content items installed",
-                        artifacts.len()
-                    ));
+                    ui.label(format!("{} content items installed", artifacts.len()));
                     egui::CollapsingHeader::new("Installed file locations").show(ui, |ui| {
                         for artifact in artifacts {
                             ui.small(format!(
@@ -326,7 +324,8 @@ impl StudioApp {
                         egui::CollapsingHeader::new("Review changes")
                             .default_open(true)
                             .show(ui, |ui| {
-                                for difference in graph_difference_lines(saved_graph, actual_graph) {
+                                for difference in graph_difference_lines(saved_graph, actual_graph)
+                                {
                                     ui.small(difference);
                                 }
                             });

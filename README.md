@@ -65,3 +65,19 @@ Each project can also be unregistered from Vapor discovery through a
 confirmation step. This removes only its `[[workspace.projects]]` entry; the
 project files and Cargo workspace membership remain unchanged. The existing
 Find projects / Adopt flow can register it again later.
+
+## Developer service simulator
+
+The Studio workspace declares `vapor-studio-service` as a managed binary for
+promotion beside `vapor-gui` by a shared Vapor application-root build. The GUI
+and terminal simulator use the same versioned protocol and service state. To
+inspect workflow behavior without opening the GUI, run the promoted service:
+
+```text
+vapor-studio-service simulate
+vapor-studio-service simulate --scenario crates/vapor_studio_service/scenarios/fixture-profile-selection.json
+```
+
+The simulator starts a separate fixture-only service process. Its provider set
+contains no Steam or Workshop publisher, and the checked-in scenarios exercise
+only deterministic local state and rejection paths.

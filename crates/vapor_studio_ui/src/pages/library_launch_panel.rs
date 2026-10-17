@@ -25,7 +25,7 @@ impl StudioApp {
                 let mut remove_argument = None;
                 for index in 0..argument_count {
                     ui.horizontal_wrapped(|ui| {
-                        let input_width = (ui.available_width() - 100.0).max(120.0).min(360.0);
+                        let input_width = (ui.available_width() - 100.0).clamp(120.0, 360.0);
                         ui.label(format!("{}", index + 1));
                         ui.add_enabled(
                             can_edit,

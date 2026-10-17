@@ -114,8 +114,7 @@ impl StudioApp {
                     && content.is_unambiguous();
             }
             ui.horizontal_wrapped(|ui| {
-                let search_width =
-                    super::super::components::design::search_field_width(ui);
+                let search_width = super::super::components::design::search_field_width(ui);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.workshop.subscription_search_query)
                         .desired_width(search_width)

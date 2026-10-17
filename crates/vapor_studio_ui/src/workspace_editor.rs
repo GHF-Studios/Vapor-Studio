@@ -344,12 +344,12 @@ impl WorkspaceEditorState {
 
 impl StudioApp {
     pub(super) fn sync_saved_workspace_manifest(&mut self, manifest: &Path, source: &str) {
-        if let Ok(relative) = manifest.strip_prefix(Path::new(self.workspace.root.trim())) {
-            if let Some(document) = self.workspace.editor.documents.get_mut(relative) {
-                document.contents = source.to_owned();
-                document.original = source.to_owned();
-                document.refresh_inspection(relative);
-            }
+        if let Ok(relative) = manifest.strip_prefix(Path::new(self.workspace.root.trim()))
+            && let Some(document) = self.workspace.editor.documents.get_mut(relative)
+        {
+            document.contents = source.to_owned();
+            document.original = source.to_owned();
+            document.refresh_inspection(relative);
         }
     }
 

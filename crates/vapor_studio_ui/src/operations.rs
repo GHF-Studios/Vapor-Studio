@@ -219,7 +219,7 @@ impl StudioApp {
             status: OperationStatus::Running,
         });
         let operation_id = request.id;
-        let initial_phase = phase.clone();
+        let initial_phase = phase;
         let core_request = CoreOperationRequest {
             id: request.id,
             domain: "studio".to_owned(),

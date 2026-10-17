@@ -1,7 +1,6 @@
 use super::super::StudioApp;
 use super::super::components::design::{
-    LIST_ROW_HEIGHT, StatusTone, empty_state, search_field_width, status_text,
-    use_stacked_panels,
+    LIST_ROW_HEIGHT, StatusTone, empty_state, search_field_width, status_text, use_stacked_panels,
 };
 use eframe::egui;
 
@@ -459,18 +458,17 @@ impl StudioApp {
                             !subscribed,
                         ));
                     }
-                    if locally_available {
-                        if ui
+                    if locally_available
+                        && ui
                             .add_enabled(
                                 !self.operation.running,
                                 egui::Button::new("Refresh cached copy"),
                             )
                             .clicked()
-                        {
-                            action = Some(WorkshopSearchAction::RefreshCache(
-                                item.published_file_id.clone(),
-                            ));
-                        }
+                    {
+                        action = Some(WorkshopSearchAction::RefreshCache(
+                            item.published_file_id.clone(),
+                        ));
                     }
                     if let Some(url) = &item.preview_url {
                         ui.hyperlink_to("Open Workshop page", url);

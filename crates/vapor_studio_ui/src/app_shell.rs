@@ -371,8 +371,8 @@ impl StudioApp {
                     self.activate_navigation_section(Section::Library);
                 }
             }
-            if show_profile_create {
-                if ui
+            if show_profile_create
+                && ui
                     .add_enabled(
                         !self.operation.running && !self.has_unsaved_context_switch_edits(),
                         egui::Button::new("+ Play profile"),
@@ -381,7 +381,7 @@ impl StudioApp {
                         "Discard the Create draft or save/discard workspace edits before creating a profile.",
                     )
                     .clicked()
-                {
+            {
                     let mut number = self.profile.items.len() + 1;
                     loop {
                         let candidate = format!("Profile {number}");
@@ -397,7 +397,6 @@ impl StudioApp {
                         number += 1;
                     }
                     self.add_profile();
-                }
             }
             if self.operation.running {
                 ui.separator();
@@ -411,6 +410,7 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_operation();
+        self.poll_service();
         let command_palette_requested =
             ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::K));
         if command_palette_requested {

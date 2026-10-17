@@ -11,18 +11,10 @@ pub(super) enum RepreviewAfterCatalogRefresh {
     },
 }
 
+#[derive(Default)]
 pub(super) struct ProfileCompositionState {
     preview: Option<vapor_studio_core::CompositionPreview>,
     repreview_after_catalog_refresh: Option<RepreviewAfterCatalogRefresh>,
-}
-
-impl Default for ProfileCompositionState {
-    fn default() -> Self {
-        Self {
-            preview: None,
-            repreview_after_catalog_refresh: None,
-        }
-    }
 }
 
 impl ProfileCompositionState {
@@ -494,10 +486,7 @@ impl StudioApp {
                 &arguments,
             ))
         });
-        self.status = concat!(
-            "Preparing game setup. Steam must be open and signed in if Workshop items need downloading…",
-        )
-        .to_owned();
+        self.status = "Preparing game setup. Steam must be open and signed in if Workshop items need downloading…".to_owned();
     }
 
     pub(super) fn ensure_default_profile_root(&mut self) -> bool {

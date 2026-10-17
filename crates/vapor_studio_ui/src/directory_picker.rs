@@ -124,10 +124,7 @@ impl DirectoryPicker {
         let mut window_open = self.open;
         let mut result = None;
         let viewport = context.content_rect().size();
-        let picker_size = egui::vec2(
-            (viewport.x - 24.0).max(1.0),
-            (viewport.y - 24.0).max(1.0),
-        );
+        let picker_size = egui::vec2((viewport.x - 24.0).max(1.0), (viewport.y - 24.0).max(1.0));
         let folders_height = (viewport.y - 300.0).clamp(40.0, 300.0);
         egui::Window::new(title)
             .id(egui::Id::new("studio-directory-picker"))
@@ -150,14 +147,13 @@ impl DirectoryPicker {
                     if ui
                         .add_enabled(up.is_some(), egui::Button::new("↑ Up"))
                         .clicked()
+                        && let Some(up) = up
                     {
-                        if let Some(up) = up {
-                            self.navigate(&up);
-                        }
+                        self.navigate(&up);
                     }
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.path_draft)
-                            .desired_width(ui.available_width().min(480.0).max(1.0))
+                            .desired_width(ui.available_width().clamp(1.0, 480.0))
                             .hint_text("Folder path"),
                     );
                     let go = ui.button("Go").clicked()
@@ -181,7 +177,7 @@ impl DirectoryPicker {
                     }
                 }
                 ui.separator();
-                ui.label(egui::RichText::new(&self.path.display().to_string()).strong());
+                ui.label(egui::RichText::new(self.path.display().to_string()).strong());
                 ui.add(
                     egui::TextEdit::singleline(&mut self.folder_filter)
                         .hint_text("Filter folders in this location"),

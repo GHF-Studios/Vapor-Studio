@@ -19,7 +19,14 @@ pub(super) fn discover_workspace_files(root: &Path) -> Result<Vec<PathBuf>, Stri
             let name = name.to_string_lossy();
             if matches!(
                 name.as_ref(),
-                ".git" | ".hg" | ".svn" | ".cache" | "target" | "node_modules" | "vendor" | "output"
+                ".git"
+                    | ".hg"
+                    | ".svn"
+                    | ".cache"
+                    | "target"
+                    | "node_modules"
+                    | "vendor"
+                    | "output"
             ) {
                 continue;
             }

@@ -66,7 +66,7 @@ impl StudioApp {
             return;
         }
         if let Some(identity) = newly_selected {
-            self.catalog.selected = Some(identity);
+            self.select_catalog_identity(identity);
             self.workshop.preview = None;
         }
     }

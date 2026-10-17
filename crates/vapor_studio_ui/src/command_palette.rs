@@ -146,10 +146,7 @@ impl StudioApp {
         let mut request_focus = self.command_palette_focus_search;
         self.command_palette_focus_search = false;
         let viewport = ui.ctx().content_rect().size();
-        let popup_size = egui::vec2(
-            (viewport.x - 24.0).max(1.0),
-            (viewport.y - 24.0).max(1.0),
-        );
+        let popup_size = egui::vec2((viewport.x - 24.0).max(1.0), (viewport.y - 24.0).max(1.0));
         let results_height = (viewport.y - 250.0).clamp(40.0, 340.0);
 
         egui::Window::new("Command palette")
@@ -452,7 +449,7 @@ impl StudioApp {
                     .find(|content| super::catalog_content_selector_matches(content, &selector))
                     .map(|content| content.id.clone())
                     .unwrap_or_else(|| selector.clone());
-                self.catalog.selected = Some(selector);
+                self.select_catalog_identity(selector);
                 self.catalog.source_filter = crate::navigation::CatalogSourceFilter::All;
                 self.catalog.kind_filter = None;
                 self.open_discover_tab(DiscoverTab::Local);

@@ -121,12 +121,8 @@ pub fn source_dependency_relationship(
     parent: vapor_core::ContentKind,
     child: vapor_core::ContentKind,
 ) -> Option<&'static str> {
-    let Some(parent) = shell_content_kind(parent) else {
-        return None;
-    };
-    let Some(child) = shell_content_kind(child) else {
-        return None;
-    };
+    let parent = shell_content_kind(parent)?;
+    let child = shell_content_kind(child)?;
     content::source_dependency_relationship(parent, child)
 }
 

@@ -74,7 +74,12 @@ impl StudioApp {
             ));
             egui::CollapsingHeader::new("Project file details")
                 .default_open(false)
-                .show(ui, |ui| ui.small(format!("Definition file: {}", composition.manifest.display())));
+                .show(ui, |ui| {
+                    ui.small(format!(
+                        "Definition file: {}",
+                        composition.manifest.display()
+                    ))
+                });
             if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
                 ui.add_enabled_ui(!operation_running && !composition_role_change_pending, |ui| {
                     ui.group(|ui| {
@@ -82,25 +87,33 @@ impl StudioApp {
                         ui.label("Choose one game engine and one game for this setup.");
                         draw_packagepack_role_slot(
                             ui,
-                            &mut composition.links,
-                            &source_contents,
-                            "engine-choice",
-                            "Game engine · required",
-                            "Choose an Engine",
-                            false,
-                            &mut self.authoring.packagepack_engine_search,
-                            &mut self.authoring.pending_composition_role_change,
+                            PackagepackRoleSlotSpec {
+                                group: "engine-choice",
+                                label: "Game engine · required",
+                                empty_label: "Choose an Engine",
+                                optional: false,
+                            },
+                            PackagepackRoleSlotContext {
+                                links: &mut composition.links,
+                                sources: source_contents,
+                                search: &mut self.authoring.packagepack_engine_search,
+                                pending_change: &mut self.authoring.pending_composition_role_change,
+                            },
                         );
                         draw_packagepack_role_slot(
                             ui,
-                            &mut composition.links,
-                            &source_contents,
-                            "game-choice",
-                            "Game · required",
-                            "Choose a Game",
-                            false,
-                            &mut self.authoring.packagepack_game_search,
-                            &mut self.authoring.pending_composition_role_change,
+                            PackagepackRoleSlotSpec {
+                                group: "game-choice",
+                                label: "Game · required",
+                                empty_label: "Choose a Game",
+                                optional: false,
+                            },
+                            PackagepackRoleSlotContext {
+                                links: &mut composition.links,
+                                sources: source_contents,
+                                search: &mut self.authoring.packagepack_game_search,
+                                pending_change: &mut self.authoring.pending_composition_role_change,
+                            },
                         );
                         ui.small("Save checks that both required roles are available before updating this setup.");
                     });
@@ -176,10 +189,10 @@ impl StudioApp {
             ui.separator();
             ui.label("Add other content from these project folders");
             ui.horizontal_wrapped(|ui| {
-            let search_width = super::super::components::design::search_field_width(ui);
+                let search_width = super::super::components::design::search_field_width(ui);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.authoring.composition_link_search)
-                    .desired_width(search_width)
+                        .desired_width(search_width)
                         .hint_text("Search by name, role, or version"),
                 );
                 if !self.authoring.composition_link_search.is_empty()
@@ -258,41 +271,40 @@ impl StudioApp {
                         egui::Button::new("Add content"),
                     )
                     .clicked()
-                {
-                    if let Some(content) = source_contents.iter().find(|content| {
+                    && let Some(content) = source_contents.iter().find(|content| {
                         is_additional_composition_dependency(content, composition)
                             && super::super::source_content_selector_matches(
                                 content,
                                 &self.authoring.composition_link_candidate,
                             )
-                    }) {
-                        let id = content.id.clone();
-                        let relationship = super::super::source_content_kind(&composition.kind)
-                            .and_then(|parent| {
-                                super::super::source_content_kind(&content.kind).and_then(|child| {
-                                    vapor_studio_core::source_dependency_relationship(parent, child)
-                                })
+                    })
+                {
+                    let id = content.id.clone();
+                    let relationship = super::super::source_content_kind(&composition.kind)
+                        .and_then(|parent| {
+                            super::super::source_content_kind(&content.kind).and_then(|child| {
+                                vapor_studio_core::source_dependency_relationship(parent, child)
                             })
-                            .unwrap_or("dependency");
-                        if composition
-                            .links
-                            .iter()
-                            .any(|link| link.id == id && link.relationship == relationship)
-                        {
-                            self.status = format!("{id} is already included in this composition.");
-                        } else {
-                            composition.links.push(SourceCompositionLink {
-                                id,
-                                relationship: relationship.to_owned(),
-                                optional: false,
-                                version: content
-                                    .version
-                                    .as_ref()
-                                    .map(|version| format!("={version}")),
-                                workshop_id: None,
-                                reason: None,
-                            });
-                        }
+                        })
+                        .unwrap_or("dependency");
+                    if composition
+                        .links
+                        .iter()
+                        .any(|link| link.id == id && link.relationship == relationship)
+                    {
+                        self.status = format!("{id} is already included in this composition.");
+                    } else {
+                        composition.links.push(SourceCompositionLink {
+                            id,
+                            relationship: relationship.to_owned(),
+                            optional: false,
+                            version: content
+                                .version
+                                .as_ref()
+                                .map(|version| format!("={version}")),
+                            workshop_id: None,
+                            reason: None,
+                        });
                     }
                 }
             });
@@ -490,14 +502,12 @@ impl StudioApp {
                 "Keep current choice",
                 !self.operation.running && proposal_available,
             ) {
-                if confirm {
-                    if let Some(composition) = self.authoring.composition_edit.as_mut() {
-                        composition.links.retain(|link| {
-                            packagepack_relationship_group(&link.relationship) != Some(change.group)
-                        });
-                        if let Some(proposed) = change.proposed {
-                            composition.links.push(proposed);
-                        }
+                if confirm && let Some(composition) = self.authoring.composition_edit.as_mut() {
+                    composition.links.retain(|link| {
+                        packagepack_relationship_group(&link.relationship) != Some(change.group)
+                    });
+                    if let Some(proposed) = change.proposed {
+                        composition.links.push(proposed);
                     }
                 }
                 self.authoring.pending_composition_role_change = None;
@@ -509,15 +519,18 @@ impl StudioApp {
         if discard_dependencies {
             self.authoring.composition_discard_confirmation_open = true;
         }
-        if self.authoring.composition_discard_confirmation_open {
-            if let Some(discard) = discard_confirmation(
+        if self.authoring.composition_discard_confirmation_open
+            && let Some(discard) = discard_confirmation(
                 ui,
                 "Discard content changes?",
                 "The current content choices will return to the values saved in this project.",
-            ) {
-                if discard {
+            )
+        {
+            match discard {
+                true => {
                     self.discard_source_composition_changes();
-                } else {
+                }
+                false => {
                     self.authoring.composition_discard_confirmation_open = false;
                 }
             }
@@ -533,7 +546,7 @@ impl StudioApp {
             self.preview_selected_composition();
         }
         if let Some(selector) = stage_source_selector {
-            self.catalog.selected = Some(selector.clone());
+            self.select_catalog_identity(selector.clone());
             self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
             self.stage_workshop_content(selector);
         }
@@ -682,7 +695,10 @@ impl StudioApp {
                                     if ui
                                         .selectable_label(
                                             self.authoring.composition_edit_selector == selector,
-                                            format!("{selector} · {}", super::super::display_content_kind(&content.kind)),
+                                            format!(
+                                                "{selector} · {}",
+                                                super::super::display_content_kind(&content.kind)
+                                            ),
                                         )
                                         .clicked()
                                     {
@@ -774,17 +790,37 @@ fn packagepack_relationship_group(relationship: &str) -> Option<&'static str> {
     }
 }
 
+struct PackagepackRoleSlotSpec {
+    group: &'static str,
+    label: &'static str,
+    empty_label: &'static str,
+    optional: bool,
+}
+
+struct PackagepackRoleSlotContext<'a> {
+    links: &'a mut Vec<SourceCompositionLink>,
+    sources: &'a [vapor_studio_core::SourceContent],
+    search: &'a mut String,
+    pending_change: &'a mut Option<super::super::source_authoring::PendingCompositionRoleChange>,
+}
+
 fn draw_packagepack_role_slot(
     ui: &mut egui::Ui,
-    links: &mut Vec<SourceCompositionLink>,
-    sources: &[vapor_studio_core::SourceContent],
-    group: &'static str,
-    label: &str,
-    empty_label: &str,
-    optional: bool,
-    search: &mut String,
-    pending_change: &mut Option<super::super::source_authoring::PendingCompositionRoleChange>,
+    spec: PackagepackRoleSlotSpec,
+    context: PackagepackRoleSlotContext<'_>,
 ) {
+    let PackagepackRoleSlotSpec {
+        group,
+        label,
+        empty_label,
+        optional,
+    } = spec;
+    let PackagepackRoleSlotContext {
+        links,
+        sources,
+        search,
+        pending_change,
+    } = context;
     let packagepack = vapor_core::ContentKind::Packagepack;
     let choices = sources
         .iter()

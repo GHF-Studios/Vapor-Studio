@@ -60,7 +60,10 @@ impl StudioApp {
                 self.search_workshop();
             }
             if ui
-                .add_enabled(!self.operation.running, egui::Button::new("Browse content on this device"))
+                .add_enabled(
+                    !self.operation.running,
+                    egui::Button::new("Browse content on this device"),
+                )
                 .clicked()
             {
                 self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
@@ -214,7 +217,7 @@ impl StudioApp {
                     self.workspace.unregistered_projects.candidates.len(),
                 )
             } else {
-                    "Project list has not been refreshed yet".to_owned()
+                "Project list has not been refreshed yet".to_owned()
             });
             let mut project_issues = Vec::new();
             if let Some(error) = self.workspace.workspace_validation_error.as_deref() {

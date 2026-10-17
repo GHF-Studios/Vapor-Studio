@@ -1,13 +1,11 @@
 use super::super::StudioApp;
-use super::super::components::design::{
-    StatusTone, page_header, status_text, use_stacked_form,
-};
+use super::super::components::design::{StatusTone, page_header, status_text, use_stacked_form};
 use super::super::root_publishing::{PublishTab, root_publish_confirmation};
 use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
 enum WorkshopPublishAction {
-    Publish(String, vapor_studio_core::WorkshopPackagePreview),
+    Publish(String, Box<vapor_studio_core::WorkshopPackagePreview>),
     DiscardReview,
 }
 
@@ -210,7 +208,10 @@ impl StudioApp {
                     })
                     .clicked()
                 {
-                    action = Some(WorkshopPublishAction::Publish(identity.clone(), preview.clone()));
+                    action = Some(WorkshopPublishAction::Publish(
+                        identity.clone(),
+                        Box::new(preview.clone()),
+                    ));
                 }
                 if ui
                     .add_enabled(!self.operation.running, egui::Button::new("Discard review"))
@@ -222,7 +223,7 @@ impl StudioApp {
         });
             match action {
                 Some(WorkshopPublishAction::Publish(identity, preview)) => {
-                    self.publish_reviewed_workshop_content(identity, preview);
+                    self.publish_reviewed_workshop_content(identity, *preview);
                 }
                 Some(WorkshopPublishAction::DiscardReview) => self.invalidate_workshop_review(),
                 None => {}

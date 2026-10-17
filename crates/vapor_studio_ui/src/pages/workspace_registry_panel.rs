@@ -148,9 +148,7 @@ impl StudioApp {
         {
             ui.weak("The last successful list was empty; refresh to check again.");
         } else if self.workspace.registered_sources.is_empty() {
-            ui.weak(
-                "No known project folders loaded yet. Refresh to check this installation.",
-            );
+            ui.weak("No known project folders loaded yet. Refresh to check this installation.");
         }
         for source in &self.workspace.registered_sources {
             let active = self.workspace.active_source.as_ref() == Some(source);

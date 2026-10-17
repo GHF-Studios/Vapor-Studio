@@ -1,18 +1,24 @@
 use super::StudioApp;
 use super::operation_protocol::OperationResult;
 use crate::navigation::CatalogSourceFilter;
+use std::path::{Path, PathBuf};
 use vapor_core::ContentKind;
 use vapor_studio_core::ContentIdentity;
+use vapor_studio_protocol::{
+    CatalogEntry as ServiceCatalogEntry, CatalogLocationKind as ServiceLocationKind, ProtocolFrame,
+    StudioAction, StudioEvent, StudioResponseKind,
+};
 
-pub(super) fn discover_workspace_and_catalog(
-    executable: &std::path::Path,
-    workspace_root: Option<&std::path::Path>,
-) -> (
-    Result<Vec<vapor_studio_core::SourceContent>, String>,
-    Result<Vec<vapor_studio_core::CatalogContent>, String>,
-    Result<vapor_studio_core::UnregisteredProjectScan, String>,
-    Option<String>,
-) {
+pub(super) struct WorkspaceDiscovery {
+    pub(super) source: Result<Vec<vapor_studio_core::SourceContent>, String>,
+    pub(super) unregistered: Result<vapor_studio_core::UnregisteredProjectScan, String>,
+    pub(super) validation_error: Option<String>,
+}
+
+pub(super) fn discover_workspace_data(
+    executable: &Path,
+    workspace_root: Option<&Path>,
+) -> WorkspaceDiscovery {
     let workspace_validation_error = workspace_root.and_then(|root| {
         vapor_core::VaporWorkspace::load(root)
             .err()
@@ -21,11 +27,14 @@ pub(super) fn discover_workspace_and_catalog(
     let source = workspace_root
         .map(|root| vapor_studio_core::discover_source_content(executable, root))
         .unwrap_or_else(|| Ok(Vec::new()));
-    let catalog = vapor_studio_core::discover_content_catalog(executable, workspace_root);
     let unregistered = workspace_root
         .map(|root| vapor_studio_core::scan_unregistered_content_projects(executable, root))
         .unwrap_or_else(|| Ok(vapor_studio_core::UnregisteredProjectScan::default()));
-    (source, catalog, unregistered, workspace_validation_error)
+    WorkspaceDiscovery {
+        source,
+        unregistered,
+        validation_error: workspace_validation_error,
+    }
 }
 
 pub(super) struct CatalogState {
@@ -88,8 +97,117 @@ impl CatalogState {
 }
 
 impl StudioApp {
+    pub(super) fn select_catalog_identity(&mut self, selector: String) {
+        let (content_id, version) = selector
+            .split_once('@')
+            .map(|(id, version)| (id.to_owned(), Some(version.to_owned())))
+            .unwrap_or_else(|| (selector.clone(), None));
+        self.catalog.selected = Some(selector);
+        self.submit_service_action(StudioAction::Catalog(
+            vapor_studio_protocol::CatalogAction::Inspect {
+                content_id,
+                version,
+            },
+        ));
+    }
+
+    pub(super) fn submit_service_action(&mut self, action: StudioAction) {
+        let Some(service) = self.service.as_mut() else {
+            if self.service_error.is_none() {
+                self.service_error = Some("Studio service is not connected.".to_owned());
+            }
+            self.catalog.catalog_discovery_loaded = false;
+            self.catalog.catalog_discovery_error = self.service_error.clone();
+            return;
+        };
+        if let Err(error) = service.send(action, None) {
+            let message = format!("Could not send the action to the Studio service: {error}");
+            self.service_error = Some(message.clone());
+            self.catalog.catalog_discovery_error = Some(message);
+        }
+    }
+
+    pub(super) fn poll_service(&mut self) {
+        let mut frames = Vec::new();
+        let mut disconnected = None;
+        if let Some(service) = self.service.as_mut() {
+            loop {
+                match service.try_recv() {
+                    Ok(Some(frame)) => frames.push(frame),
+                    Ok(None) => break,
+                    Err(error) => {
+                        disconnected = Some(error);
+                        break;
+                    }
+                }
+            }
+        } else {
+            return;
+        }
+        for frame in frames {
+            match frame {
+                ProtocolFrame::Response(response) => {
+                    self.apply_service_catalog_snapshot(&response.snapshot);
+                    match response.error {
+                        Some(error) => {
+                            self.catalog.catalog_discovery_error = Some(error.message.clone());
+                            self.service_error = Some(error.message);
+                        }
+                        None if response.kind == StudioResponseKind::Applied => {
+                            self.catalog.catalog_discovery_error = None;
+                            self.service_error = None;
+                        }
+                        None => {}
+                    }
+                }
+                ProtocolFrame::Event(StudioEvent::Snapshot(snapshot)) => {
+                    self.apply_service_catalog_snapshot(&snapshot);
+                }
+                ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
+                    self.catalog.catalog_discovery_error = Some(error.message.clone());
+                    if error.code == vapor_studio_protocol::StudioErrorCode::ProviderFailure {
+                        self.catalog.catalog_discovery_loaded = false;
+                    }
+                    self.service_error = Some(error.message);
+                }
+                _ => {}
+            }
+        }
+        if let Some(error) = disconnected {
+            let message = format!("Studio service disconnected: {error}");
+            self.catalog.catalog_discovery_error = Some(message.clone());
+            self.service_error = Some(message);
+            self.service = None;
+        }
+    }
+
+    fn apply_service_catalog_snapshot(&mut self, snapshot: &vapor_studio_protocol::StudioSnapshot) {
+        self.catalog.items = snapshot.catalog.iter().map(service_catalog_entry).collect();
+        self.catalog.catalog_discovery_loaded = true;
+        if let Some(selected_id) = snapshot.selected_content_id.as_deref() {
+            self.catalog.selected = self
+                .catalog
+                .items
+                .iter()
+                .find(|entry| catalog_content_selector_matches(entry, selected_id))
+                .map(catalog_content_selector);
+        }
+        if self.catalog.selected.as_ref().is_some_and(|identity| {
+            !self
+                .catalog
+                .items
+                .iter()
+                .any(|entry| catalog_content_selector_matches(entry, identity))
+        }) {
+            self.catalog.selected = None;
+        }
+    }
+
     pub(super) fn refresh_content_catalog(&mut self) {
         self.profile_composition.invalidate_preview();
+        self.submit_service_action(StudioAction::Catalog(
+            vapor_studio_protocol::CatalogAction::Refresh,
+        ));
         let root = self
             .profile
             .items
@@ -99,29 +217,26 @@ impl StudioApp {
         let executable = match std::env::current_exe() {
             Ok(value) => value,
             Err(error) => {
-                self.status = format!("Content action succeeded; catalog refresh failed: {error}");
+                self.status = format!("Catalog refresh requested; workspace scan failed: {error}");
                 return;
             }
         };
         self.spawn(
-            vapor_studio_core::OperationKind::Discover,
+            vapor_studio_core::OperationKind::DiscoverContentProjects,
             move |_context| {
-                let (source, catalog, unregistered, workspace_validation_error) =
-                    discover_workspace_and_catalog(&executable, root.as_deref());
+                let discovery = discover_workspace_data(&executable, root.as_deref());
                 OperationResult::Discovery(
-                    source,
-                    catalog,
-                    unregistered,
-                    workspace_validation_error,
+                    discovery.source,
+                    discovery.unregistered,
+                    discovery.validation_error,
                 )
             },
         );
     }
 
-    pub(super) fn apply_catalog_discovery(
+    pub(super) fn apply_workspace_discovery(
         &mut self,
         source_result: Result<Vec<vapor_studio_core::SourceContent>, String>,
-        catalog_result: Result<Vec<vapor_studio_core::CatalogContent>, String>,
         unregistered_result: Result<vapor_studio_core::UnregisteredProjectScan, String>,
         workspace_validation_error: Option<String>,
     ) {
@@ -134,14 +249,6 @@ impl StudioApp {
             }
             Err(error) => self.catalog.source_discovery_error = Some(error),
         }
-        match catalog_result {
-            Ok(catalog) => {
-                self.catalog.items = catalog;
-                self.catalog.catalog_discovery_loaded = true;
-                self.catalog.catalog_discovery_error = None;
-            }
-            Err(error) => self.catalog.catalog_discovery_error = Some(error),
-        }
         match unregistered_result {
             Ok(scan) => {
                 self.workspace.unregistered_scan_completed = true;
@@ -151,29 +258,17 @@ impl StudioApp {
             Err(error) => self.workspace.unregistered_scan_error = Some(error),
         }
         let source_count = self.catalog.sources.len();
-        let catalog_count = self.catalog.items.len();
-        self.status = match (
-            self.catalog.source_discovery_error.as_deref(),
-            self.catalog.catalog_discovery_error.as_deref(),
-        ) {
-            (None, None) if self.profile.items[self.profile.active_index].workspace.is_some() => {
-                format!("Discovered {source_count} workspace projects and {catalog_count} local content identities.")
+        self.status = match self.catalog.source_discovery_error.as_deref() {
+            None if self.profile.items[self.profile.active_index].workspace.is_some() => {
+                format!("Discovered {source_count} workspace projects; the local catalog is provided by the Studio service.")
             }
-            (None, None) => {
-                format!("Discovered {catalog_count} cached and installed content identities.")
-            }
-            (Some(source_error), None) => format!(
-                "Local catalog refreshed with {catalog_count} items, but workspace sources could not refresh: {source_error}"
-            ),
-            (None, Some(catalog_error)) => format!(
-                "Workspace sources refreshed with {source_count} projects, but the local catalog could not refresh: {catalog_error}"
-            ),
-            (Some(source_error), Some(catalog_error)) => format!(
-                "Workspace sources and local catalog refresh failed: {source_error}; {catalog_error}"
-            ),
+            None => "Workspace source discovery is ready; the local catalog is provided by the Studio service.".to_owned(),
+            Some(error) => format!("Workspace source discovery failed: {error}"),
         };
         if let Some(error) = self.workspace.unregistered_scan_error.as_deref() {
-            self.status.push_str(&format!(" Workspace project scan could not complete: {error}"));
+            self.status.push_str(&format!(
+                " Workspace project scan could not complete: {error}"
+            ));
         }
         if self.workspace.unregistered_scan_completed {
             let candidates = self.workspace.unregistered_projects.candidates.len();
@@ -189,8 +284,7 @@ impl StudioApp {
                 " Workspace validation needs repair; save fixes and refresh workspace content before running workspace operations. {error}"
             ));
         }
-        if self.catalog.local_catalog_current() && self.catalog.source_snapshot_current()
-        {
+        if self.catalog.local_catalog_current() && self.catalog.source_snapshot_current() {
             match self.profile_composition.take_repreview_request() {
                 Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::ActiveProfile) => {
                     self.preview_selected_composition();
@@ -391,5 +485,75 @@ impl CatalogFilter {
                 .to_string_lossy()
                 .to_lowercase()
                 .contains(&self.query)
+    }
+}
+
+fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_studio_core::CatalogContent {
+    vapor_studio_core::CatalogContent {
+        id: entry.id.clone(),
+        version: entry.version.clone(),
+        kind: entry.kind.clone(),
+        published_file_id: entry.published_file_id.clone(),
+        dependencies: entry.dependencies.clone(),
+        conflicts: entry
+            .conflicts
+            .iter()
+            .map(|conflict| vapor_studio_core::CatalogConflict {
+                field: conflict.field.clone(),
+                first_value: conflict.first_value.clone(),
+                first_location: PathBuf::from(&conflict.first_location),
+                conflicting_value: conflict.conflicting_value.clone(),
+                conflicting_location: PathBuf::from(&conflict.conflicting_location),
+            })
+            .collect(),
+        locations: entry
+            .locations
+            .iter()
+            .map(|location| vapor_studio_core::CatalogLocation {
+                kind: match location.kind {
+                    ServiceLocationKind::Workspace => {
+                        vapor_studio_core::CatalogLocationKind::Workspace
+                    }
+                    ServiceLocationKind::Cache => vapor_studio_core::CatalogLocationKind::Cache,
+                    ServiceLocationKind::Installed => {
+                        vapor_studio_core::CatalogLocationKind::Installed
+                    }
+                },
+                root: PathBuf::from(&location.root),
+                enabled: location.enabled,
+                fingerprint: location.fingerprint.clone(),
+                install_source: location.install_source.clone(),
+            })
+            .collect(),
+    }
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::content_selector_matches;
+
+    #[test]
+    fn service_selection_preserves_exact_content_version() {
+        assert!(content_selector_matches(
+            "moon",
+            Some("1.2.0"),
+            "moon@1.2.0"
+        ));
+        assert!(!content_selector_matches(
+            "moon",
+            Some("1.2.0"),
+            "moon@1.3.0"
+        ));
+        assert!(!content_selector_matches(
+            "moon",
+            Some("1.2.0"),
+            "moon-extra@1.2.0"
+        ));
+    }
+
+    #[test]
+    fn unversioned_content_matches_only_its_exact_identity() {
+        assert!(content_selector_matches("moon", None, "moon"));
+        assert!(!content_selector_matches("moon", None, "moon@1.2.0"));
     }
 }

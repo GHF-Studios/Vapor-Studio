@@ -4325,6 +4325,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vapor_studio_client"
+version = "0.5.0"
+dependencies = [
+ "serde_json",
+ "vapor_studio_protocol",
+]
+
+[[package]]
 name = "vapor_studio_core"
 version = "0.5.0"
 dependencies = [
@@ -4333,6 +4341,25 @@ dependencies = [
  "vapor_core",
  "vapor_shell",
  "vapor_steam",
+]
+
+[[package]]
+name = "vapor_studio_protocol"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "vapor_studio_service"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vapor_studio_client",
+ "vapor_studio_core",
+ "vapor_studio_protocol",
 ]
 
 [[package]]
@@ -4346,7 +4373,9 @@ dependencies = [
  "vapor_core",
  "vapor_devtools",
  "vapor_sdk_core",
+ "vapor_studio_client",
  "vapor_studio_core",
+ "vapor_studio_protocol",
 ]
 
 [[package]]

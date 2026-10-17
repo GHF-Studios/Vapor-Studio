@@ -58,9 +58,7 @@ impl StudioApp {
         if let Some(error) = self.workspace.editor.files_refresh_error.as_deref() {
             status_text(ui, error, StatusTone::Caution);
         }
-        if !self.workspace.editor.files_loaded
-            && self.workspace.editor.draft_recovery.is_some()
-        {
+        if !self.workspace.editor.files_loaded && self.workspace.editor.draft_recovery.is_some() {
             status_text(
                 ui,
                 "Editor drafts were saved from this workspace. Refresh the file list to restore tabs and unsaved edits.",
@@ -165,11 +163,9 @@ impl StudioApp {
         }
         if let Some(confirm) = reload_confirmation {
             let path = self.workspace.editor.pending_reload_confirmation.take();
-            if confirm {
-                if let Some(path) = path {
-                    self.workspace.editor.selected_file = Some(path);
-                    self.reload_workspace_file();
-                }
+            if confirm && let Some(path) = path {
+                self.workspace.editor.selected_file = Some(path);
+                self.reload_workspace_file();
             }
         }
 
@@ -233,62 +229,66 @@ impl StudioApp {
                 .default_size(270.0)
                 .size_range(190.0..=440.0)
                 .show(ui, |ui| {
-                ui.heading("Project");
-                let filter_response = ui.add(
-                    egui::TextEdit::singleline(&mut self.workspace.editor.file_filter)
-                        .hint_text("Find file by name or path · Ctrl/Cmd+P"),
-                );
-                if quick_open_requested {
-                    filter_response.request_focus();
-                }
-                if !self.workspace.editor.file_filter.trim().is_empty()
-                    && ui.small_button("Clear").clicked()
-                {
-                    self.workspace.editor.file_filter.clear();
-                }
-                let filter = self.workspace.editor.file_filter.trim().to_lowercase();
-                let filtered_count = self.workspace.editor.matching_file_count(&filter);
-                ui.small(format!(
-                    "{} of {} files",
-                    filtered_count,
-                    self.workspace.editor.files.len()
-                ));
-                let enter_opens_match = filter_response.lost_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                    && filtered_count == 1;
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if filtered_count == 0 {
-                        ui.weak(if filter.is_empty() {
-                            "No visible files in this workspace."
-                        } else {
-                            "No files match this path."
-                        });
-                    } else {
-                        draw_workspace_tree(
-                            ui,
-                            &self.workspace.editor.file_tree,
-                            &self.workspace.editor.files,
-                            self.workspace.editor.file_search_keys(),
-                            &filter,
-                            self.workspace.editor.selected_file.as_ref(),
-                            !self.operation.running && !self.authoring.manifest_metadata_dirty,
-                            &PathBuf::new(),
-                            0,
-                            &mut open_file,
-                        );
+                    ui.heading("Project");
+                    let filter_response = ui.add(
+                        egui::TextEdit::singleline(&mut self.workspace.editor.file_filter)
+                            .hint_text("Find file by name or path · Ctrl/Cmd+P"),
+                    );
+                    if quick_open_requested {
+                        filter_response.request_focus();
                     }
-                });
-                if enter_opens_match {
-                    open_file = self
-                        .workspace
-                        .editor
-                        .files
-                        .iter()
-                        .zip(self.workspace.editor.file_search_keys())
-                        .find_map(|(path, key)| {
-                            (filter.is_empty() || key.contains(&filter)).then(|| path.clone())
-                        });
-                }
+                    if !self.workspace.editor.file_filter.trim().is_empty()
+                        && ui.small_button("Clear").clicked()
+                    {
+                        self.workspace.editor.file_filter.clear();
+                    }
+                    let filter = self.workspace.editor.file_filter.trim().to_lowercase();
+                    let filtered_count = self.workspace.editor.matching_file_count(&filter);
+                    ui.small(format!(
+                        "{} of {} files",
+                        filtered_count,
+                        self.workspace.editor.files.len()
+                    ));
+                    let enter_opens_match = filter_response.lost_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                        && filtered_count == 1;
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        if filtered_count == 0 {
+                            ui.weak(if filter.is_empty() {
+                                "No visible files in this workspace."
+                            } else {
+                                "No files match this path."
+                            });
+                        } else {
+                            let mut tree_context = WorkspaceTreeDrawContext {
+                                files: &self.workspace.editor.files,
+                                search_keys: self.workspace.editor.file_search_keys(),
+                                filter: &filter,
+                                selected: self.workspace.editor.selected_file.as_ref(),
+                                enabled: !self.operation.running
+                                    && !self.authoring.manifest_metadata_dirty,
+                                open_file: &mut open_file,
+                            };
+                            draw_workspace_tree(
+                                ui,
+                                &self.workspace.editor.file_tree,
+                                &mut tree_context,
+                                &PathBuf::new(),
+                                0,
+                            );
+                        }
+                    });
+                    if enter_opens_match {
+                        open_file = self
+                            .workspace
+                            .editor
+                            .files
+                            .iter()
+                            .zip(self.workspace.editor.file_search_keys())
+                            .find_map(|(path, key)| {
+                                (filter.is_empty() || key.contains(&filter)).then(|| path.clone())
+                            });
+                    }
                 });
         }
         if let Some(path) = open_file {
@@ -325,42 +325,42 @@ impl StudioApp {
                 .default_size(270.0)
                 .size_range(210.0..=440.0)
                 .show(ui, |ui| {
-                ui.heading("Inspector");
-                ui.small(format!("Workspace\n{}", self.workspace.root));
-                if let Some(path) = &selected_path {
-                    ui.separator();
-                    ui.label("File");
-                    ui.small(path.display().to_string());
-                    ui.label(format!("{} file", workspace_file_kind(path)));
-                    ui.label(format!(
-                        "{} lines · {} characters",
-                        active_line_count, active_character_count
-                    ));
-                    ui.label(if active_dirty {
-                        "Unsaved changes"
-                    } else {
-                        "Saved"
-                    });
-                    if inspection_pending {
-                        status_text(ui, "Updating document analysis…", StatusTone::Neutral);
-                    } else if let Some(diagnostic) = &diagnostic {
-                        match diagnostic {
-                            Ok(()) => {
-                                status_text(ui, "TOML syntax valid", StatusTone::Positive);
-                            }
-                            Err(error) => {
-                                status_text(ui, "TOML syntax error", StatusTone::Error)
-                                    .on_hover_text(error);
+                    ui.heading("Inspector");
+                    ui.small(format!("Workspace\n{}", self.workspace.root));
+                    if let Some(path) = &selected_path {
+                        ui.separator();
+                        ui.label("File");
+                        ui.small(path.display().to_string());
+                        ui.label(format!("{} file", workspace_file_kind(path)));
+                        ui.label(format!(
+                            "{} lines · {} characters",
+                            active_line_count, active_character_count
+                        ));
+                        ui.label(if active_dirty {
+                            "Unsaved changes"
+                        } else {
+                            "Saved"
+                        });
+                        if inspection_pending {
+                            status_text(ui, "Updating document analysis…", StatusTone::Neutral);
+                        } else if let Some(diagnostic) = &diagnostic {
+                            match diagnostic {
+                                Ok(()) => {
+                                    status_text(ui, "TOML syntax valid", StatusTone::Positive);
+                                }
+                                Err(error) => {
+                                    status_text(ui, "TOML syntax error", StatusTone::Error)
+                                        .on_hover_text(error);
+                                }
                             }
                         }
                     }
-                }
-                ui.separator();
-                if let Some(path) = &selected_path {
-                    ui.weak(workspace_file_guidance(path));
-                } else {
-                    ui.weak("Select a file to inspect and edit it.");
-                }
+                    ui.separator();
+                    if let Some(path) = &selected_path {
+                        ui.weak(workspace_file_guidance(path));
+                    } else {
+                        ui.weak("Select a file to inspect and edit it.");
+                    }
                 });
         }
 
@@ -397,63 +397,63 @@ impl StudioApp {
     }
 }
 
+struct WorkspaceTreeDrawContext<'a> {
+    files: &'a [PathBuf],
+    search_keys: &'a [String],
+    filter: &'a str,
+    selected: Option<&'a PathBuf>,
+    enabled: bool,
+    open_file: &'a mut Option<PathBuf>,
+}
+
 fn draw_workspace_tree(
     ui: &mut egui::Ui,
     node: &WorkspaceTreeNode,
-    files: &[PathBuf],
-    search_keys: &[String],
-    filter: &str,
-    selected: Option<&PathBuf>,
-    enabled: bool,
+    context: &mut WorkspaceTreeDrawContext<'_>,
     parent_path: &std::path::Path,
     depth: usize,
-    open_file: &mut Option<PathBuf>,
 ) {
     for (name, child) in &node.entries {
         match child {
             WorkspaceTreeChild::Directory(directory) => {
-                if !filter.is_empty() && !directory.contains_matching_file(search_keys, filter) {
+                if !context.filter.is_empty()
+                    && !directory.contains_matching_file(context.search_keys, context.filter)
+                {
                     continue;
                 }
                 let directory_path = parent_path.join(name);
                 let _ = egui::CollapsingHeader::new(name)
-                    .id_salt(("workspace-tree", &directory_path, !filter.is_empty()))
-                    .default_open(depth == 0 || !filter.is_empty())
+                    .id_salt((
+                        "workspace-tree",
+                        &directory_path,
+                        !context.filter.is_empty(),
+                    ))
+                    .default_open(depth == 0 || !context.filter.is_empty())
                     .show(ui, |ui| {
-                        draw_workspace_tree(
-                            ui,
-                            directory,
-                            files,
-                            search_keys,
-                            filter,
-                            selected,
-                            enabled,
-                            &directory_path,
-                            depth + 1,
-                            open_file,
-                        )
+                        draw_workspace_tree(ui, directory, context, &directory_path, depth + 1)
                     });
             }
             WorkspaceTreeChild::File(index) => {
-                let Some(path) = files.get(*index) else {
+                let Some(path) = context.files.get(*index) else {
                     continue;
                 };
-                if !filter.is_empty()
-                    && !search_keys
+                if !context.filter.is_empty()
+                    && !context
+                        .search_keys
                         .get(*index)
-                        .is_some_and(|key| key.contains(filter))
+                        .is_some_and(|key| key.contains(context.filter))
                 {
                     continue;
                 }
                 let response = ui.add_enabled(
-                    enabled,
+                    context.enabled,
                     egui::Button::selectable(
-                        selected.is_some_and(|selected| selected == path),
+                        context.selected.is_some_and(|selected| selected == path),
                         name,
                     ),
                 );
                 if response.clicked() {
-                    *open_file = Some(path.to_path_buf());
+                    *context.open_file = Some(path.to_path_buf());
                 }
             }
         }

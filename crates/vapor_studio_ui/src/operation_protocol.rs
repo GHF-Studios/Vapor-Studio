@@ -10,7 +10,6 @@ pub(super) struct WorkspaceOpenSnapshot {
     pub(super) workspace_validation_error: Option<String>,
     pub(super) source_content: Result<Vec<vapor_studio_core::SourceContent>, String>,
     pub(super) unregistered_projects: Result<vapor_studio_core::UnregisteredProjectScan, String>,
-    pub(super) local_catalog: Result<Vec<vapor_studio_core::CatalogContent>, String>,
     pub(super) workspace_files: Result<Vec<PathBuf>, String>,
 }
 
@@ -32,7 +31,6 @@ pub(super) enum OperationResult {
     UnregisteredProjectScan(Result<vapor_studio_core::UnregisteredProjectScan, String>),
     Discovery(
         Result<Vec<vapor_studio_core::SourceContent>, String>,
-        Result<Vec<vapor_studio_core::CatalogContent>, String>,
         Result<vapor_studio_core::UnregisteredProjectScan, String>,
         Option<String>,
     ),
@@ -105,9 +103,8 @@ impl OperationResult {
                 let messages = errors.cloned().collect::<Vec<_>>();
                 (!messages.is_empty()).then(|| messages.join("; "))
             }
-            Self::Discovery(_, Err(error), _, _) | Self::Discovery(_, _, Err(error), _) => {
-                Some(error.clone())
-            }
+            Self::Discovery(_, Err(error), _) => Some(error.clone()),
+            Self::Discovery(_, _, Some(error)) => Some(error.clone()),
             Self::WorkshopAcquisition(Ok((acquisitions, requested)))
                 if acquisitions.len() < *requested =>
             {
@@ -176,5 +173,7 @@ impl OperationResult {
 }
 
 pub(super) fn partial_workshop_acquisition_message(imported: usize, requested: usize) -> String {
-    format!("Downloaded {imported} of {requested} Workshop items. Your selection is still here so you can try again.")
+    format!(
+        "Downloaded {imported} of {requested} Workshop items. Your selection is still here so you can try again."
+    )
 }

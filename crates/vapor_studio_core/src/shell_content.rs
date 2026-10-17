@@ -192,10 +192,7 @@ pub fn download_workshop_items(
     let mut grouped = std::collections::BTreeMap::<u32, Vec<(usize, String)>>::new();
     for (index, id) in normalized_ids.iter().enumerate() {
         let app_id = content::workshop_app_id(&installation, None, id, id)?;
-        grouped
-            .entry(app_id)
-            .or_default()
-            .push((index, id.clone()));
+        grouped.entry(app_id).or_default().push((index, id.clone()));
     }
     let mut acquisitions = Vec::with_capacity(normalized_ids.len());
     for (app_id, items) in grouped {
@@ -221,12 +218,8 @@ pub fn download_workshop_items(
             &ids,
             |published_file_id, root| {
                 let id = published_file_id.to_string();
-                let report = content::import_workshop_item_from_provider(
-                    &installation,
-                    app_id,
-                    &id,
-                    root,
-                )?;
+                let report =
+                    content::import_workshop_item_from_provider(&installation, app_id, &id, root)?;
                 let cached = content::cached_artifact(&installation, report.artifact_id())?;
                 Ok((
                     *positions.get(&published_file_id).ok_or_else(|| {
@@ -379,12 +372,8 @@ fn acquire_root_seed_closure(
             let Some(published_file_id) = node.published_file_id.as_deref() else {
                 continue;
             };
-            let app_id = content::workshop_app_id(
-                installation,
-                paths,
-                &node.id,
-                published_file_id,
-            )?;
+            let app_id =
+                content::workshop_app_id(installation, paths, &node.id, published_file_id)?;
             let key = (app_id, published_file_id.to_owned());
             if acquired.insert(key) {
                 pending
@@ -401,9 +390,8 @@ fn acquire_root_seed_closure(
             let numeric_ids = published_file_ids
                 .iter()
                 .map(|id| {
-                    id.parse::<u64>().map_err(|_| {
-                        format!("Workshop item ID '{id}' is not a valid number")
-                    })
+                    id.parse::<u64>()
+                        .map_err(|_| format!("Workshop item ID '{id}' is not a valid number"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             vapor_steam::with_downloaded_workshop_items(
@@ -481,12 +469,7 @@ pub fn run_installed_profile(
         }
     } else if let Some(graph) = expected_graph {
         let selectors = graph_content_selectors(graph);
-        repair_profile_composition(
-            application_executable,
-            workspace_root,
-            selector,
-            &selectors,
-        )?
+        repair_profile_composition(application_executable, workspace_root, selector, &selectors)?
     } else {
         install_profile_composition(application_executable, workspace_root, selector)?
     };

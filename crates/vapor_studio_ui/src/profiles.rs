@@ -136,16 +136,20 @@ impl StudioApp {
             return false;
         };
         if matches.len() > 1 {
-            self.catalog.selected = Some(catalog_content_selector(&content));
+            self.select_catalog_identity(catalog_content_selector(&content));
             self.catalog.source_filter = CatalogSourceFilter::Workshop;
             self.catalog.kind_filter =
                 Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
             self.catalog.search_query = published_file_id.to_owned();
             self.open_discover_tab(super::catalog::DiscoverTab::Local);
             self.status = if launch_after_assignment {
-                format!("Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before launching it.")
+                format!(
+                    "Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before launching it."
+                )
             } else {
-                format!("Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before adding it to a profile.")
+                format!(
+                    "Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before adding it to a profile."
+                )
             };
             return false;
         }
@@ -186,6 +190,11 @@ impl StudioApp {
                 "Discard the Create draft or save or discard workspace, composition, or manifest edits before switching profiles.".to_owned();
             return;
         }
+        self.submit_service_action(vapor_studio_protocol::StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::Select {
+                profile_id: self.profile.items[index].id.clone(),
+            },
+        ));
         self.activate_profile_context(index);
     }
 
