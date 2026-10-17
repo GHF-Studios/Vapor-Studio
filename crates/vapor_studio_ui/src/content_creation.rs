@@ -19,11 +19,8 @@ impl StudioApp {
         self.workspace.editor.selected_file = Some(manifest.clone());
         self.workspace.editor.files_open = true;
         self.workspace.editor.documents.insert(
-            manifest,
-            WorkspaceDocument {
-                original: contents.clone(),
-                contents,
-            },
+            manifest.clone(),
+            WorkspaceDocument::new(&manifest, contents),
         );
         self.section = Section::Workspace;
         self.status = "Created content and opened its manifest.".to_owned();

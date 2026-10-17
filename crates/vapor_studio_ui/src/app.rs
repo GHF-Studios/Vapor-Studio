@@ -41,8 +41,9 @@ mod workspace_ops;
 
 use crate::navigation::Section;
 use catalog::{
-    CatalogState, catalog_content_selector, catalog_matches_filters, content_selector,
-    source_content_kind, source_content_selector,
+    CatalogState, catalog_content_selector, catalog_content_selector_matches,
+    catalog_matches_filters, content_selector, source_content_kind, source_content_selector,
+    source_content_selector_matches,
 };
 use composition_lifecycle::ProfileCompositionState;
 use directory_picker::DirectoryPicker;

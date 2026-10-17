@@ -173,7 +173,7 @@ impl StudioApp {
                 .catalog
                 .items
                 .iter()
-                .any(|content| catalog_content_selector(content) == *identity)
+                .any(|content| catalog_content_selector_matches(content, identity))
         }) {
             self.catalog.selected = None;
         }
@@ -196,8 +196,32 @@ pub(crate) fn source_content_selector(content: &vapor_studio_core::SourceContent
         .unwrap_or_else(|| content.id.clone())
 }
 
+pub(crate) fn source_content_selector_matches(
+    content: &vapor_studio_core::SourceContent,
+    selector: &str,
+) -> bool {
+    content_selector_matches(&content.id, content.version.as_deref(), selector)
+}
+
 pub(crate) fn catalog_content_selector(content: &vapor_studio_core::CatalogContent) -> String {
     content_selector(&content.identity())
+}
+
+pub(crate) fn catalog_content_selector_matches(
+    content: &vapor_studio_core::CatalogContent,
+    selector: &str,
+) -> bool {
+    content_selector_matches(&content.id, content.version.as_deref(), selector)
+}
+
+fn content_selector_matches(id: &str, version: Option<&str>, selector: &str) -> bool {
+    match version {
+        Some(version) => selector
+            .strip_prefix(id)
+            .and_then(|remainder| remainder.strip_prefix('@'))
+            == Some(version),
+        None => selector == id,
+    }
 }
 
 pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {

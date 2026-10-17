@@ -93,7 +93,8 @@ impl StudioApp {
 
     fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
         self.catalog.items.iter().any(|content| {
-            catalog_content_selector(content) == selector && !content.is_unambiguous()
+            super::catalog_content_selector_matches(content, selector)
+                && !content.is_unambiguous()
         })
     }
 

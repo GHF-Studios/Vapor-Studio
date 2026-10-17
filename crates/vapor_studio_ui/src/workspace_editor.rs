@@ -25,11 +25,52 @@ pub(super) struct WorkspaceEditorState {
 pub(super) struct WorkspaceDocument {
     pub(super) original: String,
     pub(super) contents: String,
+    dirty: bool,
+    pub(super) line_count: usize,
+    pub(super) character_count: usize,
+    pub(super) toml_diagnostic: Option<Result<(), String>>,
 }
 
 impl WorkspaceDocument {
+    pub(super) fn new(path: &Path, contents: String) -> Self {
+        let original = contents.clone();
+        Self::from_parts(path, original, contents)
+    }
+
+    fn from_parts(path: &Path, original: String, contents: String) -> Self {
+        let mut document = Self {
+            original,
+            contents,
+            dirty: false,
+            line_count: 0,
+            character_count: 0,
+            toml_diagnostic: None,
+        };
+        document.refresh_inspection(path);
+        document
+    }
+
+    pub(super) fn refresh_inspection(&mut self, path: &Path) {
+        self.dirty = self.contents != self.original;
+        self.line_count = self.contents.lines().count();
+        self.character_count = self.contents.chars().count();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        self.toml_diagnostic = (name == "Vapor.toml"
+            || name.ends_with(".vapor.toml")
+            || name == "Cargo.toml")
+        .then(|| {
+            self.contents
+                .parse::<toml::Value>()
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        });
+    }
+
     pub(super) fn is_dirty(&self) -> bool {
-        self.contents != self.original
+        self.dirty
     }
 }
 
@@ -118,7 +159,10 @@ impl WorkspaceEditorState {
             {
                 return false;
             }
-            restored.insert(path, WorkspaceDocument { original, contents });
+            restored.insert(
+                path.clone(),
+                WorkspaceDocument::from_parts(&path, original, contents),
+            );
         }
         self.documents = restored;
         self.selected_file = selected
@@ -144,6 +188,7 @@ impl StudioApp {
             if let Some(document) = self.workspace.editor.documents.get_mut(relative) {
                 document.contents = source.to_owned();
                 document.original = source.to_owned();
+                document.refresh_inspection(relative);
             }
         }
     }
@@ -176,10 +221,7 @@ impl StudioApp {
         self.workspace.editor.files_open = true;
         self.workspace.editor.documents.insert(
             path.clone(),
-            WorkspaceDocument {
-                original: String::new(),
-                contents: String::new(),
-            },
+            WorkspaceDocument::new(&path, String::new()),
         );
         self.workspace.editor.new_file_path.clear();
         self.status = format!("Created {}.", path.display());
@@ -189,11 +231,8 @@ impl StudioApp {
         self.workspace.editor.selected_file = Some(path.clone());
         self.workspace.editor.files_open = true;
         self.workspace.editor.documents.insert(
-            path,
-            WorkspaceDocument {
-                original: contents.clone(),
-                contents,
-            },
+            path.clone(),
+            WorkspaceDocument::new(&path, contents),
         );
         self.status = "Opened workspace file.".to_owned();
     }
@@ -202,6 +241,7 @@ impl StudioApp {
         self.invalidate_workshop_review();
         if let Some(document) = self.workspace.editor.documents.get_mut(&path) {
             document.original.clone_from(&document.contents);
+            document.dirty = false;
         }
         self.status = format!("Saved {}.", path.display());
     }
@@ -214,6 +254,7 @@ impl StudioApp {
                 Ok(path) => {
                     if let Some(document) = self.workspace.editor.documents.get_mut(&path) {
                         document.original.clone_from(&document.contents);
+                        document.dirty = false;
                         saved += 1;
                     }
                 }

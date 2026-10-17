@@ -31,11 +31,13 @@ fn identity_label(identity: &ContentIdentity) -> String {
     )
 }
 
-fn canonical_dependencies(node: &ResolvedNodeIdentity) -> Vec<(String, ContentIdentity)> {
+fn canonical_dependencies<'a>(
+    node: &'a ResolvedNodeIdentity,
+) -> Vec<(&'a str, &'a ContentIdentity)> {
     let mut dependencies = node
         .dependencies
         .iter()
-        .map(|dependency| (dependency.binding.clone(), dependency.content.clone()))
+        .map(|dependency| (dependency.binding.as_str(), &dependency.content))
         .collect::<Vec<_>>();
     dependencies.sort();
     dependencies

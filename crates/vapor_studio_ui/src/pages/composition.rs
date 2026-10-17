@@ -236,8 +236,10 @@ impl StudioApp {
                             && !self.authoring.composition_link_candidate.is_empty()
                             && source_contents.iter().any(|content| {
                                 is_additional_composition_dependency(content, composition)
-                                    && super::super::source_content_selector(content)
-                                        == self.authoring.composition_link_candidate
+                                    && super::super::source_content_selector_matches(
+                                        content,
+                                        &self.authoring.composition_link_candidate,
+                                    )
                             }),
                         egui::Button::new("Add content"),
                     )
@@ -245,8 +247,10 @@ impl StudioApp {
                 {
                     if let Some(content) = source_contents.iter().find(|content| {
                         is_additional_composition_dependency(content, composition)
-                            && super::super::source_content_selector(content)
-                                == self.authoring.composition_link_candidate
+                            && super::super::source_content_selector_matches(
+                                content,
+                                &self.authoring.composition_link_candidate,
+                            )
                     })
                     {
                         let id = content.id.clone();

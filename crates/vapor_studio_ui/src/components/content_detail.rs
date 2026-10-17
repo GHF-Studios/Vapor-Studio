@@ -1,16 +1,24 @@
 use super::super::{Section, StudioApp};
 use eframe::egui;
+use std::path::PathBuf;
+
+enum ContentDetailAction {
+    StageWorkshop(String),
+    ReviewPublish,
+    AssignProfileRoot(vapor_studio_core::ContentIdentity, Option<PathBuf>),
+}
 
 impl StudioApp {
     #[allow(clippy::collapsible_if)]
     pub(in crate::app) fn draw_content_detail(&mut self, ui: &mut egui::Ui) {
-        if let Some(identity) = self.catalog.selected.clone() {
+        let mut action = None;
+        if let Some(identity) = self.catalog.selected.as_ref() {
             if let Some(content) = self
                 .catalog
                 .items
                 .iter()
                 .find(|content| {
-                    super::super::catalog_content_selector(content) == identity
+                    super::super::catalog_content_selector_matches(content, identity)
                         && super::super::catalog_matches_filters(
                             content,
                             self.catalog.source_filter,
@@ -18,7 +26,6 @@ impl StudioApp {
                             &self.catalog.search_query,
                         )
                 })
-                .cloned()
             {
                 ui.heading("Content details");
                 ui.label(format!(
@@ -92,25 +99,33 @@ impl StudioApp {
                             ));
                         }
                     });
-                if content.dependencies.is_empty() {
-                    ui.weak("No declared dependencies.");
-                } else {
-                    ui.label("Dependencies");
-                    for dependency in &content.dependencies {
-                        ui.small(dependency);
+                egui::CollapsingHeader::new(format!(
+                    "Dependencies · {}",
+                    content.dependencies.len()
+                ))
+                .default_open(false)
+                .show(ui, |ui| {
+                    if content.dependencies.is_empty() {
+                        ui.weak("No declared dependencies.");
+                    } else {
+                        for dependency in &content.dependencies {
+                            ui.small(dependency);
+                        }
                     }
-                }
+                });
                 let is_authored_here = self
                     .catalog
                     .sources
                     .iter()
-                    .any(|source| super::super::source_content_selector(source) == identity);
+                    .any(|source| {
+                        super::super::source_content_selector_matches(source, identity)
+                    });
                 if is_authored_here {
                     if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && content.is_unambiguous(), egui::Button::new("Stage Workshop review package"))
                         .on_disabled_hover_text(if content.is_unambiguous() { "Save or discard workspace file and structured metadata drafts first; staging reads the workspace source from disk." } else { "Resolve conflicting local records before staging this identity." })
                         .clicked()
                     {
-                        self.stage_workshop_content(identity.clone());
+                        action = Some(ContentDetailAction::StageWorkshop(identity.clone()));
                     }
                 }
                 let preview = self
@@ -121,8 +136,7 @@ impl StudioApp {
                         is_authored_here
                             && preview.id == content.id
                             && preview.version.as_deref() == content.version.as_deref()
-                    })
-                    .cloned();
+                    });
                 if let Some(preview) = preview {
                     ui.group(|ui| {
                         ui.heading("Workshop package staged");
@@ -131,8 +145,7 @@ impl StudioApp {
                             preview.id, preview.files, preview.bytes, preview.target
                         ));
                         if ui.button("Review in Publish").clicked() {
-                            self.root_publishing.tab = super::super::root_publishing::PublishTab::WorkshopContent;
-                            self.section = Section::Publish;
+                            action = Some(ContentDetailAction::ReviewPublish);
                         }
                     });
                 }
@@ -173,10 +186,27 @@ impl StudioApp {
                         })
                         .clicked()
                     {
-                        self.assign_profile_root(content.identity(), content_workspace);
+                        action = Some(ContentDetailAction::AssignProfileRoot(
+                            content.identity(),
+                            content_workspace,
+                        ));
                     }
                 }
             }
+        }
+        match action {
+            Some(ContentDetailAction::StageWorkshop(identity)) => {
+                self.stage_workshop_content(identity);
+            }
+            Some(ContentDetailAction::ReviewPublish) => {
+                self.root_publishing.tab =
+                    super::super::root_publishing::PublishTab::WorkshopContent;
+                self.section = Section::Publish;
+            }
+            Some(ContentDetailAction::AssignProfileRoot(identity, workspace)) => {
+                self.assign_profile_root(identity, workspace);
+            }
+            None => {}
         }
     }
 }

@@ -44,7 +44,6 @@ impl StudioApp {
         }
         let mut newly_selected = None;
         for content in &self.catalog.items {
-            let identity = super::super::catalog_content_selector(content);
             if !catalog_matches_filters(
                 content,
                 self.catalog.source_filter,
@@ -53,7 +52,13 @@ impl StudioApp {
             ) {
                 continue;
             }
-            let selected = self.catalog.selected.as_deref() == Some(identity.as_str());
+            let selected = self
+                .catalog
+                .selected
+                .as_deref()
+                .is_some_and(|identity| {
+                    super::super::catalog_content_selector_matches(content, identity)
+                });
             ui.horizontal(|ui| {
                 if ui
                     .selectable_label(
@@ -67,7 +72,7 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    newly_selected = Some(identity.clone());
+                    newly_selected = Some(super::super::catalog_content_selector(content));
                 }
                 if !content.is_unambiguous() {
                     ui.colored_label(egui::Color32::YELLOW, "Conflict");

@@ -37,7 +37,11 @@ impl StudioApp {
                         ui.selectable_value(&mut self.catalog.source_filter, filter, filter.label());
                     }
                 });
-            let mut kinds = self.catalog.items.iter().map(|content| content.kind.clone())
+            let mut kinds = self
+                .catalog
+                .items
+                .iter()
+                .map(|content| content.kind.clone())
                 .collect::<std::collections::BTreeSet<_>>();
             kinds.extend(self.workspace.unregistered_projects.candidates.iter()
                 .map(|candidate| candidate.kind.to_string()));
@@ -46,7 +50,15 @@ impl StudioApp {
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.catalog.kind_filter, None, "All content types");
                     for kind in kinds {
-                        ui.selectable_value(&mut self.catalog.kind_filter, Some(kind.clone()), kind);
+                        if ui
+                            .selectable_label(
+                                self.catalog.kind_filter.as_deref() == Some(kind.as_str()),
+                                &kind,
+                            )
+                            .clicked()
+                        {
+                            self.catalog.kind_filter = Some(kind);
+                        }
                     }
                 });
             if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Refresh local catalog"))
@@ -56,19 +68,29 @@ impl StudioApp {
                 self.discover();
             }
         });
-        let matching_catalog_items = self
-            .catalog
-            .items
-            .iter()
-            .filter(|content| {
-                catalog_matches_filters(
-                    content,
-                    self.catalog.source_filter,
-                    self.catalog.kind_filter.as_deref(),
-                    &self.catalog.search_query,
-                )
-            })
-            .count();
+        let selected_identity = self.catalog.selected.as_deref();
+        let mut matching_catalog_items = 0;
+        let mut selected_exists = false;
+        let mut selected_is_visible = false;
+        for content in &self.catalog.items {
+            let is_selected = selected_identity
+                .is_some_and(|identity| {
+                    super::super::catalog_content_selector_matches(content, identity)
+                });
+            let matches_filters = catalog_matches_filters(
+                content,
+                self.catalog.source_filter,
+                self.catalog.kind_filter.as_deref(),
+                &self.catalog.search_query,
+            );
+            if matches_filters {
+                matching_catalog_items += 1;
+            }
+            if is_selected {
+                selected_exists = true;
+                selected_is_visible = matches_filters;
+            }
+        }
         let matching_workspace_projects = self
             .workspace
             .unregistered_projects
@@ -134,23 +156,7 @@ impl StudioApp {
             });
             return;
         }
-        let selected_is_visible = self.catalog.selected.as_ref().is_some_and(|identity| {
-            self.catalog.items.iter().any(|content| {
-                super::super::catalog_content_selector(content) == *identity
-                    && catalog_matches_filters(
-                        content,
-                        self.catalog.source_filter,
-                        self.catalog.kind_filter.as_deref(),
-                        &self.catalog.search_query,
-                    )
-            })
-        });
-        let selected_is_hidden = self.catalog.selected.is_some()
-            && self.catalog.items.iter().any(|content| {
-                super::super::catalog_content_selector(content)
-                    == self.catalog.selected.as_deref().unwrap_or_default()
-            })
-            && !selected_is_visible;
+        let selected_is_hidden = selected_exists && !selected_is_visible;
         if ui.available_width() < 820.0 {
             section_header(ui, "Available content", "Local sources and authored projects in the active workspace.");
             self.draw_workspace_candidates(ui);

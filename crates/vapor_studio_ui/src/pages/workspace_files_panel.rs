@@ -234,26 +234,10 @@ impl StudioApp {
             .editor
             .active_document()
             .map(|document| {
-                let diagnostic = selected_path.as_deref().and_then(|path| {
-                    let name = path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or_default();
-                    (name == "Vapor.toml"
-                        || name.ends_with(".vapor.toml")
-                        || name == "Cargo.toml")
-                        .then(|| {
-                            document
-                                .contents
-                                .parse::<toml::Value>()
-                                .map(|_| ())
-                                .map_err(|error| error.to_string())
-                        })
-                });
                 (
-                    document.contents.lines().count(),
-                    document.contents.chars().count(),
-                    diagnostic,
+                    document.line_count,
+                    document.character_count,
+                    document.toml_diagnostic.clone(),
                 )
             })
             .unwrap_or_default();
@@ -309,11 +293,17 @@ impl StudioApp {
                 let can_edit = !self.operation.running && !self.authoring.manifest_metadata_dirty;
                 ui.push_id(selected_path.as_deref(), |ui| {
                     ui.add_enabled_ui(can_edit, |ui| {
-                        egui::TextEdit::multiline(&mut document.contents)
+                        let response = egui::TextEdit::multiline(&mut document.contents)
                             .code_editor()
                             .desired_width(f32::INFINITY)
                             .desired_rows(24)
-                            .show(ui)
+                            .show(ui);
+                        if response.response.changed()
+                            && let Some(path) = selected_path.as_deref()
+                        {
+                            document.refresh_inspection(path);
+                        }
+                        response
                     });
                 });
             } else {
