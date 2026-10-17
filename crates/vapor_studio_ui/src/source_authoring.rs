@@ -180,6 +180,9 @@ impl StudioApp {
         if !self.require_open_workspace("edit Workshop metadata") {
             return;
         }
+        // Both metadata editors share one dirty-state slot and write the same
+        // role manifest. Keep only one editor live at a time.
+        self.authoring.runtime_outputs_edit = None;
         let selector = source_content_selector(content);
         let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {
@@ -207,6 +210,7 @@ impl StudioApp {
         if !self.require_open_workspace("edit runtime output declarations") {
             return;
         }
+        self.authoring.workshop_metadata_edit = None;
         let selector = source_content_selector(content);
         let root = PathBuf::from(self.workspace.root.trim());
         let executable = match std::env::current_exe() {

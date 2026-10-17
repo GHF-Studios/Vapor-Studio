@@ -85,13 +85,6 @@ impl StudioApp {
                     "Selected content · {} items",
                     graph.nodes.len()
                 ));
-                if let InstallationState::Installed {
-                    graph_fingerprint: Some(fingerprint),
-                    ..
-                } = &profile.installation
-                {
-                    ui.small(format!("Content fingerprint: {fingerprint}"));
-                }
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
                         "Engine: {}",
@@ -110,20 +103,32 @@ impl StudioApp {
                     .default_open(true)
                     .show(ui, |ui| {
                         for node in &graph.nodes {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(node.kind.as_str());
                                 ui.label(content_selector(&node.content));
-                                ui.weak(format!(
-                                    "Payload {}",
-                                    node.fingerprint.as_deref().unwrap_or("not fingerprinted")
-                                ));
-                                if let Some(source) = &node.source {
-                                    ui.weak(format!("Installed from {source}"));
-                                }
                                 if !node.dependencies.is_empty() {
                                     ui.weak(format!("{} dependencies", node.dependencies.len()));
                                 }
                             });
+                        }
+                    });
+                egui::CollapsingHeader::new("Integrity details")
+                    .show(ui, |ui| {
+                        if let InstallationState::Installed {
+                            graph_fingerprint: Some(fingerprint),
+                            ..
+                        } = &profile.installation
+                        {
+                            ui.small(format!("Composition fingerprint: {fingerprint}"));
+                        }
+                        for node in &graph.nodes {
+                            ui.small(format!(
+                                "{} · {} · source {} · file fingerprint {}",
+                                node.kind,
+                                content_selector(&node.content),
+                                node.source.as_deref().unwrap_or("not recorded"),
+                                node.fingerprint.as_deref().unwrap_or("file fingerprint unavailable"),
+                            ));
                         }
                     });
             });
