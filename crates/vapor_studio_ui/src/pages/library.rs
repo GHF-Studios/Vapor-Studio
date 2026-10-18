@@ -205,7 +205,7 @@ impl StudioApp {
             section_header(
                 ui,
                 "Available content",
-                "Downloaded or installed items, ready to review.",
+                "Items ready to add or already in use.",
             );
             self.draw_catalog_list(ui, &filter);
             ui.separator();
@@ -216,7 +216,7 @@ impl StudioApp {
                 section_header(
                     items,
                     "Available content",
-                    "Downloaded or installed items, ready to review.",
+                    "Items ready to add or already in use.",
                 );
                 egui::ScrollArea::vertical().show(items, |ui| {
                     self.draw_catalog_list(ui, &filter);

@@ -21,11 +21,11 @@ pub(super) enum CompositionInstallationAction {
     DiscoverContent,
 }
 
-fn identity_label(identity: &ContentReference) -> String {
-    identity.version.as_deref().map_or_else(
-        || identity.id.clone(),
-        |version| format!("{}@{version}", identity.id),
-    )
+fn identity_label(
+    identity: &ContentReference,
+    catalog: &[vapor_client_application::CatalogContent],
+) -> String {
+    super::super::display_catalog_identity(&identity.id, identity.version.as_deref(), catalog)
 }
 
 fn canonical_dependencies(node: &ResolvedNodeIdentity) -> Vec<(&str, &ContentReference)> {
@@ -41,20 +41,21 @@ fn canonical_dependencies(node: &ResolvedNodeIdentity) -> Vec<(&str, &ContentRef
 fn graph_difference_lines(
     saved: &ResolvedCompositionGraph,
     installed: &ResolvedCompositionGraph,
+    catalog: &[vapor_client_application::CatalogContent],
 ) -> Vec<String> {
     let mut differences = Vec::new();
     if saved.root != installed.root {
         differences.push(format!(
             "Selected content changed: {} → {}",
-            identity_label(&saved.root),
-            identity_label(&installed.root),
+            identity_label(&saved.root, catalog),
+            identity_label(&installed.root, catalog),
         ));
     }
     if saved.effective_engine != installed.effective_engine {
         differences.push(format!(
             "Engine changed: {} → {}",
-            identity_label(&saved.effective_engine),
-            identity_label(&installed.effective_engine),
+            identity_label(&saved.effective_engine, catalog),
+            identity_label(&installed.effective_engine, catalog),
         ));
     }
     if saved.effective_game != installed.effective_game {
@@ -63,12 +64,12 @@ fn graph_difference_lines(
             saved
                 .effective_game
                 .as_ref()
-                .map(identity_label)
+                .map(|identity| identity_label(identity, catalog))
                 .unwrap_or_else(|| "none".to_owned()),
             installed
                 .effective_game
                 .as_ref()
-                .map(identity_label)
+                .map(|identity| identity_label(identity, catalog))
                 .unwrap_or_else(|| "none".to_owned()),
         ));
     }
@@ -81,7 +82,7 @@ fn graph_difference_lines(
             differences.push(format!(
                 "No longer installed: {} · {}",
                 expected.kind,
-                identity_label(&expected.content),
+                identity_label(&expected.content, catalog),
             ));
             continue;
         };
@@ -101,7 +102,7 @@ fn graph_difference_lines(
         if !changes.is_empty() {
             differences.push(format!(
                 "Changed {} · {}",
-                identity_label(&expected.content),
+                identity_label(&expected.content, catalog),
                 changes.join(", "),
             ));
         }
@@ -115,7 +116,7 @@ fn graph_difference_lines(
             differences.push(format!(
                 "Also installed: {} · {}",
                 actual.kind,
-                identity_label(&actual.content),
+                identity_label(&actual.content, catalog),
             ));
         }
     }
@@ -291,14 +292,10 @@ impl StudioApp {
                     ui.label(format!("{} content items installed", artifacts.len()));
                     egui::CollapsingHeader::new("Installed content").show(ui, |ui| {
                         for artifact in artifacts {
-                            ui.small(format!(
-                                "{}{}",
-                                artifact.id,
-                                artifact
-                                    .version
-                                    .as_ref()
-                                    .map(|version| format!(" · {version}"))
-                                    .unwrap_or_default(),
+                            ui.small(super::super::display_catalog_identity(
+                                &artifact.id,
+                                artifact.version.as_deref(),
+                                &self.catalog.items,
                             ));
                         }
                     });
@@ -314,7 +311,12 @@ impl StudioApp {
                         "Installed content differs from this composition's saved setup",
                         StatusTone::Caution,
                     );
-                    ui.label(detail);
+                    ui.weak("Review the changed content below before updating this composition.");
+                    egui::CollapsingHeader::new("Technical details")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.small(detail);
+                        });
                     if !verified {
                         ui.label(
                             "Verify the installed files before saving these changes to the composition.",
@@ -324,7 +326,11 @@ impl StudioApp {
                         egui::CollapsingHeader::new("Review changes")
                             .default_open(true)
                             .show(ui, |ui| {
-                                for difference in graph_difference_lines(saved_graph, actual_graph)
+                                for difference in graph_difference_lines(
+                                    saved_graph,
+                                    actual_graph,
+                                    &self.catalog.items,
+                                )
                                 {
                                     ui.small(difference);
                                 }
@@ -335,19 +341,22 @@ impl StudioApp {
                     ui.small(format!(
                         "Installed setup: {} content items · engine {}",
                         actual_graph.nodes.len(),
-                        actual_graph.effective_engine.id,
+                        super::super::display_catalog_identity(
+                            &actual_graph.effective_engine.id,
+                            actual_graph.effective_engine.version.as_deref(),
+                            &self.catalog.items,
+                        ),
                     ));
                     egui::CollapsingHeader::new("Content details").show(ui, |ui| {
                         for node in &actual_graph.nodes {
                             ui.small(format!(
-                                "{} · {}{}",
+                                "{} · {}",
                                 super::super::display_content_kind(&node.kind),
-                                node.content.id,
-                                node.content
-                                    .version
-                                    .as_deref()
-                                    .map(|version| format!(" · {version}"))
-                                    .unwrap_or_default(),
+                                super::super::display_catalog_identity(
+                                    &node.content.id,
+                                    node.content.version.as_deref(),
+                                    &self.catalog.items,
+                                ),
                             ));
                         }
                         ui.small(format!("{} content items installed", artifacts.len()));
@@ -369,7 +378,12 @@ impl StudioApp {
                 }
                 InstallationState::Partial { detail } => {
                     status_text(ui, "Installation needs attention", StatusTone::Caution);
-                    ui.label(detail);
+                    ui.weak("Some required content could not be checked or installed.");
+                    egui::CollapsingHeader::new("Technical details")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.small(detail);
+                        });
                 }
                 InstallationState::NeedsRepair { detail, artifacts } => {
                     status_text(
@@ -377,7 +391,12 @@ impl StudioApp {
                         &format!("{} installed versions need repair", artifacts.len()),
                         StatusTone::Caution,
                     );
-                    ui.label(detail);
+                    ui.weak("Repair the installed content before launching this composition.");
+                    egui::CollapsingHeader::new("Technical details")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.small(detail);
+                        });
                 }
             }
         }
@@ -465,7 +484,7 @@ mod graph_difference_tests {
         installed.nodes.reverse();
         installed.nodes[1].dependencies.reverse();
         assert_eq!(
-            graph_difference_lines(&saved, &installed),
+            graph_difference_lines(&saved, &installed, &[]),
             ["No content differences found; verify the installed files again."],
         );
 
@@ -474,7 +493,7 @@ mod graph_difference_tests {
         installed.nodes[1].dependencies[1].content = identity("org.other-engine", "2.0.0");
         installed.nodes[2].content = identity("org.other-engine", "2.0.0");
         installed.effective_engine = identity("org.other-engine", "2.0.0");
-        let differences = graph_difference_lines(&saved, &installed);
+        let differences = graph_difference_lines(&saved, &installed, &[]);
         assert!(
             differences
                 .iter()

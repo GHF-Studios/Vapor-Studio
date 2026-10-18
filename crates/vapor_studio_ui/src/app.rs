@@ -42,7 +42,8 @@ mod workspace_ops;
 use crate::navigation::Section;
 use catalog::{
     CatalogFilter, CatalogState, catalog_content_selector, catalog_content_selector_matches,
-    content_kind_name, content_selector, display_catalog_name, display_content_kind,
+    content_kind_name, content_selector, display_catalog_identity, display_catalog_name,
+    display_content_kind,
     source_content_kind,
     source_content_selector, source_content_selector_matches,
 };

@@ -36,7 +36,7 @@ impl StudioApp {
                 )
                 .clicked();
         });
-        ui.weak("Subscribe to add content to your Library and receive Steam updates. Add-ons can be added to a compatible composition later.");
+        ui.weak("Subscribe to follow updates, or add an item to your Library when you want to use it. Neither action changes a composition.");
         if run_search && !self.operation.running && steam_available {
             self.search_workshop();
         }
@@ -134,7 +134,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running && steam_available,
-                        egui::Button::new(format!("Download {count}")),
+                        egui::Button::new(format!("Add {count} to Library")),
                     )
                     .clicked()
                 {
@@ -165,7 +165,7 @@ impl StudioApp {
             }
             if !subscription_batch_supported {
                 ui.small(format!(
-                    "Steam subscription changes handle up to {} items at once. Download remains available.",
+                    "Steam subscription changes handle up to {} items at once. You can still add items to your Library.",
                     vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH
                 ));
             }
@@ -191,7 +191,7 @@ impl StudioApp {
                 empty_state(
                     ui,
                     "Find content in Steam Workshop",
-                    "Search Steam Workshop for community content. Subscribe to add an item to your Library and receive updates. This does not change a composition.",
+                    "Find community content in Steam Workshop. Subscribe to follow updates, or add an item to your Library when you want to use it. Neither action changes a composition.",
                     |ui| {
                         if ui.button("Search Workshop").clicked() {
                             run_search = true;
@@ -323,7 +323,7 @@ impl StudioApp {
                         |ui| {
                         clicked = super::super::components::design::primary_button(
                             ui,
-                            "Download",
+                            "Add to Library",
                         )
                         .clicked();
                     });
@@ -468,7 +468,7 @@ impl StudioApp {
                     }
                 });
             } else {
-                details.weak("Select a Workshop item to review its description, subscription, and download options.");
+                details.weak("Select an item to review its description and available actions.");
             }
         });
         match action {

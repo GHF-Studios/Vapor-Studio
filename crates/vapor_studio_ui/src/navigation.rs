@@ -74,11 +74,11 @@ impl CatalogSourceFilter {
 
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::All => "All on this device",
-            Self::Workspace => "Project folders",
-            Self::Cache => "Downloaded here",
-            Self::Installed => "Ready to play",
-            Self::Workshop => "From Steam Workshop",
+            Self::All => "Available here",
+            Self::Workspace => "In project folders",
+            Self::Cache => "In your Library",
+            Self::Installed => "Installed",
+            Self::Workshop => "From Workshop",
         }
     }
 }

@@ -31,13 +31,10 @@ impl StudioApp {
                         status_text(ui, status, tone);
                     });
                     if let Some(root) = &composition.root_package {
-                        ui.small(format!(
-                            "{}{}",
-                            root.id,
-                            root.version
-                                .as_ref()
-                                .map(|version| format!(" · {version}"))
-                                .unwrap_or_default()
+                        ui.small(super::super::display_catalog_identity(
+                            &root.id,
+                            root.version.as_deref(),
+                            &self.catalog.items,
                         ));
                     } else {
                         ui.small("No composition selected");

@@ -31,8 +31,8 @@ impl StudioApp {
         let steam_available = self.workshop.steam_client_available;
         section_header(
             ui,
-            "Your Steam subscriptions",
-            "Steam keeps track of subscriptions. Download a copy here to make an item available to this installation.",
+            "Your subscriptions",
+            "Items you follow on Workshop appear here. Add one to your Library when you want it available in this installation.",
         );
         if !steam_available {
             status_text(
@@ -67,7 +67,7 @@ impl StudioApp {
             empty_state(
                 ui,
                 "Subscriptions have not been loaded",
-                "Connect to Steam to review subscribed items, Steam download state, and which items are already available in Vapor.",
+                "Connect to Steam to review the items you follow and add them to your Library.",
                 |_| {},
             );
         } else if self.workshop.subscriptions.is_empty() {
@@ -126,7 +126,7 @@ impl StudioApp {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.workshop.subscription_search_query)
                         .desired_width(search_width)
-                        .hint_text("Find a subscription by title or item ID"),
+                        .hint_text("Find a subscription by title"),
                 );
                 if !self.workshop.subscription_search_query.is_empty()
                     && ui.small_button("Clear").clicked()
@@ -190,9 +190,9 @@ impl StudioApp {
                     && ui
                         .add_enabled(
                             !self.operation.running,
-                            egui::Button::new(format!("Download selected · {selected_visible}")),
+                            egui::Button::new(format!("Add to Library · {selected_visible}")),
                         )
-                        .on_hover_text("Download only the selected items currently visible in this view to this installation.")
+                        .on_hover_text("Add only the selected items currently visible in this view to your Library.")
                         .clicked()
                 {
                     action = Some(SubscriptionAction::DownloadMany(
@@ -274,17 +274,6 @@ impl StudioApp {
                         .get(id.as_str())
                         .copied()
                         .unwrap_or_default();
-                    let steam_state = details.map(|item| {
-                        if item.downloading {
-                            "Downloading in Steam"
-                        } else if item.needs_update {
-                            "Steam update available"
-                        } else if item.installed {
-                            "Downloaded in Steam"
-                        } else {
-                            "Subscribed"
-                        }
-                    });
                     ui.group(|ui| {
                         ui.horizontal_wrapped(|ui| {
                             let mut selected = self.workshop.selected_items.contains(id);
@@ -298,9 +287,6 @@ impl StudioApp {
                                 action = Some(SubscriptionAction::SetSelected(id.clone(), selected));
                             }
                             ui.strong(title);
-                            if let Some(state) = steam_state {
-                                ui.weak(state);
-                            }
                             if local.available {
                                 ui.weak("Available in Library");
                                 if local.conflicted {
@@ -309,11 +295,23 @@ impl StudioApp {
                             }
                         });
                         ui.collapsing("Actions and details", |ui| {
+                            if let Some(item) = details {
+                                let state = if item.downloading {
+                                    "Waiting for Steam to finish its download"
+                                } else if item.needs_update {
+                                    "An update is available from Steam"
+                                } else if item.installed {
+                                    "Available through Steam"
+                                } else {
+                                    "Following on Steam"
+                                };
+                                ui.weak(state);
+                            }
                             if let Some((current, total)) = details
                                 .and_then(|item| item.download_progress.filter(|(_, total)| *total > 0))
                             {
                                 ui.weak(format!(
-                                    "Steam download · {:.1} / {:.1} MiB",
+                                    "Steam transfer · {:.1} / {:.1} MiB",
                                     current as f64 / 1_048_576.0,
                                     total as f64 / 1_048_576.0
                                 ));
@@ -414,9 +412,9 @@ impl StudioApp {
                                 );
                             }
                             let download_label = if local.available {
-                                "Update local copy"
+                                "Update in Library"
                             } else {
-                                "Download to this app"
+                                "Add to Library"
                             };
                             ui.horizontal_wrapped(|ui| {
                                 if ui

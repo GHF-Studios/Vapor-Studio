@@ -7,6 +7,7 @@ pub(crate) fn draw_composition_preview(
     ui: &mut egui::Ui,
     preview: &CompositionPreview,
     can_download_missing_items: bool,
+    catalog: &[vapor_client_application::CatalogContent],
 ) -> Vec<String> {
     let mut workshop_downloads = Vec::new();
     ui.group(|ui| {
@@ -22,49 +23,48 @@ pub(crate) fn draw_composition_preview(
                 );
             }
         });
-        ui.weak("This is a read-only plan. It has not downloaded or installed anything.");
+        ui.weak("Nothing has changed yet. Review what this setup needs before continuing.");
         if !can_download_missing_items {
             status_text(
                 ui,
-                "Downloads are paused until Studio finishes its current task and your saved project files are up to date.",
+                "Getting missing items is paused until Studio finishes its current task and your saved project files are up to date.",
                 StatusTone::Caution,
             );
         }
         for node in &preview.nodes {
             let source = match (node.source, node.already_installed) {
                 (CompositionPreviewSource::Workspace, true) => {
-                    "Project folder copy · already installed"
+                    "From project · already installed"
                 }
-                (CompositionPreviewSource::Workspace, false) => "Project folder copy",
-                (CompositionPreviewSource::Cache, true) => "Downloaded here · already ready",
-                (CompositionPreviewSource::Cache, false) => "Downloaded here",
+                (CompositionPreviewSource::Workspace, false) => "From project",
+                (CompositionPreviewSource::Cache, true) => "In your Library · already installed",
+                (CompositionPreviewSource::Cache, false) => "In your Library",
                 (CompositionPreviewSource::Installed, _) => {
-                    "Already installed · no source to update"
+                    "Already installed"
                 }
-                (CompositionPreviewSource::RootSeed, _) => "Download needed",
+                (CompositionPreviewSource::RootSeed, _) => "Available on Workshop",
             };
             ui.horizontal(|ui| {
                 ui.label(format!(
-                    "{} · {}{}",
+                    "{} · {}",
                     super::super::display_content_kind(&node.kind),
-                    node.id,
-                    node.version
-                        .as_ref()
-                        .map(|version| format!("@{version}"))
-                        .unwrap_or_default()
+                    super::super::display_catalog_identity(
+                        &node.id,
+                        node.version.as_deref(),
+                        catalog,
+                    ),
                 ));
                 ui.weak(source);
             });
             for dependency in &node.dependencies {
                 ui.small(format!(
-                    "↳ {} · {}{}{}",
+                    "↳ {} · {}{}",
                     dependency.relationship,
-                    dependency.id,
-                    dependency
-                        .version
-                        .as_ref()
-                        .map(|version| format!(" ({version})"))
-                        .unwrap_or_default(),
+                    super::super::display_catalog_identity(
+                        &dependency.id,
+                        dependency.version.as_deref(),
+                        catalog,
+                    ),
                     if dependency.optional {
                         " · optional"
                     } else {
@@ -84,7 +84,7 @@ pub(crate) fn draw_composition_preview(
         if !workshop_downloads.is_empty() {
             ui.separator();
             ui.label(format!(
-                "{} required Workshop item{} need to be downloaded before this setup can be installed.",
+                "{} required Workshop item{} need to be added to your Library before this setup can be installed.",
                 workshop_downloads.len(),
                 if workshop_downloads.len() == 1 { "" } else { "s" }
             ));
@@ -92,13 +92,13 @@ pub(crate) fn draw_composition_preview(
                 .add_enabled(
                     can_download_missing_items,
                     egui::Button::new(format!(
-                        "Download {} missing item{}",
+                        "Add {} item{} to Library",
                         workshop_downloads.len(),
                         if workshop_downloads.len() == 1 { "" } else { "s" }
                     )),
                 )
                 .on_disabled_hover_text(
-                    "Finish the current task and save or reload project edits before downloading these items.",
+                    "Finish the current task and save or reload project edits before adding these items.",
                 )
                 .clicked();
             if !download_clicked {

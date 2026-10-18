@@ -575,18 +575,32 @@ pub(crate) fn display_content_kind(kind: &str) -> String {
 /// Player-facing title for a catalog item. Stable IDs remain available in
 /// technical details, while the authored name is used as the primary label.
 pub(crate) fn display_catalog_name(content: &vapor_client_application::CatalogContent) -> String {
-    content
-        .name
-        .as_deref()
+    display_content_name(&content.id, content.name.as_deref())
+}
+
+pub(crate) fn display_catalog_identity(
+    id: &str,
+    version: Option<&str>,
+    catalog: &[vapor_client_application::CatalogContent],
+) -> String {
+    let name = catalog
+        .iter()
+        .find(|content| content.id == id && content.version.as_deref() == version)
+        .map(display_catalog_name)
+        .unwrap_or_else(|| display_content_name(id, None));
+    version.map_or(name.clone(), |version| format!("{name} · v{version}"))
+}
+
+fn display_content_name(id: &str, authored_name: Option<&str>) -> String {
+    authored_name
         .filter(|name| !name.trim().is_empty())
         .map(str::trim)
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| {
-            let words = content
-                .id
+            let words = id
                 .rsplit(['/', ':', '.'])
                 .next()
-                .unwrap_or(&content.id)
+                .unwrap_or(id)
                 .split(['-', '_'])
                 .filter(|word| !word.is_empty())
                 .map(|word| {
@@ -600,7 +614,7 @@ pub(crate) fn display_catalog_name(content: &vapor_client_application::CatalogCo
                 })
                 .collect::<Vec<_>>();
             if words.is_empty() {
-                content.id.clone()
+                id.to_owned()
             } else {
                 words.join(" ")
             }
@@ -618,10 +632,10 @@ pub(super) fn catalog_location_label(
     location: &vapor_client_application::CatalogLocation,
 ) -> &'static str {
     match location.kind {
-        vapor_client_application::CatalogLocationKind::Workspace => "Workspace",
-        vapor_client_application::CatalogLocationKind::Cache => "Downloaded",
+        vapor_client_application::CatalogLocationKind::Workspace => "In a project",
+        vapor_client_application::CatalogLocationKind::Cache => "In your Library",
         vapor_client_application::CatalogLocationKind::Installed if location.enabled => "Installed",
-        vapor_client_application::CatalogLocationKind::Installed => "Installed · disabled",
+        vapor_client_application::CatalogLocationKind::Installed => "Installed · inactive",
     }
 }
 

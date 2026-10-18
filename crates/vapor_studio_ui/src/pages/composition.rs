@@ -436,7 +436,7 @@ impl StudioApp {
             }
         } else {
             ui.separator();
-            ui.weak("Choose a project to review what it includes. Downloaded and installed copies are managed separately.");
+            ui.weak("Choose a project to review what it includes. Your project files stay separate from the copies used by a composition.");
         }
         if let Some(change) = self.authoring.pending_composition_role_change.clone() {
             let proposal_available = change.proposed.as_ref().is_none_or(|proposal| {
@@ -567,6 +567,7 @@ impl StudioApp {
                     ui,
                     &preview,
                     !operation_running && workspace_manifest_saved,
+                    &self.catalog.items,
                 );
             if !published_file_ids.is_empty() {
                 self.download_source_composition_dependencies(

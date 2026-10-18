@@ -81,6 +81,7 @@ impl StudioApp {
                     ui,
                     preview,
                     !self.operation.running && !self.has_unsaved_workspace_edits(),
+                    &self.catalog.items,
                 );
             if !published_file_ids.is_empty() {
                 action = Some(CompositionContentAction::DownloadDependencies(
@@ -95,14 +96,24 @@ impl StudioApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
                         "Engine: {}",
-                        content_selector(&graph.effective_engine)
+                        super::super::display_catalog_identity(
+                            &graph.effective_engine.id,
+                            graph.effective_engine.version.as_deref(),
+                            &self.catalog.items,
+                        )
                     ));
                     ui.label(format!(
                         "Game: {}",
                         graph
                             .effective_game
                             .as_ref()
-                            .map(content_selector)
+                            .map(|identity| {
+                                super::super::display_catalog_identity(
+                                    &identity.id,
+                                    identity.version.as_deref(),
+                                    &self.catalog.items,
+                                )
+                            })
                             .unwrap_or_else(|| "None".to_owned())
                     ));
                 });
@@ -112,7 +123,11 @@ impl StudioApp {
                         for node in &graph.nodes {
                             ui.horizontal_wrapped(|ui| {
                                 ui.label(super::super::display_content_kind(node.kind.as_str()));
-                                ui.label(content_selector(&node.content));
+                                ui.label(super::super::display_catalog_identity(
+                                    &node.content.id,
+                                    node.content.version.as_deref(),
+                                    &self.catalog.items,
+                                ));
                                 if !node.dependencies.is_empty() {
                                     ui.weak(format!("{} dependencies", node.dependencies.len()));
                                 }

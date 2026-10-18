@@ -292,7 +292,7 @@ impl StudioApp {
             section_header(
                 ui,
                 "On this device",
-                "Content already downloaded or included in an open project folder.",
+                "Content available in your Library or the open project folder.",
             );
             self.draw_workspace_candidates(ui, &filter);
             self.draw_catalog_list(ui, &filter);
@@ -308,7 +308,7 @@ impl StudioApp {
                 section_header(
                     main,
                     "On this device",
-                    "Downloaded here or included in an open project folder.",
+                    "Available in your Library or the open project folder.",
                 );
                 egui::ScrollArea::vertical().show(main, |ui| {
                     self.draw_workspace_candidates(ui, &filter);
