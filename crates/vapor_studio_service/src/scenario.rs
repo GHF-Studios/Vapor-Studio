@@ -25,6 +25,8 @@ pub struct ExpectedState {
     pub active_profile_id: Option<String>,
     pub selected_content_id: Option<String>,
     pub catalog_len: Option<usize>,
+    pub workspace_source_projects_len: Option<usize>,
+    pub workspace_candidates_len: Option<usize>,
 }
 
 pub fn load_scenario(path: &Path) -> Result<Scenario, String> {

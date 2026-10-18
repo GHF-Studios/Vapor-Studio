@@ -136,6 +136,22 @@ pub fn source_dependency_choice_group(
     content::source_dependency_choice_group(parent, child)
 }
 
+/// Parse a content kind emitted by workspace project discovery.
+pub fn source_project_kind(kind: &str) -> Option<ShellContentKind> {
+    Some(match kind {
+        "engine" => ShellContentKind::Engine,
+        "game" => ShellContentKind::Game,
+        "packagepack" => ShellContentKind::Packagepack,
+        "enginepack" => ShellContentKind::Enginepack,
+        "gamepack" => ShellContentKind::Gamepack,
+        "modpack" => ShellContentKind::Modpack,
+        "engine-mod" => ShellContentKind::EngineMod,
+        "game-mod" => ShellContentKind::GameMod,
+        "extension-mod" => ShellContentKind::ExtensionMod,
+        _ => return None,
+    })
+}
+
 /// Return every exclusive dependency role required for a project to be valid.
 pub fn source_required_dependency_choice_groups(
     parent: vapor_core::ContentKind,
@@ -181,6 +197,14 @@ pub fn discover_source_content(
             },
         })
         .collect())
+}
+
+/// Validate the active Vapor Workspace manifest without requiring every
+/// content project inside it to be valid.
+pub fn validate_workspace(workspace_root: &Path) -> Result<(), String> {
+    vapor_core::VaporWorkspace::load(workspace_root)
+        .map(|_| ())
+        .map_err(|error| format!("{}: {error}", workspace_root.display()))
 }
 
 pub fn validate_profile_source(

@@ -94,7 +94,6 @@ pub(super) fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &
         RememberWorkspace => "Make project folder available",
         AdoptContentProject => "Add existing project",
         UnregisterContentProject => "Remove project from Studio",
-        DiscoverContentProjects => "Find projects in folder",
         DiscoverWorkspace => "Read project files",
         OpenWorkspaceFile => "Open file",
         SaveWorkspaceFile => "Save project files",

@@ -114,6 +114,45 @@ fn run_scenario(executable: &Path, scenario_path: &Path) -> Result<(), String> {
                 response.snapshot.catalog.len()
             ));
         }
+        if step
+            .expect
+            .workspace_source_projects_len
+            .is_some_and(|expected| {
+                response.snapshot.workspace_content.source_projects.len() != expected
+            })
+        {
+            return Err(format!(
+                "step {} expected {} workspace source projects, got {}",
+                index + 1,
+                step.expect
+                    .workspace_source_projects_len
+                    .unwrap_or_default(),
+                response.snapshot.workspace_content.source_projects.len()
+            ));
+        }
+        if step
+            .expect
+            .workspace_candidates_len
+            .is_some_and(|expected| {
+                response
+                    .snapshot
+                    .workspace_content
+                    .unregistered_projects
+                    .len()
+                    != expected
+            })
+        {
+            return Err(format!(
+                "step {} expected {} unregistered projects, got {}",
+                index + 1,
+                step.expect.workspace_candidates_len.unwrap_or_default(),
+                response
+                    .snapshot
+                    .workspace_content
+                    .unregistered_projects
+                    .len()
+            ));
+        }
         println!(
             "{}. {} · revision {} → {} · {:?}{}",
             index + 1,
@@ -162,11 +201,21 @@ fn run_interactive(executable: &Path) -> Result<(), String> {
         let action = match parts.next().unwrap_or_default() {
             "help" => {
                 println!(
-                    "refresh | search QUERY | inspect ID [VERSION] | profile ID | publish | snapshot | quit"
+                    "open WORKSPACE | discover | refresh | search QUERY | inspect ID [VERSION] | profile ID | publish | snapshot | quit"
                 );
                 continue;
             }
             "refresh" => StudioAction::Catalog(CatalogAction::Refresh),
+            "discover" => StudioAction::Catalog(CatalogAction::DiscoverContentProjects),
+            "open" => {
+                let Some(root) = parts.next() else {
+                    println!("usage: open WORKSPACE_PATH");
+                    continue;
+                };
+                StudioAction::Workspace(vapor_studio_protocol::WorkspaceAction::Open {
+                    root: root.to_owned(),
+                })
+            }
             "search" => StudioAction::Catalog(CatalogAction::Search {
                 query: parts.collect::<Vec<_>>().join(" "),
             }),
@@ -238,6 +287,28 @@ fn print_snapshot(snapshot: &vapor_studio_protocol::StudioSnapshot) {
         snapshot.catalog.len(),
         snapshot.host.mode
     );
+    if !snapshot.workspace_content.source_projects.is_empty()
+        || snapshot.workspace_content.source_projects_loaded
+        || snapshot.workspace_content.unregistered_projects_loaded
+    {
+        println!(
+            "workspace · {} source project(s) · {} adoption candidate(s){}{}",
+            snapshot.workspace_content.source_projects.len(),
+            snapshot.workspace_content.unregistered_projects.len(),
+            snapshot
+                .workspace_content
+                .source_projects_error
+                .as_ref()
+                .map(|error| format!(" · source discovery error: {error}"))
+                .unwrap_or_default(),
+            snapshot
+                .workspace_content
+                .unregistered_projects_error
+                .as_ref()
+                .map(|error| format!(" · project scan error: {error}"))
+                .unwrap_or_default(),
+        );
+    }
     for entry in &snapshot.catalog {
         println!(
             "  {} {} [{}] · {} location(s)",

@@ -44,35 +44,6 @@ impl StudioApp {
         self.status = summary;
     }
 
-    pub(super) fn apply_unregistered_project_scan(
-        &mut self,
-        scan: vapor_studio_core::UnregisteredProjectScan,
-    ) {
-        self.status = format!(
-            "Found {} project{} you can add and {} item{} needing attention.",
-            scan.candidates.len(),
-            if scan.candidates.len() == 1 { "" } else { "s" },
-            scan.diagnostics.len(),
-            if scan.diagnostics.len() == 1 { "" } else { "s" },
-        );
-        self.workspace.unregistered_projects = scan;
-        self.workspace.unregistered_scan_completed = true;
-        self.workspace.unregistered_scan_error = None;
-    }
-
-    pub(super) fn apply_unregistered_project_scan_error(&mut self, error: String) {
-        let has_previous_results = self.workspace.unregistered_scan_completed;
-        self.workspace.unregistered_scan_error = Some(error.clone());
-        self.status = format!(
-            "Could not refresh the workspace project scan: {error}. {}",
-            if has_previous_results {
-                "The last successful results remain available."
-            } else {
-                "No successful scan is available yet."
-            }
-        );
-    }
-
     pub(super) fn validate_source_project(&mut self, content: &vapor_studio_core::SourceContent) {
         if !self.require_open_workspace("validate this content project") {
             return;
@@ -153,19 +124,9 @@ impl StudioApp {
         if !self.require_open_workspace("scan for unregistered content") {
             return;
         }
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let root = PathBuf::from(self.workspace.root.trim());
-        self.spawn(OperationKind::DiscoverContentProjects, move |_context| {
-            OperationResult::UnregisteredProjectScan(
-                vapor_studio_core::scan_unregistered_content_projects(&executable, &root),
-            )
-        });
+        self.submit_service_action(vapor_studio_protocol::StudioAction::Catalog(
+            vapor_studio_protocol::CatalogAction::DiscoverContentProjects,
+        ));
         self.status = "Finding unregistered content manifests in this Workspace…".to_owned();
     }
 

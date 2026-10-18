@@ -185,7 +185,6 @@ impl StudioApp {
             | OperationKind::RememberWorkspace
             | OperationKind::AdoptContentProject
             | OperationKind::UnregisterContentProject
-            | OperationKind::DiscoverContentProjects
             | OperationKind::DiscoverWorkspace => OperationPhase::Resolving,
             OperationKind::CreateWorkspace => OperationPhase::Building,
             OperationKind::CreateWorkspaceFile

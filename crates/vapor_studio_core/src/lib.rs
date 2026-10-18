@@ -46,13 +46,14 @@ pub use vapor_steam::{WorkshopItem, WorkshopPage, WorkshopSubscription};
 
 pub use workspace::{
     SourceComposition, SourceCompositionLink, SourceContent, SourceRuntimeOutputs,
-    SourceWorkshopMetadata, UnregisteredProjectCandidate, UnregisteredProjectScan,
-    WorkshopPolicyDraft, adopt_workspace_content_project, create_basic_content_workspace,
-    create_content_workspace, create_content_workspace_with_workshop, discover_source_content,
-    load_source_composition, load_source_runtime_outputs, load_source_workshop_metadata,
-    remember_workspace, save_source_composition, save_source_runtime_outputs,
-    save_source_workshop_metadata, scan_unregistered_content_projects, source_dependency_allowed,
-    source_dependency_choice_group, source_dependency_relationship,
-    source_required_dependency_choice_groups, unregister_workspace_content_project,
-    validate_profile_source, validate_workspace_source,
+    SourceWorkshopMetadata, SourceWorkshopPolicy, UnregisteredProjectCandidate,
+    UnregisteredProjectScan, WorkshopPolicyDraft, adopt_workspace_content_project,
+    create_basic_content_workspace, create_content_workspace,
+    create_content_workspace_with_workshop, discover_source_content, load_source_composition,
+    load_source_runtime_outputs, load_source_workshop_metadata, remember_workspace,
+    save_source_composition, save_source_runtime_outputs, save_source_workshop_metadata,
+    scan_unregistered_content_projects, source_dependency_allowed, source_dependency_choice_group,
+    source_dependency_relationship, source_project_kind, source_required_dependency_choice_groups,
+    unregister_workspace_content_project, validate_profile_source, validate_workspace,
+    validate_workspace_source,
 };

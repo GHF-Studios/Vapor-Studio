@@ -18,7 +18,8 @@ pub use message::{
 pub use state::{
     AvailableAction, CatalogConflict, CatalogEntry, CatalogLocation, CatalogLocationKind,
     HostSummary, OperationEvent, OperationPhase, OperationStatus, OperationSummary, StudioEvent,
-    StudioRevision, StudioSnapshot,
+    StudioRevision, StudioSnapshot, WorkspaceContentSnapshot, WorkspaceProjectCandidate,
+    WorkspaceSourceProject, WorkspaceWorkshopPolicy,
 };
 
 #[cfg(test)]
@@ -192,7 +193,7 @@ mod tests {
             expected_revision: Some(StudioRevision(3)),
             action: StudioAction::Catalog(CatalogAction::Refresh),
         });
-        assert_round_trip(StudioEvent::Snapshot(StudioSnapshot {
+        assert_round_trip(StudioEvent::Snapshot(Box::new(StudioSnapshot {
             revision: StudioRevision(3),
             host: HostSummary {
                 app_root: Some("/app".into()),
@@ -222,13 +223,45 @@ mod tests {
                     install_source: None,
                 }],
             }],
+            workspace_content: WorkspaceContentSnapshot {
+                source_projects: vec![WorkspaceSourceProject {
+                    id: "loo-cast.game".into(),
+                    version: Some("1.0.0".into()),
+                    kind: "game".into(),
+                    root: "game".into(),
+                    manifest: "game/Vapor.toml".into(),
+                    binaries: vec!["loo-cast-game".into()],
+                    libraries: vec![],
+                    dependencies: vec!["required · spacetime-engine".into()],
+                    workshop: WorkspaceWorkshopPolicy {
+                        app_id: Some(2122620),
+                        published_file_id: Some("3762162407".into()),
+                        visibility: Some("public".into()),
+                        title: Some("Loo-Cast Game".into()),
+                        description: Some("Game content".into()),
+                        tags: vec!["game".into()],
+                        change_note: None,
+                    },
+                }],
+                source_projects_loaded: true,
+                source_projects_error: None,
+                unregistered_projects: vec![WorkspaceProjectCandidate {
+                    path: "mods/terrain".into(),
+                    id: "mod-terrain".into(),
+                    kind: "game-mod".into(),
+                }],
+                unregistered_diagnostics: vec!["ignored invalid project".into()],
+                unregistered_projects_loaded: true,
+                unregistered_projects_error: None,
+                workspace_validation_error: Some("metadata needs repair".into()),
+            },
             selected_content_id: None,
             available_actions: vec![AvailableAction {
                 id: "catalog.refresh".into(),
                 enabled: true,
                 reason: None,
             }],
-        }));
+        })));
         assert_round_trip(StudioEvent::OperationChanged(OperationEvent {
             revision: StudioRevision(4),
             id: "operation-1".into(),
@@ -246,5 +279,25 @@ mod tests {
         assert_round_trip(ProtocolFrame::Event(StudioEvent::ServiceReady {
             protocol_version: PROTOCOL_VERSION,
         }));
+    }
+
+    #[test]
+    fn snapshots_from_the_previous_protocol_shape_default_workspace_discovery() {
+        let prior_snapshot = r#"{
+            "revision": 0,
+            "host": {"app_root": null, "workspace": null, "mode": "production"},
+            "active_profile_id": null,
+            "active_operation": null,
+            "catalog": [],
+            "selected_content_id": null,
+            "available_actions": []
+        }"#;
+
+        let snapshot: StudioSnapshot = serde_json::from_str(prior_snapshot)
+            .expect("older snapshot omitting additive workspace state remains readable");
+        assert_eq!(
+            snapshot.workspace_content,
+            WorkspaceContentSnapshot::default()
+        );
     }
 }

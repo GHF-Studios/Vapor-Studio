@@ -25,8 +25,57 @@ pub struct StudioSnapshot {
     pub active_profile_id: Option<String>,
     pub active_operation: Option<OperationSummary>,
     pub catalog: Vec<CatalogEntry>,
+    #[serde(default)]
+    pub workspace_content: WorkspaceContentSnapshot,
     pub selected_content_id: Option<String>,
     pub available_actions: Vec<AvailableAction>,
+}
+
+/// Authoritative discovery state for source projects in the active workspace.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceContentSnapshot {
+    pub source_projects: Vec<WorkspaceSourceProject>,
+    pub source_projects_loaded: bool,
+    pub source_projects_error: Option<String>,
+    pub unregistered_projects: Vec<WorkspaceProjectCandidate>,
+    pub unregistered_diagnostics: Vec<String>,
+    pub unregistered_projects_loaded: bool,
+    pub unregistered_projects_error: Option<String>,
+    pub workspace_validation_error: Option<String>,
+}
+
+/// A content project declared by the active workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSourceProject {
+    pub id: String,
+    pub version: Option<String>,
+    pub kind: String,
+    pub root: String,
+    pub manifest: String,
+    pub binaries: Vec<String>,
+    pub libraries: Vec<String>,
+    pub dependencies: Vec<String>,
+    pub workshop: WorkspaceWorkshopPolicy,
+}
+
+/// Workshop publication intent attached to a workspace source project.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceWorkshopPolicy {
+    pub app_id: Option<u32>,
+    pub published_file_id: Option<String>,
+    pub visibility: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub change_note: Option<String>,
+}
+
+/// A valid content project that can be explicitly adopted into the workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceProjectCandidate {
+    pub path: String,
+    pub id: String,
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,7 +164,7 @@ pub enum OperationStatus {
 #[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
 pub enum StudioEvent {
     ServiceReady { protocol_version: u16 },
-    Snapshot(StudioSnapshot),
+    Snapshot(Box<StudioSnapshot>),
     OperationChanged(OperationEvent),
     ServiceStopping,
     ProtocolError(crate::StudioError),

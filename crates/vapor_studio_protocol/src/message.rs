@@ -58,6 +58,6 @@ pub enum StudioErrorCode {
 #[serde(tag = "kind", content = "payload", rename_all = "kebab-case")]
 pub enum ProtocolFrame {
     Request(StudioRequest),
-    Response(StudioResponse),
+    Response(Box<StudioResponse>),
     Event(StudioEvent),
 }

@@ -1,41 +1,12 @@
 use super::StudioApp;
-use super::operation_protocol::OperationResult;
 use crate::navigation::CatalogSourceFilter;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use vapor_core::ContentKind;
 use vapor_studio_core::ContentIdentity;
 use vapor_studio_protocol::{
     CatalogEntry as ServiceCatalogEntry, CatalogLocationKind as ServiceLocationKind, ProtocolFrame,
     StudioAction, StudioEvent, StudioResponseKind,
 };
-
-pub(super) struct WorkspaceDiscovery {
-    pub(super) source: Result<Vec<vapor_studio_core::SourceContent>, String>,
-    pub(super) unregistered: Result<vapor_studio_core::UnregisteredProjectScan, String>,
-    pub(super) validation_error: Option<String>,
-}
-
-pub(super) fn discover_workspace_data(
-    executable: &Path,
-    workspace_root: Option<&Path>,
-) -> WorkspaceDiscovery {
-    let workspace_validation_error = workspace_root.and_then(|root| {
-        vapor_core::VaporWorkspace::load(root)
-            .err()
-            .map(|error| format!("{}: {error}", root.display()))
-    });
-    let source = workspace_root
-        .map(|root| vapor_studio_core::discover_source_content(executable, root))
-        .unwrap_or_else(|| Ok(Vec::new()));
-    let unregistered = workspace_root
-        .map(|root| vapor_studio_core::scan_unregistered_content_projects(executable, root))
-        .unwrap_or_else(|| Ok(vapor_studio_core::UnregisteredProjectScan::default()));
-    WorkspaceDiscovery {
-        source,
-        unregistered,
-        validation_error: workspace_validation_error,
-    }
-}
 
 pub(super) struct CatalogState {
     pub(super) discover_tab: DiscoverTab,
@@ -184,6 +155,42 @@ impl StudioApp {
     fn apply_service_catalog_snapshot(&mut self, snapshot: &vapor_studio_protocol::StudioSnapshot) {
         self.catalog.items = snapshot.catalog.iter().map(service_catalog_entry).collect();
         self.catalog.catalog_discovery_loaded = true;
+        self.catalog.sources = snapshot
+            .workspace_content
+            .source_projects
+            .iter()
+            .map(service_source_project)
+            .collect();
+        self.catalog.source_discovery_loaded = snapshot.workspace_content.source_projects_loaded;
+        self.catalog.source_discovery_error =
+            snapshot.workspace_content.source_projects_error.clone();
+        self.workspace.workspace_validation_error = snapshot
+            .workspace_content
+            .workspace_validation_error
+            .clone();
+
+        let mut candidates = Vec::new();
+        let mut diagnostics = snapshot.workspace_content.unregistered_diagnostics.clone();
+        for candidate in &snapshot.workspace_content.unregistered_projects {
+            if let Some(candidate) = service_workspace_candidate(candidate) {
+                candidates.push(candidate);
+            } else {
+                diagnostics.push(format!(
+                    "Studio service returned unsupported content kind '{}' for {}.",
+                    candidate.kind, candidate.id
+                ));
+            }
+        }
+        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan {
+            candidates,
+            diagnostics,
+        };
+        self.workspace.unregistered_scan_completed =
+            snapshot.workspace_content.unregistered_projects_loaded;
+        self.workspace.unregistered_scan_error = snapshot
+            .workspace_content
+            .unregistered_projects_error
+            .clone();
         if let Some(selected_id) = snapshot.selected_content_id.as_deref() {
             self.catalog.selected = self
                 .catalog
@@ -201,89 +208,6 @@ impl StudioApp {
         }) {
             self.catalog.selected = None;
         }
-    }
-
-    pub(super) fn refresh_content_catalog(&mut self) {
-        self.profile_composition.invalidate_preview();
-        self.submit_service_action(StudioAction::Catalog(
-            vapor_studio_protocol::CatalogAction::Refresh,
-        ));
-        let root = self
-            .profile
-            .items
-            .get(self.profile.active_index)
-            .and_then(|profile| profile.workspace.as_ref())
-            .map(|workspace| workspace.root.clone());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Catalog refresh requested; workspace scan failed: {error}");
-                return;
-            }
-        };
-        self.spawn(
-            vapor_studio_core::OperationKind::DiscoverContentProjects,
-            move |_context| {
-                let discovery = discover_workspace_data(&executable, root.as_deref());
-                OperationResult::Discovery(
-                    discovery.source,
-                    discovery.unregistered,
-                    discovery.validation_error,
-                )
-            },
-        );
-    }
-
-    pub(super) fn apply_workspace_discovery(
-        &mut self,
-        source_result: Result<Vec<vapor_studio_core::SourceContent>, String>,
-        unregistered_result: Result<vapor_studio_core::UnregisteredProjectScan, String>,
-        workspace_validation_error: Option<String>,
-    ) {
-        self.workspace.workspace_validation_error = workspace_validation_error;
-        match source_result {
-            Ok(contents) => {
-                self.catalog.sources = contents;
-                self.catalog.source_discovery_loaded = true;
-                self.catalog.source_discovery_error = None;
-            }
-            Err(error) => self.catalog.source_discovery_error = Some(error),
-        }
-        match unregistered_result {
-            Ok(scan) => {
-                self.workspace.unregistered_scan_completed = true;
-                self.workspace.unregistered_scan_error = None;
-                self.workspace.unregistered_projects = scan;
-            }
-            Err(error) => self.workspace.unregistered_scan_error = Some(error),
-        }
-        let source_count = self.catalog.sources.len();
-        self.status = match self.catalog.source_discovery_error.as_deref() {
-            None if self.profile.items[self.profile.active_index].workspace.is_some() => {
-                format!("Discovered {source_count} workspace projects; the local catalog is provided by the Studio service.")
-            }
-            None => "Workspace source discovery is ready; the local catalog is provided by the Studio service.".to_owned(),
-            Some(error) => format!("Workspace source discovery failed: {error}"),
-        };
-        if let Some(error) = self.workspace.unregistered_scan_error.as_deref() {
-            self.status.push_str(&format!(
-                " Workspace project scan could not complete: {error}"
-            ));
-        }
-        if self.workspace.unregistered_scan_completed {
-            let candidates = self.workspace.unregistered_projects.candidates.len();
-            if candidates > 0 {
-                self.status.push_str(&format!(
-                    " Found {candidates} existing project{} you can add to Studio.",
-                    if candidates == 1 { "" } else { "s" },
-                ));
-            }
-        }
-        if let Some(error) = self.workspace.workspace_validation_error.as_deref() {
-            self.status.push_str(&format!(
-                " Workspace validation needs repair; save fixes and refresh workspace content before running workspace operations. {error}"
-            ));
-        }
         if self.catalog.local_catalog_current() && self.catalog.source_snapshot_current() {
             match self.profile_composition.take_repreview_request() {
                 Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::ActiveProfile) => {
@@ -292,25 +216,21 @@ impl StudioApp {
                 Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::Source {
                     selector,
                     workspace_root,
-                }) => {
-                    self.preview_composition(
-                        selector,
-                        Some(workspace_root),
-                        "Re-resolving the source composition against the refreshed cache…",
-                    );
-                }
+                }) => self.preview_composition(
+                    selector,
+                    Some(workspace_root),
+                    "Re-resolving the source composition against the refreshed cache…",
+                ),
                 None => {}
             }
         }
-        if self.catalog.selected.as_ref().is_some_and(|identity| {
-            !self
-                .catalog
-                .items
-                .iter()
-                .any(|content| catalog_content_selector_matches(content, identity))
-        }) {
-            self.catalog.selected = None;
-        }
+    }
+
+    pub(super) fn refresh_content_catalog(&mut self) {
+        self.profile_composition.invalidate_preview();
+        self.submit_service_action(StudioAction::Catalog(
+            vapor_studio_protocol::CatalogAction::Refresh,
+        ));
     }
 }
 
@@ -371,6 +291,7 @@ pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {
         "engine-mod" => ContentKind::EngineMod,
         "game-mod" => ContentKind::GameMod,
         "extension-mod" => ContentKind::ExtensionMod,
+        "library" => ContentKind::Library,
         _ => return None,
     })
 }
@@ -528,9 +449,96 @@ fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_studio_core::Cata
     }
 }
 
+fn service_source_project(
+    project: &vapor_studio_protocol::WorkspaceSourceProject,
+) -> vapor_studio_core::SourceContent {
+    vapor_studio_core::SourceContent {
+        id: project.id.clone(),
+        version: project.version.clone(),
+        kind: project.kind.clone(),
+        root: PathBuf::from(&project.root),
+        manifest: PathBuf::from(&project.manifest),
+        binaries: project.binaries.clone(),
+        libraries: project.libraries.clone(),
+        dependencies: project.dependencies.clone(),
+        workshop: vapor_studio_core::SourceWorkshopPolicy {
+            app_id: project.workshop.app_id,
+            published_file_id: project.workshop.published_file_id.clone(),
+            visibility: project.workshop.visibility.clone(),
+            title: project.workshop.title.clone(),
+            description: project.workshop.description.clone(),
+            tags: project.workshop.tags.clone(),
+            change_note: project.workshop.change_note.clone(),
+        },
+    }
+}
+
+fn service_workspace_candidate(
+    candidate: &vapor_studio_protocol::WorkspaceProjectCandidate,
+) -> Option<vapor_studio_core::UnregisteredProjectCandidate> {
+    Some(vapor_studio_core::UnregisteredProjectCandidate {
+        path: PathBuf::from(&candidate.path),
+        id: candidate.id.clone(),
+        kind: vapor_studio_core::source_project_kind(&candidate.kind)?,
+    })
+}
+
 #[cfg(test)]
 mod selector_tests {
-    use super::content_selector_matches;
+    use super::{content_selector_matches, service_source_project, service_workspace_candidate};
+    use vapor_studio_protocol::{
+        WorkspaceProjectCandidate, WorkspaceSourceProject, WorkspaceWorkshopPolicy,
+    };
+
+    #[test]
+    fn service_workspace_projection_preserves_source_intent_and_candidate_identity() {
+        let source = service_source_project(&WorkspaceSourceProject {
+            id: "example.game".into(),
+            version: Some("1.2.3".into()),
+            kind: "game".into(),
+            root: "/work/game".into(),
+            manifest: "/work/game/Vapor.toml".into(),
+            binaries: vec!["example-game".into()],
+            libraries: vec![],
+            dependencies: vec!["required · example.engine".into()],
+            workshop: WorkspaceWorkshopPolicy {
+                app_id: Some(2122620),
+                published_file_id: Some("12345".into()),
+                visibility: Some("public".into()),
+                title: Some("Example game".into()),
+                description: Some("A test fixture".into()),
+                tags: vec!["game".into()],
+                change_note: Some("Initial release".into()),
+            },
+        });
+        assert_eq!(source.id, "example.game");
+        assert_eq!(source.version.as_deref(), Some("1.2.3"));
+        assert_eq!(source.workshop.app_id, Some(2122620));
+        assert_eq!(source.workshop.published_file_id.as_deref(), Some("12345"));
+
+        let candidate = service_workspace_candidate(&WorkspaceProjectCandidate {
+            path: "/work/mods/terrain".into(),
+            id: "terrain".into(),
+            kind: "game-mod".into(),
+        })
+        .expect("known Rust-defined content kind");
+        assert_eq!(
+            candidate.path,
+            std::path::PathBuf::from("/work/mods/terrain")
+        );
+        assert_eq!(candidate.id, "terrain");
+        assert_eq!(candidate.kind.to_string(), "game-mod");
+    }
+
+    #[test]
+    fn unsupported_workspace_candidate_kind_is_not_misrepresented() {
+        let candidate = service_workspace_candidate(&WorkspaceProjectCandidate {
+            path: "mods/future".into(),
+            id: "future".into(),
+            kind: "future-kind".into(),
+        });
+        assert!(candidate.is_none());
+    }
 
     #[test]
     fn service_selection_preserves_exact_content_version() {

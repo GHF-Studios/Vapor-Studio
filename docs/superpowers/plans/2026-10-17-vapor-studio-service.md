@@ -10,7 +10,7 @@
 
 **Spec:** [2026-10-17 Studio Service Boundary](../specs/2026-10-17-studio-service-boundary-design.md)
 
-## Current checkpoint (2026-10-17)
+## Current checkpoint (2026-10-18)
 
 Implemented and managed-validated: the typed protocol (51 semantic action
 variants), child client/server lifecycle, fixture simulator, protocol and
@@ -23,6 +23,20 @@ complete GUI migration; the detailed workflow tasks below remain open. A
 ignored local GUI lockfile is stale while managed builds enforce `--locked`, so
 shared-root sibling promotion remains unverified. No deployment or launch was
 performed.
+
+The 2026-10-18 Part 1 tranche moved registered and unregistered workspace
+project discovery behind the service snapshot and removed the matching GUI
+worker scans. The full managed validation gate passes with 33 tests. Durable
+profile state and migration remain the next service ownership boundary.
+
+## Part 1 checkpoint (2026-10-18)
+
+Workspace source-project discovery and unregistered-project scanning now run in
+`StudioSession` and are projected through `StudioSnapshot`. Catalog refresh,
+workspace open, and explicit project scans use this service state; GUI workers
+no longer perform these reads. The protocol addition defaults when decoded by a
+new client, and deterministic child-process scenarios cover workspace open and
+refresh. Profile CRUD and durable profile migration remain open.
 
 ## Global Constraints
 

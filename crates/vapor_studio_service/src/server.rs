@@ -29,7 +29,7 @@ fn serve(
     )?;
     write_frame(
         &mut output,
-        &ProtocolFrame::Event(StudioEvent::Snapshot(session.snapshot())),
+        &ProtocolFrame::Event(StudioEvent::Snapshot(Box::new(session.snapshot()))),
     )?;
 
     let mut buffer = Vec::new();
@@ -85,7 +85,7 @@ fn serve(
                 } else {
                     session.dispatch(request)
                 };
-                write_frame(&mut output, &ProtocolFrame::Response(response))?;
+                write_frame(&mut output, &ProtocolFrame::Response(Box::new(response)))?;
             }
             Ok(_) => {
                 write_frame(

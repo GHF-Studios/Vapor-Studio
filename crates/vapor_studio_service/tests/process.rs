@@ -84,6 +84,7 @@ fn every_checked_in_fixture_scenario_runs_through_a_child_process() {
     let scenarios = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios");
     for name in [
         "fixture-profile-selection.json",
+        "fixture-workspace-discovery.json",
         "workspace-open-recovery.json",
         "fixture-publisher-boundary.json",
     ] {

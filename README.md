@@ -76,8 +76,12 @@ inspect workflow behavior without opening the GUI, run the promoted service:
 ```text
 vapor-studio-service simulate
 vapor-studio-service simulate --scenario crates/vapor_studio_service/scenarios/fixture-profile-selection.json
+vapor-studio-service simulate --scenario crates/vapor_studio_service/scenarios/fixture-workspace-discovery.json
 ```
 
 The simulator starts a separate fixture-only service process. Its provider set
 contains no Steam or Workshop publisher, and the checked-in scenarios exercise
-only deterministic local state and rejection paths.
+only deterministic local state and rejection paths. The interactive commands
+include `open WORKSPACE_PATH`, `discover`, `refresh`, `search`, and `inspect`;
+workspace actions return the same typed source-project and adoption-candidate
+snapshot consumed by the GUI.

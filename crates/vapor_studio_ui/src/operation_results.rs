@@ -7,9 +7,6 @@ impl StudioApp {
             OperationResult::Workspace(Ok(workspace)) => self.apply_workspace_loaded(workspace),
             OperationResult::Workspace(Err(error)) => self.status = error,
             OperationResult::WorkspaceSelection(Err(error)) => self.status = error,
-            OperationResult::UnregisteredProjectScan(Err(error)) => {
-                self.apply_unregistered_project_scan_error(error)
-            }
             OperationResult::RememberedSources(Err(error)) => self.status = error,
             OperationResult::RememberedSources(Ok(known)) => self.apply_remembered_sources(known),
             OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
@@ -18,21 +15,9 @@ impl StudioApp {
             OperationResult::UnregisteredContentProject(Ok((summary, contents, identity))) => {
                 self.apply_unregistered_content_project(summary, contents, identity)
             }
-            OperationResult::UnregisteredProjectScan(Ok(scan)) => {
-                self.apply_unregistered_project_scan(scan)
-            }
             OperationResult::WorkspaceSelection(Ok(selection)) => {
                 self.activate_workspace(selection)
             }
-            OperationResult::Discovery(
-                source_result,
-                unregistered_result,
-                workspace_validation_error,
-            ) => self.apply_workspace_discovery(
-                source_result,
-                unregistered_result,
-                workspace_validation_error,
-            ),
             OperationResult::Message(Err(error)) => {
                 if self
                     .operation

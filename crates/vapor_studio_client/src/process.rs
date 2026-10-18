@@ -220,7 +220,7 @@ impl StudioClient {
                 _ => {}
             }
             if ready && let Some(snapshot) = snapshot {
-                self.latest_snapshot = snapshot;
+                self.latest_snapshot = *snapshot;
                 return Ok(());
             }
         }
@@ -232,7 +232,7 @@ impl StudioClient {
     ) -> Result<ProtocolFrame, ClientError> {
         let frame = frame?;
         if let ProtocolFrame::Event(StudioEvent::Snapshot(snapshot)) = &frame {
-            self.latest_snapshot = snapshot.clone();
+            self.latest_snapshot = snapshot.as_ref().clone();
         }
         if let ProtocolFrame::Response(response) = &frame {
             self.latest_snapshot = response.snapshot.clone();
@@ -319,6 +319,7 @@ fn empty_snapshot() -> StudioSnapshot {
         active_profile_id: None,
         active_operation: None,
         catalog: Vec::new(),
+        workspace_content: vapor_studio_protocol::WorkspaceContentSnapshot::default(),
         selected_content_id: None,
         available_actions: Vec::new(),
     }

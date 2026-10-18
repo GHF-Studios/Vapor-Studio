@@ -156,7 +156,6 @@ impl StudioApp {
                 return;
             }
         };
-        let open_executable = executable.clone();
         self.spawn(OperationKind::CreateWorkspace, move |_context| {
             let result = vapor_studio_core::create_basic_content_workspace(
                 &executable,
@@ -165,19 +164,10 @@ impl StudioApp {
                 &name,
             )
             .map(|root| {
-                let source_content =
-                    vapor_studio_core::discover_source_content(&open_executable, &root);
-                let unregistered_projects =
-                    vapor_studio_core::scan_unregistered_content_projects(&open_executable, &root);
                 let workspace_files = discover_workspace_files(&root);
                 WorkspaceOpenSnapshot {
                     root: root.clone(),
                     landing_section: crate::navigation::Section::Workspace,
-                    workspace_validation_error: vapor_core::VaporWorkspace::load(&root)
-                        .err()
-                        .map(|error| format!("{}: {error}", root.display())),
-                    source_content,
-                    unregistered_projects,
                     workspace_files,
                 }
             });

@@ -1,12 +1,18 @@
-use std::path::PathBuf;
-use vapor_studio_core::{CatalogContent, discover_content_catalog};
+use std::path::{Path, PathBuf};
+use vapor_studio_core::{
+    CatalogContent, SourceContent, discover_content_catalog, discover_source_content,
+    scan_unregistered_content_projects,
+};
 use vapor_studio_protocol::{
     AvailableAction, CatalogAction, CatalogConflict, CatalogEntry, CatalogLocation,
     CatalogLocationKind, HostSummary, StudioAction, StudioError, StudioErrorCode, StudioRequest,
-    StudioResponse, StudioResponseKind, StudioRevision, StudioSnapshot,
+    StudioResponse, StudioResponseKind, StudioRevision, StudioSnapshot, WorkspaceContentSnapshot,
+    WorkspaceProjectCandidate, WorkspaceSourceProject, WorkspaceWorkshopPolicy,
 };
 
 const MAX_CATALOG_ITEMS: usize = 10_000;
+const MAX_WORKSPACE_PROJECTS: usize = 10_000;
+const MAX_WORKSPACE_DIAGNOSTICS: usize = 1_000;
 
 #[derive(Debug, Clone)]
 pub struct ServiceBootstrap {
@@ -24,6 +30,7 @@ pub struct StudioSession {
     catalog: Vec<CatalogEntry>,
     catalog_query: String,
     catalog_error: Option<String>,
+    workspace_content: WorkspaceContentSnapshot,
 }
 
 impl StudioSession {
@@ -37,6 +44,7 @@ impl StudioSession {
             catalog: Vec::new(),
             catalog_query: String::new(),
             catalog_error: None,
+            workspace_content: WorkspaceContentSnapshot::default(),
         }
     }
 
@@ -47,6 +55,15 @@ impl StudioSession {
             reason: None,
         }];
         available_actions.extend([
+            AvailableAction {
+                id: "catalog.discover-content-projects".to_owned(),
+                enabled: self.bootstrap.workspace_root.is_some(),
+                reason: self
+                    .bootstrap
+                    .workspace_root
+                    .is_none()
+                    .then(|| "Open a workspace first.".to_owned()),
+            },
             AvailableAction {
                 id: "profile.select".to_owned(),
                 enabled: true,
@@ -107,6 +124,7 @@ impl StudioSession {
                 })
                 .cloned()
                 .collect(),
+            workspace_content: self.workspace_content.clone(),
             selected_content_id: self.selected_content_id.clone(),
             available_actions,
         }
@@ -143,12 +161,32 @@ impl StudioSession {
                         });
                     }
                 }
+                StudioAction::Catalog(CatalogAction::DiscoverContentProjects)
+                    if self.bootstrap.workspace_root.is_some() =>
+                {
+                    self.refresh_workspace_content();
+                    self.revision.0 = self.revision.0.saturating_add(1);
+                }
+                StudioAction::Catalog(CatalogAction::DiscoverContentProjects) => {
+                    response_kind = StudioResponseKind::Rejected;
+                    error = Some(StudioError {
+                        code: StudioErrorCode::ActionUnavailable,
+                        message: "Open a workspace before discovering its content projects."
+                            .to_owned(),
+                        retryable: false,
+                    });
+                }
                 StudioAction::Workspace(vapor_studio_protocol::WorkspaceAction::Open { root }) => {
                     let requested = PathBuf::from(root);
                     match std::fs::canonicalize(&requested) {
                         Ok(root) if root.is_dir() => {
+                            let root_changed =
+                                self.bootstrap.workspace_root.as_deref() != Some(&root);
                             self.bootstrap.workspace_root = Some(root);
                             self.selected_content_id = None;
+                            if root_changed {
+                                self.workspace_content = WorkspaceContentSnapshot::default();
+                            }
                             self.refresh_catalog();
                             self.revision.0 = self.revision.0.saturating_add(1);
                             if let Some(message) = self.catalog_error.clone() {
@@ -238,6 +276,7 @@ impl StudioSession {
     }
 
     fn refresh_catalog(&mut self) {
+        self.refresh_workspace_content();
         if self.bootstrap.fixture_mode {
             self.catalog_query.clear();
             self.catalog = vec![CatalogEntry {
@@ -273,6 +312,109 @@ impl StudioSession {
             }
             Err(error) => self.catalog_error = Some(error),
         }
+    }
+
+    fn refresh_workspace_content(&mut self) {
+        let Some(root) = self.bootstrap.workspace_root.clone() else {
+            self.workspace_content = WorkspaceContentSnapshot {
+                source_projects_loaded: true,
+                unregistered_projects_loaded: true,
+                ..WorkspaceContentSnapshot::default()
+            };
+            return;
+        };
+        if self.bootstrap.fixture_mode {
+            self.workspace_content = fixture_workspace_content(&root);
+            return;
+        }
+
+        self.workspace_content.workspace_validation_error =
+            vapor_studio_core::validate_workspace(&root).err();
+
+        match discover_source_content(&self.bootstrap.application_executable, &root) {
+            Ok(projects) => {
+                self.workspace_content.source_projects = projects
+                    .into_iter()
+                    .take(MAX_WORKSPACE_PROJECTS)
+                    .map(source_project)
+                    .collect();
+                self.workspace_content.source_projects_loaded = true;
+                self.workspace_content.source_projects_error = None;
+            }
+            Err(error) => self.workspace_content.source_projects_error = Some(error),
+        }
+
+        match scan_unregistered_content_projects(&self.bootstrap.application_executable, &root) {
+            Ok(scan) => {
+                self.workspace_content.unregistered_projects = scan
+                    .candidates
+                    .into_iter()
+                    .take(MAX_WORKSPACE_PROJECTS)
+                    .map(|candidate| WorkspaceProjectCandidate {
+                        path: candidate.path.display().to_string(),
+                        id: candidate.id,
+                        kind: candidate.kind.to_string(),
+                    })
+                    .collect();
+                self.workspace_content.unregistered_diagnostics = scan
+                    .diagnostics
+                    .into_iter()
+                    .take(MAX_WORKSPACE_DIAGNOSTICS)
+                    .collect();
+                self.workspace_content.unregistered_projects_loaded = true;
+                self.workspace_content.unregistered_projects_error = None;
+            }
+            Err(error) => self.workspace_content.unregistered_projects_error = Some(error),
+        }
+    }
+}
+
+fn source_project(project: SourceContent) -> WorkspaceSourceProject {
+    WorkspaceSourceProject {
+        id: project.id,
+        version: project.version,
+        kind: project.kind,
+        root: project.root.display().to_string(),
+        manifest: project.manifest.display().to_string(),
+        binaries: project.binaries,
+        libraries: project.libraries,
+        dependencies: project.dependencies,
+        workshop: WorkspaceWorkshopPolicy {
+            app_id: project.workshop.app_id,
+            published_file_id: project.workshop.published_file_id,
+            visibility: project.workshop.visibility,
+            title: project.workshop.title,
+            description: project.workshop.description,
+            tags: project.workshop.tags,
+            change_note: project.workshop.change_note,
+        },
+    }
+}
+
+fn fixture_workspace_content(root: &Path) -> WorkspaceContentSnapshot {
+    WorkspaceContentSnapshot {
+        source_projects: vec![WorkspaceSourceProject {
+            id: "fixture.game".to_owned(),
+            version: Some("1.0.0".to_owned()),
+            kind: "game".to_owned(),
+            root: root.join("game").display().to_string(),
+            manifest: root.join("game/Vapor.toml").display().to_string(),
+            binaries: vec!["fixture-game".to_owned()],
+            libraries: Vec::new(),
+            dependencies: vec!["required · fixture.engine".to_owned()],
+            workshop: WorkspaceWorkshopPolicy::default(),
+        }],
+        source_projects_loaded: true,
+        source_projects_error: None,
+        unregistered_projects: vec![WorkspaceProjectCandidate {
+            path: root.join("unregistered-addon").display().to_string(),
+            id: "fixture.addon".to_owned(),
+            kind: "game-mod".to_owned(),
+        }],
+        unregistered_diagnostics: vec!["fixture diagnostic".to_owned()],
+        unregistered_projects_loaded: true,
+        unregistered_projects_error: None,
+        workspace_validation_error: None,
     }
 }
 
@@ -350,6 +492,87 @@ mod tests {
         assert_eq!(response.revision, StudioRevision(1));
         assert_eq!(response.snapshot.catalog[0].id, "fixture.engine");
         assert_eq!(response.snapshot.host.mode, "fixture");
+        assert!(response.snapshot.workspace_content.source_projects_loaded);
+        assert!(
+            response
+                .snapshot
+                .workspace_content
+                .unregistered_projects_loaded
+        );
+    }
+
+    #[test]
+    fn workspace_project_discovery_is_a_service_action() {
+        let mut session = StudioSession::new(ServiceBootstrap {
+            application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workspace_root: Some(PathBuf::from("/fixture/workspace")),
+            active_profile_id: None,
+            fixture_mode: true,
+        });
+        let response = session.dispatch(request(
+            Some(0),
+            StudioAction::Catalog(CatalogAction::DiscoverContentProjects),
+        ));
+
+        assert_eq!(response.kind, StudioResponseKind::Applied);
+        assert_eq!(response.revision, StudioRevision(1));
+        assert_eq!(
+            response.snapshot.workspace_content.source_projects[0].id,
+            "fixture.game"
+        );
+        assert_eq!(
+            response.snapshot.workspace_content.unregistered_projects[0].id,
+            "fixture.addon"
+        );
+    }
+
+    #[test]
+    fn workspace_discovery_is_unavailable_until_a_workspace_is_open() {
+        let mut session = session();
+        let response = session.dispatch(request(
+            Some(0),
+            StudioAction::Catalog(CatalogAction::DiscoverContentProjects),
+        ));
+
+        assert_eq!(response.kind, StudioResponseKind::Rejected);
+        assert_eq!(response.revision, StudioRevision(0));
+        assert_eq!(
+            response.error.unwrap().code,
+            StudioErrorCode::ActionUnavailable
+        );
+        let action = response
+            .snapshot
+            .available_actions
+            .into_iter()
+            .find(|action| action.id == "catalog.discover-content-projects")
+            .expect("availability projection contains workspace discovery");
+        assert!(!action.enabled);
+        assert_eq!(action.reason.as_deref(), Some("Open a workspace first."));
+    }
+
+    #[test]
+    fn workspace_open_returns_source_and_unregistered_projects_in_its_snapshot() {
+        let mut session = StudioSession::new(ServiceBootstrap {
+            application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workspace_root: None,
+            active_profile_id: None,
+            fixture_mode: true,
+        });
+        let root = std::env::current_dir().expect("current directory");
+        let response = session.dispatch(request(
+            Some(0),
+            StudioAction::Workspace(vapor_studio_protocol::WorkspaceAction::Open {
+                root: root.display().to_string(),
+            }),
+        ));
+
+        assert_eq!(response.kind, StudioResponseKind::Applied);
+        let content = response.snapshot.workspace_content;
+        assert!(content.source_projects_loaded);
+        assert_eq!(content.source_projects[0].id, "fixture.game");
+        assert!(content.unregistered_projects_loaded);
+        assert_eq!(content.unregistered_projects[0].id, "fixture.addon");
+        assert_eq!(content.unregistered_diagnostics, ["fixture diagnostic"]);
     }
 
     #[test]
