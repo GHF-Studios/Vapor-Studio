@@ -63,7 +63,7 @@ impl StudioApp {
             }
             self.draw_composition_launch_panel(ui);
         } else {
-            contextual_split(ui, 0.32, |compositions, details| {
+            contextual_split(ui, |compositions, details| {
                 section_header(
                     compositions,
                     "Your compositions",

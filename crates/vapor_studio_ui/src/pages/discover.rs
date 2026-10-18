@@ -304,7 +304,7 @@ impl StudioApp {
             );
             self.draw_selected_content_detail(ui, selected_is_visible, selected_is_hidden);
         } else {
-            contextual_split(ui, 0.64, |main, context| {
+            contextual_split(ui, |main, context| {
                 section_header(
                     main,
                     "On this device",

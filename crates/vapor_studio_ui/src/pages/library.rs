@@ -212,7 +212,7 @@ impl StudioApp {
             section_header(ui, "Details", "Select an item to review it.");
             draw_selected_details(self, ui, selected_is_visible, selected_exists);
         } else {
-            contextual_split(ui, 0.62, |items, details| {
+            contextual_split(ui, |items, details| {
                 section_header(
                     items,
                     "Available content",

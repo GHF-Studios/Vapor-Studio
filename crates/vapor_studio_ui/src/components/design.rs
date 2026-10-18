@@ -4,14 +4,17 @@ use vapor_client_application::InstallationState;
 pub(crate) const ACCENT: egui::Color32 = egui::Color32::from_rgb(112, 190, 213);
 pub(crate) const ACCENT_FILL: egui::Color32 = egui::Color32::from_rgb(34, 92, 116);
 pub(crate) const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(157, 174, 190);
-pub(crate) const TWO_PANE_MIN_WIDTH: f32 = 860.0;
 pub(crate) const FORM_GRID_MIN_WIDTH: f32 = 640.0;
 pub(crate) const LIST_ROW_HEIGHT: f32 = 34.0;
 pub(crate) const SEARCH_FIELD_MAX_WIDTH: f32 = 360.0;
 pub(crate) const CONTEXT_PANEL_WIDTH: f32 = 440.0;
+const MIN_PRIMARY_PANEL_WIDTH: f32 = 480.0;
 
 pub(crate) fn use_stacked_panels(ui: &egui::Ui) -> bool {
-    ui.available_width() < TWO_PANE_MIN_WIDTH
+    let minimum_width = MIN_PRIMARY_PANEL_WIDTH
+        + CONTEXT_PANEL_WIDTH
+        + ui.spacing().item_spacing.x;
+    ui.available_width() < minimum_width
 }
 
 pub(crate) fn use_stacked_form(ui: &egui::Ui) -> bool {
@@ -20,14 +23,11 @@ pub(crate) fn use_stacked_form(ui: &egui::Ui) -> bool {
 
 pub(crate) fn contextual_split(
     ui: &mut egui::Ui,
-    main_fraction: f32,
     contents: impl FnOnce(&mut egui::Ui, &mut egui::Ui),
 ) {
     let available = ui.available_width();
     let gap = ui.spacing().item_spacing.x;
-    let context_width = (available * (1.0 - main_fraction))
-        .clamp(320.0, CONTEXT_PANEL_WIDTH)
-        .min((available - gap - 1.0).max(1.0));
+    let context_width = CONTEXT_PANEL_WIDTH.min((available - gap - 1.0).max(1.0));
     let main_width = (available - context_width - gap).max(1.0);
     let start = ui.next_widget_position();
     let available_rect = ui.available_rect_before_wrap();
