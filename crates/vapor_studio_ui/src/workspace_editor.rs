@@ -1,15 +1,13 @@
 use super::StudioApp;
-use super::operation_protocol::OperationResult;
-use super::workspace_files::{
-    create_new_workspace_file, discover_workspace_files, read_workspace_file, write_workspace_file,
-};
+use std::collections::VecDeque;
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use vapor_studio_core::OperationKind;
+use vapor_studio_core::{OperationKind, OperationPhase, workspace_file_fingerprint};
+use vapor_studio_protocol::{StudioAction, WorkspaceAction, WorkspaceFileResult};
 
 const DOCUMENT_INSPECTION_DELAY: Duration = Duration::from_millis(350);
 
@@ -25,10 +23,26 @@ pub(super) struct WorkspaceEditorState {
     pub(super) selected_file: Option<PathBuf>,
     pub(super) pending_reload_confirmation: Option<PathBuf>,
     pub(super) documents: BTreeMap<PathBuf, WorkspaceDocument>,
+    pub(super) save_queue: VecDeque<PendingWorkspaceSave>,
+    pub(super) save_in_flight: Option<PendingWorkspaceSave>,
+    pub(super) save_batch: Option<WorkspaceSaveBatch>,
     pub(super) draft_recovery: Option<String>,
     pub(super) files_open: bool,
     pub(super) show_project_tree: Option<bool>,
     pub(super) show_inspector: Option<bool>,
+}
+
+#[derive(Clone)]
+pub(super) struct PendingWorkspaceSave {
+    path: PathBuf,
+    expected_fingerprint: String,
+    contents: String,
+}
+
+pub(super) struct WorkspaceSaveBatch {
+    total: usize,
+    saved: usize,
+    failures: Vec<String>,
 }
 
 impl WorkspaceEditorState {
@@ -152,6 +166,7 @@ impl WorkspaceEditorState {
 pub(super) struct WorkspaceDocument {
     pub(super) original: String,
     pub(super) contents: String,
+    pub(super) original_fingerprint: String,
     dirty: bool,
     pub(super) line_count: usize,
     pub(super) character_count: usize,
@@ -162,13 +177,24 @@ pub(super) struct WorkspaceDocument {
 impl WorkspaceDocument {
     pub(super) fn new(path: &Path, contents: String) -> Self {
         let original = contents.clone();
-        Self::from_parts(path, original, contents)
+        let fingerprint = workspace_file_fingerprint(&original);
+        Self::from_parts(path, original, contents, fingerprint)
     }
 
-    fn from_parts(path: &Path, original: String, contents: String) -> Self {
+    pub(super) fn opened(path: &Path, contents: String, fingerprint: String) -> Self {
+        Self::from_parts(path, contents.clone(), contents, fingerprint)
+    }
+
+    fn from_parts(
+        path: &Path,
+        original: String,
+        contents: String,
+        original_fingerprint: String,
+    ) -> Self {
         let mut document = Self {
             original,
             contents,
+            original_fingerprint,
             dirty: false,
             line_count: 0,
             character_count: 0,
@@ -316,7 +342,12 @@ impl WorkspaceEditorState {
             }
             restored.insert(
                 path.clone(),
-                WorkspaceDocument::from_parts(&path, original, contents),
+                WorkspaceDocument::from_parts(
+                    &path,
+                    original.clone(),
+                    contents,
+                    workspace_file_fingerprint(&original),
+                ),
             );
         }
         self.documents = restored;
@@ -337,6 +368,9 @@ impl WorkspaceEditorState {
         self.selected_file = None;
         self.pending_reload_confirmation = None;
         self.documents.clear();
+        self.save_queue.clear();
+        self.save_in_flight = None;
+        self.save_batch = None;
         self.files_open = false;
         self.new_file_path.clear();
     }
@@ -374,18 +408,6 @@ impl StudioApp {
         }
     }
 
-    pub(super) fn apply_workspace_files_error(&mut self, error: String) {
-        let message = if self.workspace.editor.files_loaded {
-            format!(
-                "Could not refresh the workspace file list: {error}. The last successful list remains available."
-            )
-        } else {
-            format!("Could not read workspace files: {error}")
-        };
-        self.workspace.editor.files_refresh_error = Some(message.clone());
-        self.status = message;
-    }
-
     pub(super) fn apply_workspace_file_created(&mut self, path: PathBuf) {
         self.invalidate_workshop_review();
         self.workspace.editor.files_loaded = true;
@@ -404,71 +426,60 @@ impl StudioApp {
         self.status = format!("Created {}.", path.display());
     }
 
-    pub(super) fn apply_workspace_file_opened(&mut self, path: PathBuf, contents: String) {
+    pub(super) fn apply_workspace_file_opened(
+        &mut self,
+        path: PathBuf,
+        contents: String,
+        fingerprint: String,
+    ) {
         self.workspace.editor.selected_file = Some(path.clone());
         self.workspace.editor.files_open = true;
-        self.workspace
-            .editor
-            .documents
-            .insert(path.clone(), WorkspaceDocument::new(&path, contents));
+        self.workspace.editor.documents.insert(
+            path.clone(),
+            WorkspaceDocument::opened(&path, contents, fingerprint),
+        );
         self.status = "Opened workspace file.".to_owned();
     }
 
-    pub(super) fn apply_workspace_file_saved(&mut self, path: PathBuf) {
+    pub(super) fn apply_workspace_file_saved(
+        &mut self,
+        path: PathBuf,
+        contents: String,
+        fingerprint: String,
+    ) {
         self.invalidate_workshop_review();
         if let Some(document) = self.workspace.editor.documents.get_mut(&path) {
-            document.original.clone_from(&document.contents);
-            document.dirty = false;
+            document.original = contents;
+            document.original_fingerprint = fingerprint;
+            document.refresh_inspection(&path);
         }
         self.status = format!("Saved {}.", path.display());
     }
 
-    pub(super) fn apply_workspace_files_saved(&mut self, results: Vec<Result<PathBuf, String>>) {
-        let mut saved = 0;
-        let mut failures = Vec::new();
-        for result in results {
-            match result {
-                Ok(path) => {
-                    if let Some(document) = self.workspace.editor.documents.get_mut(&path) {
-                        document.original.clone_from(&document.contents);
-                        document.dirty = false;
-                        saved += 1;
-                    }
-                }
-                Err(error) => failures.push(error),
-            }
-        }
-        if saved > 0 {
-            self.invalidate_workshop_review();
-        }
-        self.status = if failures.is_empty() {
-            format!(
-                "Saved {saved} project file{}.",
-                if saved == 1 { "" } else { "s" }
-            )
-        } else {
-            format!(
-                "Saved {saved} file{}; {} file{} remain unsaved: {}",
-                if saved == 1 { "" } else { "s" },
-                failures.len(),
-                if failures.len() == 1 { "" } else { "s" },
-                failures.join("; ")
-            )
-        };
-    }
-
     pub(super) fn refresh_workspace_files(&mut self) {
+        if self.operation.running {
+            self.status =
+                "Wait for the current operation to finish before refreshing files.".to_owned();
+            return;
+        }
         if !self.require_open_workspace("read workspace files") {
             return;
         }
-        let root = PathBuf::from(self.workspace.root.trim());
-        self.spawn(OperationKind::DiscoverWorkspace, move |_context| {
-            OperationResult::WorkspaceFiles(discover_workspace_files(&root))
-        });
-        self.status = "Reading workspace files…".to_owned();
+        self.start_service_operation(
+            StudioAction::Workspace(WorkspaceAction::ListFiles { path: ".".into() }),
+            None,
+            OperationKind::DiscoverWorkspace,
+            OperationPhase::Resolving,
+            "Reading workspace files…",
+        );
     }
 
     pub(super) fn open_workspace_file(&mut self, path: PathBuf) {
+        if self.operation.running {
+            self.status =
+                "Wait for the current operation to finish before opening a file.".to_owned();
+            return;
+        }
         if self.authoring.manifest_metadata_dirty {
             self.status =
                 "Save or discard structured manifest edits before opening another file.".to_owned();
@@ -488,16 +499,23 @@ impl StudioApp {
         if !self.require_workspace_association("open a workspace file") {
             return;
         }
-        let root = PathBuf::from(self.workspace.root.trim());
-        self.spawn(OperationKind::OpenWorkspaceFile, move |_context| {
-            OperationResult::FileContents(
-                read_workspace_file(&root, &path).map(|contents| (path, contents)),
-            )
-        });
-        self.status = "Opening workspace file…".to_owned();
+        self.start_service_operation(
+            StudioAction::Workspace(WorkspaceAction::OpenFile {
+                path: path.to_string_lossy().into_owned(),
+            }),
+            None,
+            OperationKind::OpenWorkspaceFile,
+            OperationPhase::Resolving,
+            "Opening workspace file…",
+        );
     }
 
     pub(super) fn save_workspace_file(&mut self) {
+        if self.operation.running {
+            self.status =
+                "Wait for the current operation to finish before saving files.".to_owned();
+            return;
+        }
         if !self.require_open_workspace_for_editor_save("save a workspace file") {
             return;
         }
@@ -507,17 +525,20 @@ impl StudioApp {
         let Some(document) = self.workspace.editor.active_document().cloned() else {
             return;
         };
-        let root = PathBuf::from(self.workspace.root.trim());
-        self.spawn(OperationKind::SaveWorkspaceFile, move |_context| {
-            OperationResult::FileSaved(
-                write_workspace_file(&root, &path, &document.original, &document.contents)
-                    .map(|()| path),
-            )
+        self.workspace.editor.save_in_flight = Some(PendingWorkspaceSave {
+            path: path.clone(),
+            expected_fingerprint: document.original_fingerprint.clone(),
+            contents: document.contents.clone(),
         });
-        self.status = "Saving workspace file…".to_owned();
+        self.start_workspace_file_save();
     }
 
     pub(super) fn save_all_workspace_files(&mut self) {
+        if self.operation.running {
+            self.status =
+                "Wait for the current operation to finish before saving files.".to_owned();
+            return;
+        }
         if !self.require_open_workspace_for_editor_save("save workspace files") {
             return;
         }
@@ -533,35 +554,44 @@ impl StudioApp {
             self.status = "All open workspace files are saved.".to_owned();
             return;
         }
-        let root = PathBuf::from(self.workspace.root.trim());
-        self.spawn(OperationKind::SaveWorkspaceFile, move |_context| {
-            OperationResult::WorkspaceFilesSaved(
-                documents
-                    .into_iter()
-                    .map(|(path, document)| {
-                        write_workspace_file(&root, &path, &document.original, &document.contents)
-                            .map(|()| path)
-                    })
-                    .collect(),
-            )
+        let total = documents.len();
+        self.workspace.editor.save_batch = Some(WorkspaceSaveBatch {
+            total,
+            saved: 0,
+            failures: Vec::new(),
         });
-        self.status = "Saving all dirty workspace files…".to_owned();
+        self.workspace.editor.save_queue = documents
+            .into_iter()
+            .map(|(path, document)| PendingWorkspaceSave {
+                path,
+                expected_fingerprint: document.original_fingerprint,
+                contents: document.contents,
+            })
+            .collect();
+        self.start_next_workspace_file_save();
     }
 
     pub(super) fn reload_workspace_file(&mut self) {
+        if self.operation.running {
+            self.status =
+                "Wait for the current operation to finish before reloading a file.".to_owned();
+            return;
+        }
         if !self.require_open_workspace_for_editor_save("reload a workspace file") {
             return;
         }
         let Some(path) = self.workspace.editor.selected_file.clone() else {
             return;
         };
-        let root = PathBuf::from(self.workspace.root.trim());
-        self.spawn(OperationKind::OpenWorkspaceFile, move |_context| {
-            OperationResult::FileContents(
-                read_workspace_file(&root, &path).map(|contents| (path, contents)),
-            )
-        });
-        self.status = "Reloading workspace file from disk…".to_owned();
+        self.start_service_operation(
+            StudioAction::Workspace(WorkspaceAction::OpenFile {
+                path: path.to_string_lossy().into_owned(),
+            }),
+            None,
+            OperationKind::OpenWorkspaceFile,
+            OperationPhase::Resolving,
+            "Reloading workspace file from disk…",
+        );
     }
 
     pub(super) fn close_workspace_document(&mut self, path: &Path) {
@@ -585,18 +615,188 @@ impl StudioApp {
     }
 
     pub(super) fn create_workspace_file(&mut self) {
+        if self.operation.running {
+            self.status =
+                "Wait for the current operation to finish before creating a file.".to_owned();
+            return;
+        }
         if !self.require_open_workspace("create a workspace file") {
             return;
         }
-        let root = PathBuf::from(self.workspace.root.trim());
         let relative = PathBuf::from(self.workspace.editor.new_file_path.trim());
         if relative.as_os_str().is_empty() {
             self.status = "Enter a file path relative to the workspace root.".to_owned();
             return;
         }
-        self.spawn(OperationKind::CreateWorkspaceFile, move |_context| {
-            OperationResult::WorkspaceFileCreated(create_new_workspace_file(&root, &relative))
-        });
-        self.status = "Creating a new workspace file…".to_owned();
+        self.start_service_operation(
+            StudioAction::Workspace(WorkspaceAction::CreateFile {
+                path: relative.to_string_lossy().into_owned(),
+                contents: String::new(),
+            }),
+            None,
+            OperationKind::CreateWorkspaceFile,
+            OperationPhase::Building,
+            "Creating a new workspace file…",
+        );
+    }
+
+    pub(super) fn apply_service_workspace_file_result(&mut self, result: WorkspaceFileResult) {
+        match result {
+            WorkspaceFileResult::Listed {
+                operation_id,
+                files,
+            } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                self.apply_workspace_files(files.into_iter().map(PathBuf::from).collect());
+                self.finish_service_result_operation(&operation_id);
+            }
+            WorkspaceFileResult::Opened {
+                operation_id,
+                path,
+                contents,
+                fingerprint,
+            } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                self.apply_workspace_file_opened(PathBuf::from(path), contents, fingerprint);
+                self.finish_service_result_operation(&operation_id);
+            }
+            WorkspaceFileResult::Saved {
+                operation_id,
+                path,
+                fingerprint,
+            } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                let path = PathBuf::from(path);
+                if let Some(saved) = self.workspace.editor.save_in_flight.take() {
+                    if saved.path == path {
+                        self.apply_workspace_file_saved(path, saved.contents, fingerprint);
+                        if let Some(batch) = self.workspace.editor.save_batch.as_mut() {
+                            batch.saved += 1;
+                        }
+                    }
+                }
+                self.finish_service_result_operation(&operation_id);
+                self.start_next_workspace_file_save();
+            }
+            WorkspaceFileResult::Created { operation_id, path } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                self.apply_workspace_file_created(PathBuf::from(path));
+                self.finish_service_result_operation(&operation_id);
+            }
+            WorkspaceFileResult::Completed { operation_id } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                self.finish_service_result_operation(&operation_id);
+            }
+            WorkspaceFileResult::RememberedSources {
+                operation_id,
+                roots,
+            } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                self.apply_remembered_sources(roots.into_iter().map(PathBuf::from).collect());
+                self.finish_service_result_operation(&operation_id);
+            }
+            WorkspaceFileResult::UnregisteredContent {
+                operation_id,
+                content_id,
+                version,
+            } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                self.workspace.pending_unregistration = None;
+                self.invalidate_profiles_for_source_content(&vapor_studio_core::ContentIdentity {
+                    id: content_id,
+                    version,
+                });
+                self.finish_service_result_operation(&operation_id);
+            }
+        }
+    }
+
+    fn workspace_file_result_matches_active(&self, operation_id: &str) -> bool {
+        self.operation
+            .active_operation
+            .as_ref()
+            .is_some_and(|operation| operation.id.0.to_string() == operation_id)
+    }
+
+    pub(super) fn fail_service_workspace_save(&mut self, message: String) {
+        if let Some(save) = self.workspace.editor.save_in_flight.take() {
+            if let Some(batch) = self.workspace.editor.save_batch.as_mut() {
+                batch
+                    .failures
+                    .push(format!("{}: {message}", save.path.display()));
+            } else {
+                self.status = message;
+            }
+        }
+        self.start_next_workspace_file_save();
+    }
+
+    fn start_workspace_file_save(&mut self) {
+        let Some(save) = self.workspace.editor.save_in_flight.as_ref() else {
+            return;
+        };
+        self.start_service_operation(
+            StudioAction::Workspace(WorkspaceAction::SaveFile {
+                path: save.path.to_string_lossy().into_owned(),
+                expected_fingerprint: save.expected_fingerprint.clone(),
+                contents: save.contents.clone(),
+            }),
+            None,
+            OperationKind::SaveWorkspaceFile,
+            OperationPhase::Building,
+            "Saving workspace file…",
+        );
+        if !self.operation.service_owned {
+            if let Some(save) = self.workspace.editor.save_in_flight.take() {
+                if let Some(batch) = self.workspace.editor.save_batch.as_mut() {
+                    batch.failures.push(format!(
+                        "{}: the Studio service could not start the save",
+                        save.path.display()
+                    ));
+                    self.start_next_workspace_file_save();
+                } else {
+                    self.status = "The Studio service could not start the save.".to_owned();
+                }
+            }
+        }
+    }
+
+    fn start_next_workspace_file_save(&mut self) {
+        if self.operation.running || self.workspace.editor.save_in_flight.is_some() {
+            return;
+        }
+        if let Some(save) = self.workspace.editor.save_queue.pop_front() {
+            self.workspace.editor.save_in_flight = Some(save);
+            self.start_workspace_file_save();
+            return;
+        }
+        let Some(batch) = self.workspace.editor.save_batch.take() else {
+            return;
+        };
+        if batch.failures.is_empty() {
+            self.status = format!("Saved all {} workspace files.", batch.saved);
+        } else {
+            self.status = format!(
+                "Saved {} of {} workspace files; {} remain unsaved: {}",
+                batch.saved,
+                batch.total,
+                batch.failures.len(),
+                batch.failures.join("; ")
+            );
+        }
     }
 }

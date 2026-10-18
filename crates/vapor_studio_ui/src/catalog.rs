@@ -128,6 +128,12 @@ impl StudioApp {
                 ProtocolFrame::Event(StudioEvent::OperationChanged(event)) => {
                     self.apply_service_operation_event(&event);
                 }
+                ProtocolFrame::Event(StudioEvent::WorkspaceFileResult(result)) => {
+                    self.apply_service_workspace_file_result(*result);
+                }
+                ProtocolFrame::Event(StudioEvent::AuthoringResult(result)) => {
+                    self.apply_service_authoring_result(*result);
+                }
                 ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
                     return Err(error.message);
                 }
@@ -187,9 +193,14 @@ impl StudioApp {
             match frame {
                 ProtocolFrame::Response(response) => {
                     self.apply_service_catalog_snapshot(&response.snapshot);
-                    let composition_request =
+                    let operation_request =
                         self.operation.service_request_id.as_ref() == Some(&response.request_id);
-                    if composition_request {
+                    let operation_kind = self
+                        .operation
+                        .active_operation
+                        .as_ref()
+                        .map(|operation| operation.kind.clone());
+                    if operation_request {
                         self.operation.service_request_id = None;
                         if response.kind != StudioResponseKind::OperationAccepted {
                             self.operation.running = false;
@@ -199,13 +210,34 @@ impl StudioApp {
                     }
                     match response.error {
                         Some(error) => {
-                            if composition_request {
-                                self.status = error.message.clone();
+                            if operation_request {
+                                match operation_kind {
+                                    Some(vapor_studio_core::OperationKind::SearchWorkshop) => {
+                                        self.apply_workshop_error(error.message.clone());
+                                    }
+                                    Some(vapor_studio_core::OperationKind::Acquire) => {
+                                        self.apply_workshop_acquisition_error(error.message.clone());
+                                    }
+                                    Some(vapor_studio_core::OperationKind::StageWorkshop) => {
+                                        self.apply_workshop_stage_error(error.message.clone());
+                                    }
+                                    Some(vapor_studio_core::OperationKind::PublishWorkshop) => {
+                                        self.apply_workshop_error(error.message.clone());
+                                    }
+                                    Some(vapor_studio_core::OperationKind::LoadWorkshopSubscriptions)
+                                    | Some(vapor_studio_core::OperationKind::ChangeWorkshopSubscription) => {
+                                        self.apply_workshop_subscriptions_error(error.message.clone());
+                                    }
+                                    _ => self.status = error.message.clone(),
+                                }
+                            } else {
+                                self.catalog.catalog_discovery_error = Some(error.message.clone());
+                                self.service_error = Some(error.message);
                             }
-                            self.catalog.catalog_discovery_error = Some(error.message.clone());
-                            self.service_error = Some(error.message);
                         }
-                        None if response.kind == StudioResponseKind::Applied => {
+                        None if !operation_request
+                            && response.kind == StudioResponseKind::Applied =>
+                        {
                             self.catalog.catalog_discovery_error = None;
                             self.service_error = None;
                         }
@@ -217,6 +249,12 @@ impl StudioApp {
                 }
                 ProtocolFrame::Event(StudioEvent::OperationChanged(event)) => {
                     self.apply_service_operation_event(&event);
+                }
+                ProtocolFrame::Event(StudioEvent::WorkspaceFileResult(result)) => {
+                    self.apply_service_workspace_file_result(*result);
+                }
+                ProtocolFrame::Event(StudioEvent::AuthoringResult(result)) => {
+                    self.apply_service_authoring_result(*result);
                 }
                 ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
                     self.catalog.catalog_discovery_error = Some(error.message.clone());
@@ -246,6 +284,7 @@ impl StudioApp {
         &mut self,
         snapshot: &vapor_studio_protocol::StudioSnapshot,
     ) {
+        self.apply_service_workshop_snapshot(&snapshot.workshop);
         let durable = &snapshot.durable_state;
         if !durable.profiles.profiles.is_empty()
             && self.profile.service_revision != Some(durable.profile_revision)

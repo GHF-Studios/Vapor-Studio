@@ -6,18 +6,6 @@ impl StudioApp {
         match result {
             OperationResult::Workspace(Ok(workspace)) => self.apply_workspace_loaded(workspace),
             OperationResult::Workspace(Err(error)) => self.status = error,
-            OperationResult::WorkspaceSelection(Err(error)) => self.status = error,
-            OperationResult::RememberedSources(Err(error)) => self.status = error,
-            OperationResult::RememberedSources(Ok(known)) => self.apply_remembered_sources(known),
-            OperationResult::AdoptedContentProject(Ok((summary, contents))) => {
-                self.apply_adopted_content_project(summary, contents)
-            }
-            OperationResult::UnregisteredContentProject(Ok((summary, contents, identity))) => {
-                self.apply_unregistered_content_project(summary, contents, identity)
-            }
-            OperationResult::WorkspaceSelection(Ok(selection)) => {
-                self.activate_workspace(selection)
-            }
             OperationResult::Message(Err(error)) => {
                 if self
                     .operation
@@ -35,35 +23,7 @@ impl StudioApp {
                     self.status = error;
                 }
             }
-            OperationResult::WorkspaceFiles(Err(error)) => self.apply_workspace_files_error(error),
-            OperationResult::WorkspaceFileCreated(Err(error))
-            | OperationResult::FileContents(Err(error))
-            | OperationResult::FileSaved(Err(error))
-            | OperationResult::ContentWorkspace(Err(error))
-            | OperationResult::SourceCompositionLoaded(Err(error))
-            | OperationResult::SourceCompositionSaved(Err(error))
-            | OperationResult::SourceWorkshopLoaded(Err(error))
-            | OperationResult::SourceWorkshopSaved(Err(error))
-            | OperationResult::SourceRuntimeOutputsLoaded(Err(error))
-            | OperationResult::SourceRuntimeOutputsSaved(Err(error))
-            | OperationResult::UnregisteredContentProject(Err(error))
-            | OperationResult::AdoptedContentProject(Err(error)) => self.status = error,
             OperationResult::Message(Ok(message)) => self.status = message,
-            OperationResult::WorkshopStage(Err(error)) => self.apply_workshop_stage_error(error),
-            OperationResult::WorkshopAcquisition(Err(error)) => {
-                self.apply_workshop_acquisition_error(error)
-            }
-            OperationResult::WorkshopPublish(Err(error))
-            | OperationResult::WorkshopSearch(Err(error), _) => self.apply_workshop_error(error),
-            OperationResult::WorkshopSubscriptions(Err(error)) => {
-                self.apply_workshop_subscriptions_error(error)
-            }
-            OperationResult::WorkshopAcquisition(Ok((acquisitions, requested))) => {
-                self.apply_workshop_acquisition(acquisitions, requested)
-            }
-            OperationResult::WorkshopPublish(Ok(publication)) => {
-                self.apply_workshop_publication(publication)
-            }
             OperationResult::RootPublish(Ok(report)) => {
                 self.root_publishing.preview = Some(report.clone());
                 if report.planned {
@@ -96,51 +56,6 @@ impl StudioApp {
             OperationResult::RootPublish(Err(error)) => {
                 self.root_publishing.status = error.clone();
                 self.status = error;
-            }
-            OperationResult::WorkshopStage(Ok(preview)) => self.apply_workshop_stage(preview),
-            OperationResult::WorkshopSearch(Ok(page), query) => {
-                self.apply_workshop_search(page, query)
-            }
-            OperationResult::WorkshopSubscriptions(Ok(subscriptions)) => {
-                self.apply_workshop_subscriptions(subscriptions)
-            }
-            OperationResult::WorkshopSubscriptionBatchChange(Ok(()), ids, subscribed) => {
-                self.apply_workshop_subscription_batch_change(ids, subscribed)
-            }
-            OperationResult::WorkshopSubscriptionBatchChange(Err(error), _, _) => {
-                self.apply_workshop_error(error)
-            }
-            OperationResult::WorkspaceFiles(Ok(files)) => self.apply_workspace_files(files),
-            OperationResult::WorkspaceFileCreated(Ok(path)) => {
-                self.apply_workspace_file_created(path)
-            }
-            OperationResult::FileContents(Ok((path, contents))) => {
-                self.apply_workspace_file_opened(path, contents)
-            }
-            OperationResult::FileSaved(Ok(path)) => self.apply_workspace_file_saved(path),
-            OperationResult::WorkspaceFilesSaved(results) => {
-                self.apply_workspace_files_saved(results)
-            }
-            OperationResult::ContentWorkspace(Ok((manifest, contents, files))) => {
-                self.apply_content_workspace_created(manifest, contents, files)
-            }
-            OperationResult::SourceCompositionLoaded(Ok(composition)) => {
-                self.apply_source_composition_loaded(composition)
-            }
-            OperationResult::SourceCompositionSaved(Ok(composition)) => {
-                self.apply_source_composition_saved(composition)
-            }
-            OperationResult::SourceWorkshopLoaded(Ok(metadata)) => {
-                self.apply_source_workshop_loaded(metadata)
-            }
-            OperationResult::SourceWorkshopSaved(Ok(metadata)) => {
-                self.apply_source_workshop_saved(metadata)
-            }
-            OperationResult::SourceRuntimeOutputsLoaded(Ok(outputs)) => {
-                self.apply_source_runtime_outputs_loaded(outputs)
-            }
-            OperationResult::SourceRuntimeOutputsSaved(Ok(outputs)) => {
-                self.apply_source_runtime_outputs_saved(outputs)
             }
         }
     }

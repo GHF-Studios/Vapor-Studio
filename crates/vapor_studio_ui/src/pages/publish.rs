@@ -102,7 +102,13 @@ impl StudioApp {
                 for path in preview.file_paths.iter().take(50) {
                     ui.small(path);
                 }
-                if preview.file_paths.len() > 50 {
+                if self.workshop.omitted_review_file_paths > 0 {
+                    ui.weak(format!(
+                        "Showing {} paths · {} more files are included in the staged artifact.",
+                        preview.file_paths.len(),
+                        self.workshop.omitted_review_file_paths
+                    ));
+                } else if preview.file_paths.len() > 50 {
                     ui.weak(format!("{} more files", preview.file_paths.len() - 50));
                 }
             });

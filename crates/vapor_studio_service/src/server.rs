@@ -8,10 +8,11 @@ use std::{
     time::Duration,
 };
 use vapor_studio_protocol::{
-    LegacyStorageSeed, PROTOCOL_VERSION, ProtocolFrame, StudioError, StudioErrorCode, StudioEvent,
+    LegacyStorageSeed, MAX_PROTOCOL_FRAME_BYTES, PROTOCOL_VERSION, ProtocolFrame, StudioError,
+    StudioErrorCode, StudioEvent,
 };
 
-const MAX_FRAME_BYTES: usize = 1024 * 1024;
+const MAX_FRAME_BYTES: usize = MAX_PROTOCOL_FRAME_BYTES;
 
 pub fn run_stdio_service(
     bootstrap: ServiceBootstrap,
@@ -45,7 +46,7 @@ fn read_initialization(input: &mut impl BufRead) -> Result<LegacyStorageSeed, St
         return Err("client closed before service initialization".to_owned());
     }
     if buffer.len() > MAX_FRAME_BYTES {
-        return Err("service initialization exceeds the 1 MiB limit".to_owned());
+        return Err("service initialization exceeds the 32 MiB limit".to_owned());
     }
     if buffer.last() == Some(&b'\n') {
         buffer.pop();
@@ -113,7 +114,7 @@ fn serve(
                     &ProtocolFrame::Event(StudioEvent::ProtocolError(StudioError {
                         code: StudioErrorCode::InvalidRequest,
                         message: if limit_exceeded {
-                            "protocol frame exceeds the 1 MiB limit".to_owned()
+                            "protocol frame exceeds the 32 MiB limit".to_owned()
                         } else {
                             message.clone()
                         },
@@ -126,13 +127,7 @@ fn serve(
             Err(RecvTimeoutError::Timeout) => {}
         }
 
-        for event in session.poll_background_operations() {
-            write_frame(&mut output, &ProtocolFrame::Event(event))?;
-            write_frame(
-                &mut output,
-                &ProtocolFrame::Event(StudioEvent::Snapshot(Box::new(session.snapshot()))),
-            )?;
-        }
+        write_background_updates(&mut output, &mut session)?;
     }
 }
 
@@ -226,14 +221,25 @@ fn process_frame(
             )?;
         }
     }
-    for event in session.poll_background_operations() {
-        write_frame(output, &ProtocolFrame::Event(event))?;
-        write_frame(
-            output,
-            &ProtocolFrame::Event(StudioEvent::Snapshot(Box::new(session.snapshot()))),
-        )?;
-    }
+    write_background_updates(output, session)?;
     Ok(())
+}
+
+fn write_background_updates(
+    output: &mut impl Write,
+    session: &mut StudioSession,
+) -> Result<(), String> {
+    let events = session.poll_background_operations();
+    if events.is_empty() {
+        return Ok(());
+    }
+    for event in events {
+        write_frame(output, &ProtocolFrame::Event(event))?;
+    }
+    write_frame(
+        output,
+        &ProtocolFrame::Event(StudioEvent::Snapshot(Box::new(session.snapshot()))),
+    )
 }
 
 fn write_frame(writer: &mut impl Write, frame: &ProtocolFrame) -> Result<(), String> {
@@ -260,6 +266,7 @@ mod tests {
     fn fixture_session() -> StudioSession {
         StudioSession::new(ServiceBootstrap {
             application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: Some("default".to_owned()),
             fixture_mode: true,
@@ -348,7 +355,7 @@ mod tests {
         assert!(matches!(
             frames(&output).last(),
             Some(ProtocolFrame::Event(StudioEvent::ProtocolError(error)))
-                if error.message.contains("1 MiB limit")
+                if error.message.contains("32 MiB limit")
         ));
     }
 }

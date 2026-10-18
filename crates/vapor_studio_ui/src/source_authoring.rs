@@ -1,8 +1,7 @@
-use super::operation_protocol::OperationResult;
 use super::{StudioApp, source_content_selector};
 use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, OperationKind};
-use vapor_studio_protocol::StudioAction;
+use vapor_studio_protocol::{AuthoringAction, CompositionDependency, StudioAction};
 
 #[derive(Clone, Copy)]
 pub(super) enum PendingManifestDraftDiscard {
@@ -242,23 +241,15 @@ impl StudioApp {
             self.status = "Select a source content project first.".to_owned();
             return;
         }
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let operation_selector = selector.clone();
-        self.spawn(OperationKind::LoadComposition, move |_context| {
-            OperationResult::SourceCompositionLoaded(vapor_studio_core::load_source_composition(
-                &executable,
-                &root,
-                &operation_selector,
-            ))
-        });
-        self.status = format!("Loading dependencies for {selector} through Vapor Shell…");
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::LoadComposition {
+                project_id: selector.clone(),
+            }),
+            None,
+            OperationKind::LoadComposition,
+            vapor_studio_core::OperationPhase::Resolving,
+            &format!("Loading dependencies for {selector} through the Studio service…"),
+        );
     }
 
     pub(super) fn save_source_composition(&mut self) {
@@ -282,25 +273,29 @@ impl StudioApp {
             .as_deref()
             .map(|version| format!("{}@{version}", composition.id))
             .unwrap_or_else(|| composition.id.clone());
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        self.spawn(OperationKind::SaveComposition, move |_context| {
-            OperationResult::SourceCompositionSaved(vapor_studio_core::save_source_composition(
-                &executable,
-                &root,
-                &selector,
-                &composition.source,
-                &composition.links,
-            ))
-        });
-        self.status =
-            "Validating and saving composition dependencies through Vapor Shell…".to_owned();
+        let dependencies = composition
+            .links
+            .iter()
+            .map(|link| CompositionDependency {
+                project_id: link.id.clone(),
+                relationship: link.relationship.clone(),
+                version_requirement: link.version.clone(),
+                workshop_id: link.workshop_id.clone(),
+                optional: link.optional,
+                reason: link.reason.clone(),
+            })
+            .collect();
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::SaveComposition {
+                project_id: selector,
+                expected_fingerprint: composition.source,
+                dependencies,
+            }),
+            None,
+            OperationKind::SaveComposition,
+            vapor_studio_core::OperationPhase::Building,
+            "Validating and saving composition dependencies through the Studio service…",
+        );
     }
 
     pub(super) fn load_source_workshop_metadata(
@@ -314,23 +309,15 @@ impl StudioApp {
         // role manifest. Keep only one editor live at a time.
         self.authoring.runtime_outputs_edit = None;
         let selector = source_content_selector(content);
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let operation_selector = selector.clone();
-        self.spawn(OperationKind::LoadWorkshopMetadata, move |_context| {
-            OperationResult::SourceWorkshopLoaded(vapor_studio_core::load_source_workshop_metadata(
-                &executable,
-                &root,
-                &operation_selector,
-            ))
-        });
-        self.status = format!("Loading Workshop metadata for {selector} through Vapor Shell…");
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::LoadWorkshopMetadata {
+                project_id: selector.clone(),
+            }),
+            None,
+            OperationKind::LoadWorkshopMetadata,
+            vapor_studio_core::OperationPhase::Resolving,
+            &format!("Loading Workshop metadata for {selector}…"),
+        );
     }
 
     pub(super) fn load_source_runtime_outputs(
@@ -342,26 +329,15 @@ impl StudioApp {
         }
         self.authoring.workshop_metadata_edit = None;
         let selector = source_content_selector(content);
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let operation_selector = selector.clone();
-        self.spawn(OperationKind::LoadRuntimeOutputs, move |_context| {
-            OperationResult::SourceRuntimeOutputsLoaded(
-                vapor_studio_core::load_source_runtime_outputs(
-                    &executable,
-                    &root,
-                    &operation_selector,
-                ),
-            )
-        });
-        self.status =
-            format!("Loading runtime output declarations for {selector} through Vapor Shell…");
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::LoadRuntimeOutputs {
+                project_id: selector.clone(),
+            }),
+            None,
+            OperationKind::LoadRuntimeOutputs,
+            vapor_studio_core::OperationPhase::Resolving,
+            &format!("Loading runtime output declarations for {selector}…"),
+        );
     }
 
     pub(super) fn save_source_runtime_outputs(&mut self) {
@@ -392,29 +368,18 @@ impl StudioApp {
             .map(|version| format!("{}@{version}", outputs.id))
             .unwrap_or_else(|| outputs.id.clone());
         let expected_source = outputs.source;
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let operation_selector = selector.clone();
-        self.spawn(OperationKind::SaveRuntimeOutputs, move |_context| {
-            OperationResult::SourceRuntimeOutputsSaved(
-                vapor_studio_core::save_source_runtime_outputs(
-                    &executable,
-                    &root,
-                    &operation_selector,
-                    &expected_source,
-                    &binaries,
-                    &libraries,
-                ),
-            )
-        });
-        self.status =
-            format!("Validating and saving runtime outputs for {selector} through Vapor Shell…");
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::SaveRuntimeOutputs {
+                project_id: selector,
+                expected_fingerprint: expected_source,
+                binaries,
+                libraries,
+            }),
+            None,
+            OperationKind::SaveRuntimeOutputs,
+            vapor_studio_core::OperationPhase::Building,
+            "Validating and saving runtime outputs through the Studio service…",
+        );
     }
 
     pub(super) fn set_runtime_output_fields(
@@ -503,26 +468,23 @@ impl StudioApp {
             .map(|version| format!("{}@{version}", metadata.id))
             .unwrap_or_else(|| metadata.id.clone());
         let expected_source = metadata.source;
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let operation_selector = selector.clone();
-        self.spawn(OperationKind::SaveWorkshopMetadata, move |_context| {
-            OperationResult::SourceWorkshopSaved(vapor_studio_core::save_source_workshop_metadata(
-                &executable,
-                &root,
-                &operation_selector,
-                &expected_source,
-                &policy,
-            ))
-        });
-        self.status =
-            format!("Validating and saving Workshop metadata for {selector} through Vapor Shell…");
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::SaveWorkshopMetadata {
+                project_id: selector,
+                expected_fingerprint: expected_source,
+                app_id: policy.app_id,
+                published_file_id: policy.published_file_id,
+                visibility: policy.visibility,
+                title: policy.title,
+                description: policy.description,
+                tags: policy.tags,
+                change_note: policy.change_note,
+            }),
+            None,
+            OperationKind::SaveWorkshopMetadata,
+            vapor_studio_core::OperationPhase::Building,
+            "Validating and saving Workshop metadata through the Studio service…",
+        );
     }
 
     pub(super) fn set_workshop_metadata_fields(

@@ -4340,8 +4340,8 @@ dependencies = [
  "serde_json",
  "vapor_core",
  "vapor_shell",
- "vapor_studio_protocol",
  "vapor_steam",
+ "vapor_studio_protocol",
 ]
 
 [[package]]

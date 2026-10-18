@@ -131,8 +131,6 @@ impl StudioApp {
         if let Some((operation_id, result)) = result {
             self.operation.receiver = None;
             self.operation.running = false;
-            let refresh_content_catalog = result.refreshes_content_catalog();
-            let refresh_subscriptions = result.refreshes_workshop_subscriptions();
             let failure = result.failure();
             self.apply_operation_result(result);
             if let Some(event) = self
@@ -164,12 +162,6 @@ impl StudioApp {
                 && let Err(error) = self.persist_session_state()
             {
                 self.status = format!("Could not save recent activity: {error}");
-            }
-            if refresh_content_catalog {
-                self.refresh_content_catalog();
-            }
-            if refresh_subscriptions {
-                self.refresh_workshop_subscriptions();
             }
         }
     }
@@ -289,6 +281,21 @@ impl StudioApp {
             self.status = "Create or select a profile first.".to_owned();
             return;
         };
+        self.start_service_operation(action, Some(profile_id), kind, phase, status);
+    }
+
+    pub(super) fn start_service_operation(
+        &mut self,
+        action: StudioAction,
+        profile_id: Option<String>,
+        kind: OperationKind,
+        phase: OperationPhase,
+        status: &str,
+    ) {
+        if self.operation.running {
+            self.status = "Wait for the current operation to finish.".to_owned();
+            return;
+        }
         let Some(service) = self.service.as_mut() else {
             self.status = self
                 .service_error
@@ -300,13 +307,13 @@ impl StudioApp {
         let request_id = match service.send(action, None) {
             Ok(request_id) => request_id,
             Err(error) => {
-                self.status = format!("Could not start the composition operation: {error}");
+                self.status = format!("Could not start the Studio operation: {error}");
                 return;
             }
         };
         self.operation.active_operation = Some(OperationEvent {
             id: operation_id,
-            profile_id: Some(profile_id),
+            profile_id,
             kind,
             phase,
             progress: None,
@@ -375,6 +382,12 @@ impl StudioApp {
             }
             (operation.clone(), terminal, event.message.clone())
         };
+        let awaiting_workspace_result = terminal
+            && event.action.starts_with("workspace.")
+            && matches!(&event.status, ServiceOperationStatus::Succeeded);
+        let awaiting_authoring_result = terminal
+            && event.action.starts_with("authoring.")
+            && matches!(&event.status, ServiceOperationStatus::Succeeded);
         if let Some(message) = status_message {
             self.status = message.clone();
         }
@@ -386,28 +399,121 @@ impl StudioApp {
                 .operation_history
                 .push_front(HistoricalOperation {
                     completed_at_unix,
-                    event: completed_event,
+                    event: completed_event.clone(),
                 });
             self.operation.operation_history.truncate(20);
-            self.operation.active_operation = None;
-            self.operation.running = false;
-            self.operation.service_owned = false;
+            let awaiting_result = awaiting_workspace_result || awaiting_authoring_result;
+            self.operation.active_operation = awaiting_result.then_some(completed_event);
+            self.operation.running = awaiting_result;
+            self.operation.service_owned = awaiting_result;
             self.operation.service_request_id = None;
-            let editor_drafts = self
-                .workspace
-                .editor
-                .save_editor_drafts(&self.workspace.root);
-            let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
-            self.submit_service_action(StudioAction::Session(
-                vapor_studio_protocol::SessionAction::CheckpointLocalState {
-                    editor_drafts,
-                    operation_history,
-                },
-            ));
+            match event.action.as_str() {
+                "workshop.search"
+                    if matches!(&event.status, ServiceOperationStatus::Failed { .. }) =>
+                {
+                    self.apply_workshop_error(
+                        event
+                            .message
+                            .clone()
+                            .unwrap_or_else(|| "Workshop search failed.".to_owned()),
+                    );
+                }
+                "workshop.acquire"
+                    if matches!(&event.status, ServiceOperationStatus::Failed { .. }) =>
+                {
+                    self.apply_workshop_acquisition_error(
+                        event
+                            .message
+                            .clone()
+                            .unwrap_or_else(|| "Workshop acquisition failed.".to_owned()),
+                    );
+                }
+                "workshop.stage"
+                    if matches!(&event.status, ServiceOperationStatus::Failed { .. }) =>
+                {
+                    self.apply_workshop_stage_error(
+                        event
+                            .message
+                            .clone()
+                            .unwrap_or_else(|| "Workshop staging failed.".to_owned()),
+                    );
+                }
+                "workshop.publish"
+                    if matches!(&event.status, ServiceOperationStatus::Failed { .. }) =>
+                {
+                    self.apply_workshop_error(
+                        event
+                            .message
+                            .clone()
+                            .unwrap_or_else(|| "Workshop publishing failed.".to_owned()),
+                    );
+                }
+                "workshop.publish"
+                    if matches!(&event.status, ServiceOperationStatus::Succeeded) =>
+                {
+                    self.workshop.confirmation.clear();
+                }
+                "workshop.load-subscriptions" | "workshop.subscribe" | "workshop.unsubscribe"
+                    if matches!(&event.status, ServiceOperationStatus::Failed { .. }) =>
+                {
+                    self.apply_workshop_subscriptions_error(event.message.clone().unwrap_or_else(
+                        || "Workshop subscriptions could not be loaded.".to_owned(),
+                    ));
+                }
+                "workshop.subscribe" | "workshop.unsubscribe"
+                    if matches!(&event.status, ServiceOperationStatus::Succeeded) =>
+                {
+                    self.workshop.selected_items.clear();
+                }
+                "workspace.save-file"
+                    if matches!(&event.status, ServiceOperationStatus::Failed { .. }) =>
+                {
+                    self.fail_service_workspace_save(
+                        event
+                            .message
+                            .clone()
+                            .unwrap_or_else(|| "Workspace file save failed.".to_owned()),
+                    );
+                }
+                _ => {}
+            }
+            if !awaiting_result {
+                self.checkpoint_service_local_state();
+            }
         } else {
             self.operation.running = true;
             self.operation.service_owned = true;
         }
+    }
+
+    pub(super) fn finish_service_result_operation(&mut self, operation_id: &str) {
+        if !self
+            .operation
+            .active_operation
+            .as_ref()
+            .is_some_and(|operation| operation.id.0.to_string() == operation_id)
+        {
+            return;
+        }
+        self.operation.active_operation = None;
+        self.operation.running = false;
+        self.operation.service_owned = false;
+        self.operation.service_request_id = None;
+        self.checkpoint_service_local_state();
+    }
+
+    fn checkpoint_service_local_state(&mut self) {
+        let editor_drafts = self
+            .workspace
+            .editor
+            .save_editor_drafts(&self.workspace.root);
+        let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
+        self.submit_service_action(StudioAction::Session(
+            vapor_studio_protocol::SessionAction::CheckpointLocalState {
+                editor_drafts,
+                operation_history,
+            },
+        ));
     }
 
     pub(super) fn apply_service_operation_snapshot(
@@ -468,6 +574,12 @@ impl StudioApp {
 
 fn operation_kind_for_action(action: &str) -> OperationKind {
     match action {
+        "workshop.search" => OperationKind::SearchWorkshop,
+        "workshop.acquire" => OperationKind::Acquire,
+        "workshop.stage" => OperationKind::StageWorkshop,
+        "workshop.publish" => OperationKind::PublishWorkshop,
+        "workshop.load-subscriptions" => OperationKind::LoadWorkshopSubscriptions,
+        "workshop.subscribe" | "workshop.unsubscribe" => OperationKind::ChangeWorkshopSubscription,
         "composition.preview" => OperationKind::Resolve,
         "composition.install" => OperationKind::Install,
         "composition.verify" => OperationKind::Verify,
@@ -475,6 +587,21 @@ fn operation_kind_for_action(action: &str) -> OperationKind {
         "composition.update" => OperationKind::Update,
         "composition.launch" => OperationKind::RunInstalled,
         "composition.run-source" => OperationKind::Run,
+        "workspace.validate" => OperationKind::Validate,
+        "workspace.list-files" => OperationKind::DiscoverWorkspace,
+        "workspace.remember" => OperationKind::RememberWorkspace,
+        "workspace.adopt-project" => OperationKind::AdoptContentProject,
+        "workspace.unregister-project" => OperationKind::UnregisterContentProject,
+        "authoring.create-workspace" => OperationKind::CreateWorkspace,
+        "authoring.create-content" => OperationKind::CreateContent,
+        "authoring.load-composition" => OperationKind::LoadComposition,
+        "authoring.save-composition" => OperationKind::SaveComposition,
+        "authoring.load-workshop-metadata" => OperationKind::LoadWorkshopMetadata,
+        "authoring.save-workshop-metadata" => OperationKind::SaveWorkshopMetadata,
+        "authoring.load-runtime-outputs" => OperationKind::LoadRuntimeOutputs,
+        "authoring.validate-content" => OperationKind::Validate,
+        "authoring.list-registered-sources" => OperationKind::Discover,
+        "authoring.save-runtime-outputs" => OperationKind::SaveRuntimeOutputs,
         _ => OperationKind::Resolve,
     }
 }

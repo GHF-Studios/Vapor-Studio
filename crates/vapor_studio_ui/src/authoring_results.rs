@@ -1,7 +1,185 @@
 use super::StudioApp;
+use super::operation_protocol::WorkspaceOpenSnapshot;
+use crate::navigation::Section;
+use std::path::PathBuf;
 use vapor_studio_core::ContentIdentity;
+use vapor_studio_protocol::{AuthoringResult, AuthoringResultKind};
 
 impl StudioApp {
+    pub(super) fn apply_service_authoring_result(&mut self, result: AuthoringResult) {
+        if !self
+            .operation
+            .active_operation
+            .as_ref()
+            .is_some_and(|operation| operation.id.0.to_string() == result.operation_id)
+        {
+            return;
+        }
+        match result.result {
+            AuthoringResultKind::RegisteredSources { roots, active } => {
+                self.workspace.registered_sources = roots.into_iter().map(PathBuf::from).collect();
+                self.workspace.active_source = active.map(PathBuf::from);
+                self.workspace.registered_sources_loaded = true;
+                self.workspace.registered_sources_error = None;
+                self.status = format!(
+                    "Loaded {} registered workspace{} from this Vapor installation.",
+                    self.workspace.registered_sources.len(),
+                    if self.workspace.registered_sources.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                );
+            }
+            AuthoringResultKind::Composition {
+                id,
+                version,
+                kind,
+                manifest,
+                source,
+                links,
+            } => {
+                let value = vapor_studio_core::SourceComposition {
+                    id,
+                    version,
+                    kind,
+                    manifest: PathBuf::from(manifest),
+                    source,
+                    links: links
+                        .into_iter()
+                        .map(|link| vapor_studio_core::SourceCompositionLink {
+                            id: link.id,
+                            relationship: link.relationship,
+                            optional: link.optional,
+                            version: link.version,
+                            workshop_id: link.workshop_id,
+                            reason: link.reason,
+                        })
+                        .collect(),
+                };
+                let saved = self
+                    .operation
+                    .active_operation
+                    .as_ref()
+                    .is_some_and(|operation| {
+                        matches!(
+                            &operation.kind,
+                            vapor_studio_core::OperationKind::SaveComposition
+                        )
+                    });
+                if saved {
+                    self.apply_source_composition_saved(value);
+                } else {
+                    self.apply_source_composition_loaded(value);
+                }
+            }
+            AuthoringResultKind::WorkshopMetadata {
+                id,
+                version,
+                kind,
+                manifest,
+                source,
+                policy,
+            } => {
+                let value = vapor_studio_core::SourceWorkshopMetadata {
+                    id,
+                    version,
+                    kind,
+                    manifest: PathBuf::from(manifest),
+                    source,
+                    policy: vapor_studio_core::WorkshopPolicyDraft {
+                        app_id: policy.app_id,
+                        published_file_id: policy.published_file_id,
+                        visibility: policy.visibility,
+                        title: policy.title,
+                        description: policy.description,
+                        tags: policy.tags,
+                        change_note: policy.change_note,
+                    },
+                };
+                let saved = self
+                    .operation
+                    .active_operation
+                    .as_ref()
+                    .is_some_and(|operation| {
+                        matches!(
+                            &operation.kind,
+                            vapor_studio_core::OperationKind::SaveWorkshopMetadata
+                        )
+                    });
+                if saved {
+                    self.apply_source_workshop_saved(value);
+                } else {
+                    self.apply_source_workshop_loaded(value);
+                }
+            }
+            AuthoringResultKind::RuntimeOutputs {
+                id,
+                version,
+                kind,
+                manifest,
+                source,
+                binaries,
+                libraries,
+            } => {
+                let value = vapor_studio_core::SourceRuntimeOutputs {
+                    id,
+                    version,
+                    kind,
+                    manifest: PathBuf::from(manifest),
+                    source,
+                    binaries,
+                    libraries,
+                };
+                let saved = self
+                    .operation
+                    .active_operation
+                    .as_ref()
+                    .is_some_and(|operation| {
+                        matches!(
+                            &operation.kind,
+                            vapor_studio_core::OperationKind::SaveRuntimeOutputs
+                        )
+                    });
+                if saved {
+                    self.apply_source_runtime_outputs_saved(value);
+                } else {
+                    self.apply_source_runtime_outputs_loaded(value);
+                }
+            }
+            AuthoringResultKind::ContentValidated { id } => {
+                self.status = format!("Validated {id} through the Studio service.");
+            }
+            AuthoringResultKind::ContentCreated {
+                workspace_root,
+                manifest,
+                manifest_contents,
+                files,
+            } => {
+                if PathBuf::from(self.workspace.root.trim()) != PathBuf::from(&workspace_root) {
+                    self.status =
+                        "Content was created, but the active workspace changed before Studio could open its manifest."
+                            .to_owned();
+                    self.finish_service_result_operation(&result.operation_id);
+                    return;
+                }
+                self.apply_content_workspace_created(
+                    PathBuf::from(manifest),
+                    manifest_contents,
+                    files.into_iter().map(PathBuf::from).collect(),
+                );
+            }
+            AuthoringResultKind::WorkspaceCreated { root, files } => {
+                self.activate_workspace(WorkspaceOpenSnapshot {
+                    root: PathBuf::from(root),
+                    landing_section: Section::Workspace,
+                    workspace_files: Ok(files.into_iter().map(PathBuf::from).collect()),
+                });
+            }
+        }
+        self.finish_service_result_operation(&result.operation_id);
+    }
+
     pub(super) fn apply_source_composition_loaded(
         &mut self,
         composition: vapor_studio_core::SourceComposition,

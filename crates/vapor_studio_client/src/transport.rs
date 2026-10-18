@@ -1,7 +1,7 @@
 use std::io::{BufRead, Read};
 use vapor_studio_protocol::ProtocolFrame;
 
-pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_FRAME_BYTES: usize = vapor_studio_protocol::MAX_PROTOCOL_FRAME_BYTES;
 
 pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<ProtocolFrame>, String> {
     let mut bytes = Vec::new();
@@ -13,7 +13,7 @@ pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<ProtocolFrame>, St
         return Ok(None);
     }
     if bytes.len() > MAX_FRAME_BYTES {
-        return Err("service protocol frame exceeds the 1 MiB limit".to_owned());
+        return Err("service protocol frame exceeds the 32 MiB limit".to_owned());
     }
     if bytes.last() == Some(&b'\n') {
         bytes.pop();
@@ -63,7 +63,7 @@ mod tests {
     fn oversized_frames_are_rejected_before_json_decoding() {
         let bytes = vec![b'x'; MAX_FRAME_BYTES + 1];
         let error = read_frame(&mut Cursor::new(bytes)).expect_err("oversized frame must fail");
-        assert!(error.contains("1 MiB limit"));
+        assert!(error.contains("32 MiB limit"));
     }
 
     #[test]

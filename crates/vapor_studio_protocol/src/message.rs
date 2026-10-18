@@ -1,7 +1,7 @@
 use crate::{LegacyStorageSeed, StudioAction, StudioEvent, StudioRevision, StudioSnapshot};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

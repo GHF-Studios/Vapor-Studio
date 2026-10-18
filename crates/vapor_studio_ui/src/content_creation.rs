@@ -1,10 +1,10 @@
 use super::StudioApp;
-use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
+use super::operation_protocol::WorkspaceOpenSnapshot;
 use super::workspace_editor::WorkspaceDocument;
-use super::workspace_files::discover_workspace_files;
 use crate::navigation::Section;
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 use vapor_studio_core::OperationKind;
+use vapor_studio_protocol::{AuthoringAction, StudioAction, WorkshopMetadataDraft};
 
 pub(super) fn starter_workspace_slug_is_valid(value: &str) -> bool {
     !value.is_empty()
@@ -48,14 +48,7 @@ impl StudioApp {
         if !self.require_open_workspace("create content in this workspace") {
             return;
         }
-        let root = PathBuf::from(self.workspace.root.trim());
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
+        let root = self.workspace.root.trim().to_owned();
         let id = self.authoring.create.content_id.trim().to_owned();
         let version = self.authoring.create.content_version.trim().to_owned();
         let selected = self.authoring.create.dependencies.clone();
@@ -73,7 +66,7 @@ impl StudioApp {
             let value = value.trim();
             (!value.is_empty()).then(|| value.to_owned())
         };
-        let workshop = vapor_studio_core::WorkshopPolicyDraft {
+        let workshop = WorkshopMetadataDraft {
             app_id,
             published_file_id: non_empty(&self.authoring.create.workshop_published_file_id),
             visibility: non_empty(&self.authoring.create.workshop_visibility),
@@ -91,34 +84,20 @@ impl StudioApp {
             change_note: non_empty(&self.authoring.create.workshop_change_note),
         };
         let kind = self.authoring.create.content_kind;
-        self.spawn(OperationKind::CreateContent, move |_context| {
-            let result = vapor_studio_core::create_content_workspace_with_workshop(
-                &executable,
-                &root,
-                &id,
-                &version,
-                kind,
-                &selected,
-                &workshop,
-            )
-            .and_then(|output| {
-                let workspace = fs::canonicalize(&root)
-                    .map_err(|error| format!("{}: {error}", root.display()))?;
-                let manifest = output;
-                let relative = manifest
-                    .strip_prefix(&workspace)
-                    .map(PathBuf::from)
-                    .map_err(|error| {
-                        format!("created manifest is outside the workspace: {error}")
-                    })?;
-                let contents = fs::read_to_string(&manifest)
-                    .map_err(|error| format!("{}: {error}", manifest.display()))?;
-                let files = discover_workspace_files(&workspace)?;
-                Ok((relative, contents, files))
-            });
-            OperationResult::ContentWorkspace(result)
-        });
-        self.status = "Creating content and opening its manifest…".to_owned();
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::CreateContent {
+                workspace_root: root,
+                kind: kind.as_str().to_owned(),
+                id,
+                version,
+                dependencies: selected,
+                workshop,
+            }),
+            None,
+            OperationKind::CreateContent,
+            vapor_studio_core::OperationPhase::Building,
+            "Creating content and opening its manifest…",
+        );
     }
 
     pub(super) fn create_starter_workspace(&mut self) {
@@ -148,31 +127,16 @@ impl StudioApp {
                 "Organization must use lowercase letters, digits, and internal hyphens.".to_owned();
             return;
         }
-        let destination = location.join(&name);
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        self.spawn(OperationKind::CreateWorkspace, move |_context| {
-            let result = vapor_studio_core::create_basic_content_workspace(
-                &executable,
-                &destination,
-                &organization,
-                &name,
-            )
-            .map(|root| {
-                let workspace_files = discover_workspace_files(&root);
-                WorkspaceOpenSnapshot {
-                    root: root.clone(),
-                    landing_section: crate::navigation::Section::Workspace,
-                    workspace_files,
-                }
-            });
-            OperationResult::WorkspaceSelection(result)
-        });
-        self.status = "Creating a playable sample game and its project folders…".to_owned();
+        self.start_service_operation(
+            StudioAction::Authoring(AuthoringAction::CreateWorkspace {
+                parent: location.to_string_lossy().into_owned(),
+                organization,
+                name,
+            }),
+            None,
+            OperationKind::CreateWorkspace,
+            vapor_studio_core::OperationPhase::Building,
+            "Creating a playable sample game and its project folders…",
+        );
     }
 }

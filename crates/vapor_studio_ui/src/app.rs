@@ -36,8 +36,6 @@ mod workshop;
 mod workspace_content;
 #[path = "workspace_editor.rs"]
 mod workspace_editor;
-#[path = "workspace_files.rs"]
-mod workspace_files;
 #[path = "workspace_ops.rs"]
 mod workspace_ops;
 
@@ -249,6 +247,7 @@ impl StudioApp {
             &service_path,
             ServiceBootstrap {
                 application_executable: executable,
+                workshop_app_id: Some(vapor_sdk_core::root::types::ROOT_STEAM_APP_ID),
                 workspace_root,
                 active_profile_id,
                 fixture_mode: false,

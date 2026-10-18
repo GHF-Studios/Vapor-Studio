@@ -26,6 +26,7 @@ fn spawn_fixture_client(executable: &Path) -> Result<StudioClient, String> {
         executable,
         ClientBootstrap {
             application_executable: executable.to_path_buf(),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: Some("default".to_owned()),
             fixture_mode: true,
@@ -242,7 +243,9 @@ fn run_interactive(executable: &Path) -> Result<(), String> {
             }
             "publish" => StudioAction::Workshop(WorkshopAction::Publish {
                 review_id: "simulated-review".into(),
+                account: String::new(),
                 confirmation: "simulated-confirmation".into(),
+                change_note: String::new(),
             }),
             "snapshot" => {
                 print_snapshot(client.latest_snapshot());

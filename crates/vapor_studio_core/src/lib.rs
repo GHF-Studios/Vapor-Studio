@@ -9,6 +9,7 @@ mod profile;
 mod publishing;
 mod shell_content;
 mod workspace;
+mod workspace_files;
 
 pub use catalog::{
     CatalogConflict, CatalogContent, CatalogLocation, CatalogLocationKind, discover_content_catalog,
@@ -57,4 +58,9 @@ pub use workspace::{
     source_dependency_relationship, source_project_kind, source_required_dependency_choice_groups,
     unregister_workspace_content_project, validate_profile_source, validate_workspace,
     validate_workspace_source,
+};
+pub use workspace_files::{
+    create_new_workspace_file, discover_workspace_files, read_workspace_file,
+    read_workspace_file_with_fingerprint, workspace_file_fingerprint, write_workspace_file,
+    write_workspace_file_if_fingerprint,
 };

@@ -1,12 +1,8 @@
 use super::StudioApp;
 use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
 use super::workspace_editor::WorkspaceEditorState;
-use super::workspace_files::discover_workspace_files;
 use crate::navigation::Section;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use vapor_core::{DevelopmentOperation, VaporWorkspace};
 use vapor_studio_core::OperationKind;
 
@@ -151,6 +147,16 @@ impl StudioApp {
     }
 
     pub(super) fn activate_workspace(&mut self, selection: WorkspaceOpenSnapshot) {
+        let previous_root = self.workspace.root.clone();
+        self.activate_workspace_from_root(selection, &previous_root, false);
+    }
+
+    fn activate_workspace_from_root(
+        &mut self,
+        selection: WorkspaceOpenSnapshot,
+        previous_root: &str,
+        service_already_opened: bool,
+    ) {
         if self.authoring.create.is_dirty() {
             self.workspace.root_draft = self.workspace.root.clone();
             self.status =
@@ -163,21 +169,19 @@ impl StudioApp {
             landing_section,
             workspace_files,
         } = selection;
-        let workspace_changed = self.profile.items[self.profile.active_index]
-            .workspace
-            .as_ref()
-            .is_none_or(|workspace| workspace.root != root);
+        let workspace_changed = previous_root != root.to_string_lossy().as_ref();
         let files_error = workspace_files.as_ref().err().cloned();
         let previous_files =
             (!workspace_changed && files_error.is_some() && self.workspace.editor.files_loaded)
                 .then(|| self.workspace.editor.files.clone());
         let requested_root = root.display().to_string();
-        if let Err(error) =
-            self.apply_service_action(vapor_studio_protocol::StudioAction::Workspace(
-                vapor_studio_protocol::WorkspaceAction::Open {
-                    root: requested_root.clone(),
-                },
-            ))
+        if !service_already_opened
+            && let Err(error) =
+                self.apply_service_action(vapor_studio_protocol::StudioAction::Workspace(
+                    vapor_studio_protocol::WorkspaceAction::Open {
+                        root: requested_root.clone(),
+                    },
+                ))
         {
             self.status = format!("Could not open this workspace in the Studio service: {error}");
             return;
@@ -274,24 +278,47 @@ impl StudioApp {
             self.status = "Enter a workspace folder path.".to_owned();
             return;
         }
-        let selected = path.clone();
-        self.spawn(OperationKind::OpenWorkspace, move |_context| {
-            let result = fs::canonicalize(&selected)
-                .map_err(|error| format!("{}: {error}", selected.display()))
-                .and_then(|root| {
-                    if !root.is_dir() {
-                        return Err(format!("{} is not a workspace folder", root.display()));
-                    }
-                    let workspace_files = discover_workspace_files(&root);
-                    Ok(WorkspaceOpenSnapshot {
-                        root,
-                        landing_section,
-                        workspace_files,
-                    })
-                });
-            OperationResult::WorkspaceSelection(result)
-        });
-        self.status = format!("Opening workspace {}…", path.display());
+        if self.operation.running {
+            self.status =
+                "Wait for the current operation to finish before changing workspaces.".to_owned();
+            return;
+        }
+        let previous_root = self.workspace.root.clone();
+        if let Err(error) =
+            self.apply_service_action(vapor_studio_protocol::StudioAction::Workspace(
+                vapor_studio_protocol::WorkspaceAction::Open {
+                    root: path.to_string_lossy().into_owned(),
+                },
+            ))
+        {
+            self.status = format!("Could not open {}: {error}", path.display());
+            return;
+        }
+        let root = PathBuf::from(self.workspace.root.trim());
+        if root.as_os_str().is_empty() {
+            self.status = "The Studio service did not return an opened workspace.".to_owned();
+            return;
+        }
+        self.activate_workspace_from_root(
+            WorkspaceOpenSnapshot {
+                root,
+                landing_section,
+                workspace_files: Err("Workspace file listing is loading.".to_owned()),
+            },
+            &previous_root,
+            true,
+        );
+        self.start_service_operation(
+            vapor_studio_protocol::StudioAction::Workspace(
+                vapor_studio_protocol::WorkspaceAction::ListFiles {
+                    path: ".".to_owned(),
+                },
+            ),
+            None,
+            OperationKind::DiscoverWorkspace,
+            vapor_studio_core::OperationPhase::Resolving,
+            "Loading workspace files through the Studio service…",
+        );
     }
 
     pub(super) fn require_saved_workspace(&mut self, action: &str) -> bool {

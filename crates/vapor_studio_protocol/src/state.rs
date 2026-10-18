@@ -35,8 +35,102 @@ pub struct StudioSnapshot {
     pub catalog: Vec<CatalogEntry>,
     #[serde(default)]
     pub workspace_content: WorkspaceContentSnapshot,
+    #[serde(default)]
+    pub workshop: WorkshopSnapshot,
     pub selected_content_id: Option<String>,
     pub available_actions: Vec<AvailableAction>,
+}
+
+/// Read-only view of the latest Workshop query and the account's subscriptions.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopSnapshot {
+    #[serde(default)]
+    pub search: Option<WorkshopSearchSnapshot>,
+    #[serde(default)]
+    pub subscriptions: Vec<WorkshopSubscriptionSnapshot>,
+    #[serde(default)]
+    pub subscriptions_loaded: bool,
+    #[serde(default)]
+    pub subscriptions_revision: u64,
+    #[serde(default)]
+    pub acquisition: Option<WorkshopAcquisitionBatchSnapshot>,
+    #[serde(default)]
+    pub review: Option<WorkshopReviewSnapshot>,
+}
+
+/// Service-issued review token paired with the exact staged artifact facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopReviewSnapshot {
+    pub review_id: String,
+    pub selector: String,
+    pub preview: WorkshopPackagePreviewSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopPackagePreviewSnapshot {
+    pub id: String,
+    pub version: Option<String>,
+    pub app_id: Option<u32>,
+    pub published_file_id: Option<String>,
+    pub title: Option<String>,
+    pub visibility: Option<String>,
+    pub dependencies: Vec<String>,
+    pub root: String,
+    pub target: String,
+    pub fingerprint: String,
+    pub files: u64,
+    pub bytes: u64,
+    pub file_paths: Vec<String>,
+    pub omitted_file_paths: usize,
+}
+
+/// Result of the latest successful import batch from Steam Workshop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopAcquisitionBatchSnapshot {
+    pub revision: u64,
+    pub requested: usize,
+    pub items: Vec<WorkshopAcquisitionSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopAcquisitionSnapshot {
+    pub id: String,
+    pub version: Option<String>,
+    pub kind: String,
+    pub cache_root: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopSearchSnapshot {
+    #[serde(default)]
+    pub revision: u64,
+    pub query: String,
+    pub page: u32,
+    pub total_results: u32,
+    pub items: Vec<WorkshopItemSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopItemSnapshot {
+    pub published_file_id: String,
+    pub title: String,
+    pub description: String,
+    pub preview_url: Option<String>,
+    pub updated_at_unix: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopSubscriptionSnapshot {
+    pub published_file_id: String,
+    pub title: String,
+    pub description: String,
+    pub preview_url: Option<String>,
+    pub updated_at_unix: u32,
+    pub installed: bool,
+    pub needs_update: bool,
+    pub downloading: bool,
+    pub download_progress: Option<(u64, u64)>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +253,118 @@ pub struct OperationEvent {
     pub message: Option<String>,
 }
 
+/// Result of a service-owned workspace editor operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", content = "payload", rename_all = "kebab-case")]
+pub enum WorkspaceFileResult {
+    Listed {
+        operation_id: String,
+        files: Vec<String>,
+    },
+    Opened {
+        operation_id: String,
+        path: String,
+        contents: String,
+        fingerprint: String,
+    },
+    Saved {
+        operation_id: String,
+        path: String,
+        fingerprint: String,
+    },
+    Created {
+        operation_id: String,
+        path: String,
+    },
+    Completed {
+        operation_id: String,
+    },
+    RememberedSources {
+        operation_id: String,
+        roots: Vec<String>,
+    },
+    UnregisteredContent {
+        operation_id: String,
+        content_id: String,
+        version: Option<String>,
+    },
+}
+
+/// Result payload for an authoring operation executed by the Studio service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoringResult {
+    pub operation_id: String,
+    pub result: AuthoringResultKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", content = "payload", rename_all = "kebab-case")]
+pub enum AuthoringResultKind {
+    RegisteredSources {
+        roots: Vec<String>,
+        active: Option<String>,
+    },
+    Composition {
+        id: String,
+        version: Option<String>,
+        kind: String,
+        manifest: String,
+        source: String,
+        links: Vec<AuthoringCompositionLink>,
+    },
+    WorkshopMetadata {
+        id: String,
+        version: Option<String>,
+        kind: String,
+        manifest: String,
+        source: String,
+        policy: WorkshopMetadataDraft,
+    },
+    RuntimeOutputs {
+        id: String,
+        version: Option<String>,
+        kind: String,
+        manifest: String,
+        source: String,
+        binaries: Vec<String>,
+        libraries: Vec<String>,
+    },
+    ContentValidated {
+        id: String,
+    },
+    ContentCreated {
+        workspace_root: String,
+        manifest: String,
+        manifest_contents: String,
+        files: Vec<String>,
+    },
+    WorkspaceCreated {
+        root: String,
+        files: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoringCompositionLink {
+    pub id: String,
+    pub relationship: String,
+    pub optional: bool,
+    pub version: Option<String>,
+    pub workshop_id: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkshopMetadataDraft {
+    pub app_id: Option<u32>,
+    pub published_file_id: Option<String>,
+    pub visibility: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub change_note: Option<String>,
+}
+
 /// Resolved composition plan produced by the service for a profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompositionPreviewSnapshot {
@@ -228,6 +434,8 @@ pub enum StudioEvent {
     ServiceReady { protocol_version: u16 },
     Snapshot(Box<StudioSnapshot>),
     OperationChanged(OperationEvent),
+    WorkspaceFileResult(Box<WorkspaceFileResult>),
+    AuthoringResult(Box<AuthoringResult>),
     ServiceStopping,
     ProtocolError(crate::StudioError),
 }

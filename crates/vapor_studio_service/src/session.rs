@@ -3,7 +3,7 @@ use crate::{
     persistence::{StudioPersistentState, StudioStateStore},
 };
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
     thread,
@@ -14,22 +14,28 @@ use vapor_studio_core::{
     duplicate_profile, remove_profile, rename_profile, scan_unregistered_content_projects,
 };
 use vapor_studio_protocol::{
+    AuthoringAction, AuthoringCompositionLink, AuthoringResult, AuthoringResultKind,
     AvailableAction, CatalogAction, CatalogConflict, CatalogEntry, CatalogLocation,
     CatalogLocationKind, CompositionProfile, ContentIdentity, DurableStateSnapshot, HostSummary,
     InstallationState, LegacyStorageSeed, OperationEvent, OperationPhase, OperationStatus,
     OperationSummary, ProfileAction, SessionAction, StudioAction, StudioError, StudioErrorCode,
     StudioEvent, StudioRequest, StudioResponse, StudioResponseKind, StudioRevision, StudioSnapshot,
-    WorkspaceAssociation, WorkspaceContentSnapshot, WorkspaceProjectCandidate,
-    WorkspaceSourceProject, WorkspaceWorkshopPolicy,
+    WorkshopAcquisitionBatchSnapshot, WorkshopAcquisitionSnapshot, WorkshopAction,
+    WorkshopItemSnapshot, WorkshopMetadataDraft, WorkshopPackagePreviewSnapshot,
+    WorkshopReviewSnapshot, WorkshopSearchSnapshot, WorkshopSnapshot, WorkshopSubscriptionSnapshot,
+    WorkspaceAction, WorkspaceAssociation, WorkspaceContentSnapshot, WorkspaceFileResult,
+    WorkspaceProjectCandidate, WorkspaceSourceProject, WorkspaceWorkshopPolicy,
 };
 
 const MAX_CATALOG_ITEMS: usize = 10_000;
 const MAX_WORKSPACE_PROJECTS: usize = 10_000;
 const MAX_WORKSPACE_DIAGNOSTICS: usize = 1_000;
+const MAX_WORKSHOP_REVIEW_FILE_PATHS: usize = 50;
 
 #[derive(Debug, Clone)]
 pub struct ServiceBootstrap {
     pub application_executable: PathBuf,
+    pub workshop_app_id: Option<u32>,
     pub workspace_root: Option<PathBuf>,
     pub active_profile_id: Option<String>,
     pub fixture_mode: bool,
@@ -49,14 +55,21 @@ pub struct StudioSession {
     host_context: Option<StudioHostContext>,
     active_operation: Option<OperationSummary>,
     composition_preview: Option<vapor_studio_protocol::CompositionPreviewSnapshot>,
+    workshop: WorkshopSnapshot,
+    workshop_review: Option<WorkshopReviewState>,
+    fixture_workshop_subscriptions: BTreeSet<String>,
+    fixture_acquisitions: BTreeMap<String, WorkshopAcquisitionSnapshot>,
     operation_events: VecDeque<StudioEvent>,
-    operation_receiver: Receiver<CompositionOperationMessage>,
-    operation_sender: Sender<CompositionOperationMessage>,
+    operation_receiver: Receiver<BackgroundOperationMessage>,
+    operation_sender: Sender<BackgroundOperationMessage>,
 }
 
-enum CompositionOperationMessage {
+enum BackgroundOperationMessage {
     Lifecycle(vapor_core::CoreOperationEvent),
     Complete(CompositionOperationCompletion),
+    CompleteWorkshop(Box<WorkshopOperationCompletion>),
+    CompleteWorkspace(Box<WorkspaceOperationCompletion>),
+    CompleteAuthoring(Box<AuthoringOperationCompletion>),
 }
 
 struct CompositionOperationCompletion {
@@ -85,6 +98,106 @@ enum CompositionOperationResult {
     Update(Result<vapor_studio_core::InstalledComposition, String>),
     Launch(Result<vapor_studio_core::ProfileRunResult, String>),
     RunSource(Result<vapor_studio_core::ProfileRunResult, String>),
+}
+
+struct WorkshopOperationCompletion {
+    id: String,
+    action: WorkshopOperationKind,
+    result: Result<WorkshopOperationResult, String>,
+}
+
+struct WorkspaceOperationCompletion {
+    id: String,
+    action: WorkspaceOperationKind,
+    root: PathBuf,
+    result: Result<WorkspaceOperationResult, String>,
+}
+
+struct AuthoringOperationCompletion {
+    id: String,
+    action: String,
+    workspace: Option<PathBuf>,
+    workspace_bound: bool,
+    result: Result<AuthoringResultKind, String>,
+}
+
+#[derive(Clone)]
+enum WorkspaceOperationKind {
+    ListFiles,
+    OpenFile(PathBuf),
+    SaveFile(Box<WorkspaceFileSave>),
+    CreateFile(PathBuf),
+    Validate,
+    Remember,
+    AdoptProject(PathBuf),
+    UnregisterProject(String),
+}
+
+#[derive(Clone)]
+struct WorkspaceFileSave {
+    path: PathBuf,
+    expected_fingerprint: String,
+    contents: String,
+}
+
+enum WorkspaceOperationResult {
+    Listed(Vec<PathBuf>),
+    Opened(Box<WorkspaceFileOpen>),
+    Saved { path: PathBuf, fingerprint: String },
+    Created(PathBuf),
+    Completed,
+    Remembered(Vec<PathBuf>),
+    Unregistered(vapor_studio_core::ContentIdentity),
+}
+
+struct WorkspaceFileOpen {
+    path: PathBuf,
+    contents: String,
+    fingerprint: String,
+}
+
+#[derive(Debug, Clone)]
+struct WorkshopReviewState {
+    review_id: String,
+    selector: String,
+    workspace_root: PathBuf,
+    preview: vapor_studio_core::WorkshopPackagePreview,
+}
+
+#[derive(Clone)]
+enum WorkshopOperationKind {
+    Search {
+        query: String,
+        page: u32,
+    },
+    LoadSubscriptions,
+    ChangeSubscriptions {
+        ids: Vec<u64>,
+        subscribe: bool,
+    },
+    Acquire {
+        ids: Vec<String>,
+    },
+    Stage {
+        selector: String,
+        workspace_root: PathBuf,
+    },
+    Publish {
+        review: Box<WorkshopReviewState>,
+        account: String,
+        change_note: Option<String>,
+    },
+}
+
+enum WorkshopOperationResult {
+    Search(vapor_studio_core::WorkshopPage),
+    Subscriptions(Vec<vapor_studio_core::WorkshopSubscription>),
+    Acquisitions {
+        items: Vec<vapor_studio_core::WorkshopAcquisition>,
+        requested: usize,
+    },
+    Review(vapor_studio_core::WorkshopPackagePreview),
+    Publication(vapor_studio_core::WorkshopPublication),
 }
 
 impl StudioSession {
@@ -169,6 +282,10 @@ impl StudioSession {
             host_context,
             active_operation: None,
             composition_preview: None,
+            workshop: WorkshopSnapshot::default(),
+            workshop_review: None,
+            fixture_workshop_subscriptions: BTreeSet::from(["1001".to_owned()]),
+            fixture_acquisitions: BTreeMap::new(),
             operation_events: VecDeque::new(),
             operation_receiver,
             operation_sender,
@@ -215,6 +332,8 @@ impl StudioSession {
                 reason: None,
             },
         ]);
+        let mut workshop = self.workshop.clone();
+        workshop.review = self.workshop_review.as_ref().map(workshop_review_snapshot);
         StudioSnapshot {
             revision: self.revision,
             host: HostSummary {
@@ -276,13 +395,14 @@ impl StudioSession {
                 .cloned()
                 .collect(),
             workspace_content: self.workspace_content.clone(),
+            workshop,
             selected_content_id: self.selected_content_id.clone(),
             available_actions,
         }
     }
 
     pub fn dispatch(&mut self, request: StudioRequest) -> StudioResponse {
-        self.poll_composition_operation();
+        self.poll_background_operation_messages();
         let mut response_kind = StudioResponseKind::Applied;
         let mut error = None;
         if request
@@ -420,6 +540,35 @@ impl StudioSession {
                         }
                     }
                 }
+                StudioAction::Workspace(
+                    action @ (WorkspaceAction::ListFiles { .. }
+                    | WorkspaceAction::OpenFile { .. }
+                    | WorkspaceAction::SaveFile { .. }
+                    | WorkspaceAction::CreateFile { .. }
+                    | WorkspaceAction::Validate
+                    | WorkspaceAction::Remember
+                    | WorkspaceAction::AdoptProject { .. }
+                    | WorkspaceAction::UnregisterProject { .. }),
+                ) => match self.start_workspace_operation(action) {
+                    Ok(()) => {
+                        response_kind = StudioResponseKind::OperationAccepted;
+                        self.revision.0 = self.revision.0.saturating_add(1);
+                    }
+                    Err(operation_error) => {
+                        response_kind = StudioResponseKind::Rejected;
+                        error = Some(operation_error);
+                    }
+                },
+                StudioAction::Authoring(action) => match self.start_authoring_operation(action) {
+                    Ok(()) => {
+                        response_kind = StudioResponseKind::OperationAccepted;
+                        self.revision.0 = self.revision.0.saturating_add(1);
+                    }
+                    Err(operation_error) => {
+                        response_kind = StudioResponseKind::Rejected;
+                        error = Some(operation_error);
+                    }
+                },
                 StudioAction::Catalog(CatalogAction::Search { query }) => {
                     self.catalog_query = query.trim().to_lowercase();
                     self.revision.0 = self.revision.0.saturating_add(1);
@@ -489,6 +638,20 @@ impl StudioSession {
                         }
                     }
                 }
+                StudioAction::Workshop(WorkshopAction::DiscardReview) => {
+                    self.workshop_review = None;
+                    self.revision.0 = self.revision.0.saturating_add(1);
+                }
+                StudioAction::Workshop(action) => match self.start_workshop_operation(action) {
+                    Ok(()) => {
+                        response_kind = StudioResponseKind::OperationAccepted;
+                        self.revision.0 = self.revision.0.saturating_add(1);
+                    }
+                    Err(operation_error) => {
+                        response_kind = StudioResponseKind::Rejected;
+                        error = Some(operation_error);
+                    }
+                },
                 action => {
                     response_kind = StudioResponseKind::Rejected;
                     error = Some(StudioError {
@@ -515,8 +678,68 @@ impl StudioSession {
 
     /// Drain background lifecycle updates and turn completed composition work into durable profile state.
     pub fn poll_background_operations(&mut self) -> Vec<StudioEvent> {
-        self.poll_composition_operation();
+        self.poll_background_operation_messages();
         self.operation_events.drain(..).collect()
+    }
+
+    fn validate_workshop_stage(&mut self, selector: &str) -> Result<PathBuf, StudioError> {
+        let Some(workspace_root) = self.bootstrap.workspace_root.clone() else {
+            return Err(StudioError {
+                code: StudioErrorCode::ActionUnavailable,
+                message: "Open the authored content workspace before staging a Workshop item."
+                    .to_owned(),
+                retryable: false,
+            });
+        };
+        self.refresh_catalog();
+        if let Some(error) = self.catalog_error.as_ref() {
+            return Err(StudioError {
+                code: StudioErrorCode::ProviderFailure,
+                message: format!(
+                    "Studio could not refresh on-device content before staging: {error}"
+                ),
+                retryable: true,
+            });
+        }
+        if !self.workspace_content.source_projects_loaded
+            || self.workspace_content.source_projects_error.is_some()
+        {
+            return Err(StudioError {
+                code: StudioErrorCode::ProviderFailure,
+                message: self
+                    .workspace_content
+                    .source_projects_error
+                    .clone()
+                    .unwrap_or_else(|| {
+                        "Studio could not refresh the authored project list.".into()
+                    }),
+                retryable: true,
+            });
+        }
+        let (id, version) = selector
+            .split_once('@')
+            .map(|(id, version)| (id, Some(version)))
+            .unwrap_or((selector, None));
+        if id.is_empty()
+            || version.is_some_and(str::is_empty)
+            || !self
+                .workspace_content
+                .source_projects
+                .iter()
+                .any(|project| project.id == id && project.version.as_deref() == version)
+        {
+            return Err(invalid_workshop_request(
+                "Select an exact content identity from the active workspace before staging it.",
+            ));
+        }
+        if self.catalog.iter().any(|entry| {
+            entry.id == id && entry.version.as_deref() == version && !entry.conflicts.is_empty()
+        }) {
+            return Err(invalid_workshop_request(
+                "On-device copies of this content version disagree. Resolve the conflict before staging it.",
+            ));
+        }
+        Ok(workspace_root)
     }
 
     fn start_composition_operation(
@@ -618,8 +841,7 @@ impl StudioSession {
                     // persist the resulting profile state before it can report
                     // that the user-visible operation succeeded.
                     if matches!(event.status, vapor_core::OperationStatus::Running) {
-                        let _ =
-                            lifecycle_sender.send(CompositionOperationMessage::Lifecycle(event));
+                        let _ = lifecycle_sender.send(BackgroundOperationMessage::Lifecycle(event));
                     }
                 });
                 let result = vapor_core::OperationService::run_observed(
@@ -636,7 +858,7 @@ impl StudioSession {
                     },
                     composition_result_outcome,
                 );
-                let _ = completion_sender.send(CompositionOperationMessage::Complete(
+                let _ = completion_sender.send(BackgroundOperationMessage::Complete(
                     CompositionOperationCompletion {
                         id,
                         profile_id,
@@ -656,10 +878,10 @@ impl StudioSession {
         Ok(())
     }
 
-    fn poll_composition_operation(&mut self) {
+    fn poll_background_operation_messages(&mut self) {
         while let Ok(message) = self.operation_receiver.try_recv() {
             match message {
-                CompositionOperationMessage::Lifecycle(event) => {
+                BackgroundOperationMessage::Lifecycle(event) => {
                     let id = event.id.0.to_string();
                     let Some(active) = self.active_operation.as_mut().filter(|op| op.id == id)
                     else {
@@ -687,11 +909,737 @@ impl StudioSession {
                             message,
                         }));
                 }
-                CompositionOperationMessage::Complete(completion) => {
+                BackgroundOperationMessage::Complete(completion) => {
                     self.apply_composition_completion(completion);
+                }
+                BackgroundOperationMessage::CompleteWorkshop(completion) => {
+                    self.apply_workshop_completion(*completion);
+                }
+                BackgroundOperationMessage::CompleteWorkspace(completion) => {
+                    self.apply_workspace_completion(*completion);
+                }
+                BackgroundOperationMessage::CompleteAuthoring(completion) => {
+                    self.apply_authoring_completion(*completion);
                 }
             }
         }
+    }
+
+    fn start_workspace_operation(&mut self, action: WorkspaceAction) -> Result<(), StudioError> {
+        if self.active_operation.is_some() {
+            return Err(StudioError {
+                code: StudioErrorCode::OperationInProgress,
+                message: "Wait for the current Studio operation to finish.".to_owned(),
+                retryable: true,
+            });
+        }
+        let root = self
+            .bootstrap
+            .workspace_root
+            .clone()
+            .ok_or_else(|| StudioError {
+                code: StudioErrorCode::ActionUnavailable,
+                message: "Open a workspace before using its file editor.".to_owned(),
+                retryable: false,
+            })?;
+        let kind = match action {
+            WorkspaceAction::ListFiles { path } => {
+                if !path.is_empty() && path != "." {
+                    return Err(invalid_workspace_request(
+                        "Workspace file discovery currently starts at the workspace root.",
+                    ));
+                }
+                WorkspaceOperationKind::ListFiles
+            }
+            WorkspaceAction::OpenFile { path } => {
+                WorkspaceOperationKind::OpenFile(validate_workspace_relative_path(&path)?)
+            }
+            WorkspaceAction::SaveFile {
+                path,
+                expected_fingerprint,
+                contents,
+            } => {
+                if contents.len() > 4 * 1024 * 1024 {
+                    return Err(invalid_workspace_request(
+                        "Workspace editor saves are limited to 4 MiB per file.",
+                    ));
+                }
+                WorkspaceOperationKind::SaveFile(Box::new(WorkspaceFileSave {
+                    path: validate_workspace_relative_path(&path)?,
+                    expected_fingerprint,
+                    contents,
+                }))
+            }
+            WorkspaceAction::CreateFile { path, contents } => {
+                if !contents.is_empty() {
+                    return Err(invalid_workspace_request(
+                        "New workspace files are created empty; edit and save them after creation.",
+                    ));
+                }
+                WorkspaceOperationKind::CreateFile(validate_workspace_relative_path(&path)?)
+            }
+            WorkspaceAction::Validate => WorkspaceOperationKind::Validate,
+            WorkspaceAction::Remember => WorkspaceOperationKind::Remember,
+            WorkspaceAction::AdoptProject { path } => {
+                let candidate = PathBuf::from(path);
+                let candidate = if candidate.is_absolute() {
+                    candidate
+                } else {
+                    root.join(candidate)
+                };
+                let canonical = candidate.canonicalize().map_err(|error| {
+                    invalid_workspace_request(&format!("{}: {error}", candidate.display()))
+                })?;
+                let canonical_root = root.canonicalize().map_err(|error| {
+                    invalid_workspace_request(&format!("{}: {error}", root.display()))
+                })?;
+                if !canonical.starts_with(&canonical_root) || !canonical.is_dir() {
+                    return Err(invalid_workspace_request(
+                        "Choose a content project folder inside the active workspace.",
+                    ));
+                }
+                WorkspaceOperationKind::AdoptProject(canonical)
+            }
+            WorkspaceAction::UnregisterProject { project_id } => {
+                if project_id.trim().is_empty() || project_id.len() > 256 {
+                    return Err(invalid_workspace_request(
+                        "Choose a valid content project ID.",
+                    ));
+                }
+                WorkspaceOperationKind::UnregisterProject(project_id)
+            }
+            _ => {
+                return Err(StudioError {
+                    code: StudioErrorCode::ActionUnavailable,
+                    message: "This workspace action is not a file editor operation.".to_owned(),
+                    retryable: false,
+                });
+            }
+        };
+        let operation_id = vapor_core::OperationId::fresh();
+        let id = operation_id.0.to_string();
+        let action_id = workspace_operation_action_id(&kind);
+        self.active_operation = Some(OperationSummary {
+            id: id.clone(),
+            profile_id: None,
+            action: action_id.to_owned(),
+            phase: workspace_operation_phase(&kind),
+            status: OperationStatus::Running,
+            progress: None,
+        });
+
+        let action_for_worker = kind.clone();
+        let root_for_worker = root.clone();
+        let executable_for_worker = self.bootstrap.application_executable.clone();
+        let lifecycle_sender = self.operation_sender.clone();
+        let completion_sender = self.operation_sender.clone();
+        thread::Builder::new()
+            .name(format!("studio-workspace-{id}"))
+            .spawn(move || {
+                let request = vapor_core::CoreOperationRequest {
+                    id: operation_id,
+                    domain: "studio-workspace".to_owned(),
+                    action: action_id.to_owned(),
+                };
+                let sink: vapor_core::OperationEventSink = std::sync::Arc::new(move |event| {
+                    if matches!(event.status, vapor_core::OperationStatus::Running) {
+                        let _ = lifecycle_sender.send(BackgroundOperationMessage::Lifecycle(event));
+                    }
+                });
+                let result = vapor_core::OperationService::run_observed(
+                    request,
+                    sink,
+                    |_| {
+                        execute_workspace_operation(
+                            &executable_for_worker,
+                            &root_for_worker,
+                            action_for_worker.clone(),
+                        )
+                    },
+                    workspace_result_outcome,
+                );
+                let _ = completion_sender.send(BackgroundOperationMessage::CompleteWorkspace(
+                    Box::new(WorkspaceOperationCompletion {
+                        id,
+                        action: kind,
+                        root,
+                        result,
+                    }),
+                ));
+            })
+            .map_err(|error| {
+                self.active_operation = None;
+                StudioError {
+                    code: StudioErrorCode::InternalFailure,
+                    message: format!("Could not start workspace file operation: {error}"),
+                    retryable: true,
+                }
+            })?;
+        Ok(())
+    }
+
+    fn apply_workspace_completion(&mut self, completion: WorkspaceOperationCompletion) {
+        let workspace_is_current =
+            self.bootstrap.workspace_root.as_deref() == Some(&completion.root);
+        let mut result = completion.result;
+        if !workspace_is_current {
+            result =
+                Err("The active workspace changed while the file operation was running.".into());
+        }
+        let mut workspace_file_result = None;
+        let mut operation_succeeded = false;
+        let message = match result {
+            Ok(WorkspaceOperationResult::Listed(files)) => {
+                operation_succeeded = true;
+                let files = files
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>();
+                let message = format!("Found {} workspace files.", files.len());
+                workspace_file_result = Some(WorkspaceFileResult::Listed {
+                    operation_id: completion.id.clone(),
+                    files,
+                });
+                message
+            }
+            Ok(WorkspaceOperationResult::Opened(opened)) => {
+                operation_succeeded = true;
+                let path = opened.path.to_string_lossy().into_owned();
+                workspace_file_result = Some(WorkspaceFileResult::Opened {
+                    operation_id: completion.id.clone(),
+                    path: path.clone(),
+                    contents: opened.contents,
+                    fingerprint: opened.fingerprint,
+                });
+                format!("Opened {path}.")
+            }
+            Ok(WorkspaceOperationResult::Saved { path, fingerprint }) => {
+                operation_succeeded = true;
+                let path = path.to_string_lossy().into_owned();
+                self.workshop_review = None;
+                if is_content_manifest_path(Path::new(&path)) {
+                    self.refresh_catalog();
+                }
+                workspace_file_result = Some(WorkspaceFileResult::Saved {
+                    operation_id: completion.id.clone(),
+                    path: path.clone(),
+                    fingerprint,
+                });
+                format!("Saved {path}.")
+            }
+            Ok(WorkspaceOperationResult::Created(path)) => {
+                operation_succeeded = true;
+                let path = path.to_string_lossy().into_owned();
+                self.workshop_review = None;
+                workspace_file_result = Some(WorkspaceFileResult::Created {
+                    operation_id: completion.id.clone(),
+                    path: path.clone(),
+                });
+                format!("Created {path}.")
+            }
+            Ok(WorkspaceOperationResult::Completed) => {
+                operation_succeeded = true;
+                if matches!(
+                    &completion.action,
+                    WorkspaceOperationKind::AdoptProject(_)
+                        | WorkspaceOperationKind::UnregisterProject(_)
+                ) {
+                    self.workshop_review = None;
+                    self.refresh_catalog();
+                }
+                workspace_file_result = Some(WorkspaceFileResult::Completed {
+                    operation_id: completion.id.clone(),
+                });
+                match &completion.action {
+                    WorkspaceOperationKind::Validate => {
+                        "Workspace validation completed.".to_owned()
+                    }
+                    WorkspaceOperationKind::AdoptProject(_) => {
+                        "Content project added to the workspace.".to_owned()
+                    }
+                    WorkspaceOperationKind::UnregisterProject(_) => {
+                        "Content project removed from discovery.".to_owned()
+                    }
+                    _ => "Workspace operation completed.".to_owned(),
+                }
+            }
+            Ok(WorkspaceOperationResult::Unregistered(identity)) => {
+                operation_succeeded = true;
+                self.workshop_review = None;
+                self.refresh_catalog();
+                workspace_file_result = Some(WorkspaceFileResult::UnregisteredContent {
+                    operation_id: completion.id.clone(),
+                    content_id: identity.id,
+                    version: identity.version,
+                });
+                "Content project removed from discovery.".to_owned()
+            }
+            Ok(WorkspaceOperationResult::Remembered(roots)) => {
+                operation_succeeded = true;
+                let roots = roots
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>();
+                workspace_file_result = Some(WorkspaceFileResult::RememberedSources {
+                    operation_id: completion.id.clone(),
+                    roots: roots.clone(),
+                });
+                format!(
+                    "Registered {} workspace{}.",
+                    roots.len(),
+                    if roots.len() == 1 { "" } else { "s" }
+                )
+            }
+            Err(error) => error,
+        };
+        self.active_operation = None;
+        self.revision.0 = self.revision.0.saturating_add(1);
+        let succeeded = operation_succeeded;
+        self.operation_events
+            .push_back(StudioEvent::OperationChanged(OperationEvent {
+                revision: self.revision,
+                id: completion.id.clone(),
+                profile_id: None,
+                action: workspace_operation_action_id(&completion.action).to_owned(),
+                phase: OperationPhase::Complete,
+                status: if succeeded {
+                    OperationStatus::Succeeded
+                } else {
+                    OperationStatus::Failed {
+                        message: message.clone(),
+                    }
+                },
+                progress: Some(1.0),
+                message: Some(message),
+            }));
+        if let Some(result) = workspace_file_result {
+            self.operation_events
+                .push_back(StudioEvent::WorkspaceFileResult(Box::new(result)));
+        }
+    }
+
+    fn start_authoring_operation(&mut self, action: AuthoringAction) -> Result<(), StudioError> {
+        if self.active_operation.is_some() {
+            return Err(StudioError {
+                code: StudioErrorCode::OperationInProgress,
+                message: "Wait for the current Studio operation to finish.".to_owned(),
+                retryable: true,
+            });
+        }
+        let workspace = self.bootstrap.workspace_root.clone();
+        let workspace_bound = !matches!(
+            &action,
+            AuthoringAction::CreateWorkspace { .. } | AuthoringAction::ListRegisteredSources
+        );
+        let executable = self.bootstrap.application_executable.clone();
+        let operation_id = vapor_core::OperationId::fresh();
+        let id = operation_id.0.to_string();
+        let action_id = authoring_action_id(&action);
+        self.active_operation = Some(OperationSummary {
+            id: id.clone(),
+            profile_id: None,
+            action: action_id.to_owned(),
+            phase: OperationPhase::Resolving,
+            status: OperationStatus::Running,
+            progress: None,
+        });
+        let lifecycle_sender = self.operation_sender.clone();
+        let completion_sender = self.operation_sender.clone();
+        thread::Builder::new()
+            .name(format!("studio-authoring-{id}"))
+            .spawn(move || {
+                let request = vapor_core::CoreOperationRequest {
+                    id: operation_id,
+                    domain: "studio-authoring".to_owned(),
+                    action: action_id.to_owned(),
+                };
+                let sink: vapor_core::OperationEventSink = std::sync::Arc::new(move |event| {
+                    if matches!(event.status, vapor_core::OperationStatus::Running) {
+                        let _ = lifecycle_sender.send(BackgroundOperationMessage::Lifecycle(event));
+                    }
+                });
+                let result = vapor_core::OperationService::run_observed(
+                    request,
+                    sink,
+                    |_| execute_authoring_operation(&executable, workspace.as_deref(), action),
+                    authoring_result_outcome,
+                );
+                let _ = completion_sender.send(BackgroundOperationMessage::CompleteAuthoring(
+                    Box::new(AuthoringOperationCompletion {
+                        id,
+                        action: action_id.to_owned(),
+                        workspace,
+                        workspace_bound,
+                        result,
+                    }),
+                ));
+            })
+            .map_err(|error| {
+                self.active_operation = None;
+                StudioError {
+                    code: StudioErrorCode::InternalFailure,
+                    message: format!("Could not start authoring operation: {error}"),
+                    retryable: true,
+                }
+            })?;
+        Ok(())
+    }
+
+    fn apply_authoring_completion(&mut self, completion: AuthoringOperationCompletion) {
+        let mut result = completion.result;
+        if completion.workspace_bound
+            && self.bootstrap.workspace_root.as_deref() != completion.workspace.as_deref()
+        {
+            result = Err("The active workspace changed while authoring was in progress.".into());
+        }
+        let message = result
+            .as_ref()
+            .map(authoring_result_message)
+            .unwrap_or_else(|error| error.clone());
+        let succeeded = result.is_ok();
+        self.active_operation = None;
+        self.revision.0 = self.revision.0.saturating_add(1);
+        self.operation_events
+            .push_back(StudioEvent::OperationChanged(OperationEvent {
+                revision: self.revision,
+                id: completion.id.clone(),
+                profile_id: None,
+                action: completion.action,
+                phase: OperationPhase::Complete,
+                status: if succeeded {
+                    OperationStatus::Succeeded
+                } else {
+                    OperationStatus::Failed {
+                        message: message.clone(),
+                    }
+                },
+                progress: Some(1.0),
+                message: Some(message),
+            }));
+        if let Ok(result) = result {
+            match &result {
+                AuthoringResultKind::RegisteredSources { .. }
+                | AuthoringResultKind::ContentValidated { .. } => {}
+                AuthoringResultKind::Composition { .. }
+                | AuthoringResultKind::WorkshopMetadata { .. }
+                | AuthoringResultKind::RuntimeOutputs { .. } => self.refresh_catalog(),
+                AuthoringResultKind::ContentCreated { .. }
+                | AuthoringResultKind::WorkspaceCreated { .. } => {}
+            }
+            self.operation_events
+                .push_back(StudioEvent::AuthoringResult(Box::new(AuthoringResult {
+                    operation_id: completion.id,
+                    result,
+                })));
+        }
+    }
+
+    fn start_workshop_operation(&mut self, action: WorkshopAction) -> Result<(), StudioError> {
+        if self.active_operation.is_some() {
+            return Err(StudioError {
+                code: StudioErrorCode::OperationInProgress,
+                message: "Wait for the current Studio operation to finish.".to_owned(),
+                retryable: true,
+            });
+        }
+        let kind = match action {
+            WorkshopAction::Search { query, page } => {
+                if query.len() > 256 {
+                    return Err(invalid_workshop_request(
+                        "Workshop search terms must be 256 bytes or fewer.",
+                    ));
+                }
+                if !(1..=1_000).contains(&page) {
+                    return Err(invalid_workshop_request(
+                        "Workshop search page must be between 1 and 1000.",
+                    ));
+                }
+                WorkshopOperationKind::Search {
+                    query: query.trim().to_owned(),
+                    page,
+                }
+            }
+            WorkshopAction::LoadSubscriptions => WorkshopOperationKind::LoadSubscriptions,
+            WorkshopAction::Subscribe { item_ids } => WorkshopOperationKind::ChangeSubscriptions {
+                ids: parse_workshop_ids(item_ids)?,
+                subscribe: true,
+            },
+            WorkshopAction::Unsubscribe { item_ids } => {
+                WorkshopOperationKind::ChangeSubscriptions {
+                    ids: parse_workshop_ids(item_ids)?,
+                    subscribe: false,
+                }
+            }
+            WorkshopAction::Acquire { item_ids } => WorkshopOperationKind::Acquire {
+                ids: parse_workshop_ids(item_ids)?
+                    .into_iter()
+                    .map(|id| id.to_string())
+                    .collect(),
+            },
+            WorkshopAction::Stage { selector } => {
+                let workspace_root = self.validate_workshop_stage(&selector)?;
+                self.workshop_review = None;
+                WorkshopOperationKind::Stage {
+                    selector,
+                    workspace_root,
+                }
+            }
+            WorkshopAction::Publish {
+                review_id,
+                account,
+                confirmation,
+                change_note,
+            } => {
+                let review = self
+                    .workshop_review
+                    .as_ref()
+                    .filter(|review| review.review_id == review_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        invalid_workshop_request(
+                            "This Workshop review is no longer current. Stage the content again.",
+                        )
+                    })?;
+                let workspace_root = self.validate_workshop_stage(&review.selector)?;
+                if workspace_root != review.workspace_root {
+                    return Err(invalid_workshop_request(
+                        "The active workspace changed after this review was staged.",
+                    ));
+                }
+                let account = account.trim().to_owned();
+                if account.is_empty() || account.len() > 128 {
+                    return Err(invalid_workshop_request(
+                        "Enter a publisher account name of 1 to 128 bytes.",
+                    ));
+                }
+                let expected_confirmation = format!("PUBLISH {} TO {account}", review.preview.id);
+                if confirmation.trim() != expected_confirmation {
+                    return Err(invalid_workshop_request(&format!(
+                        "Type {expected_confirmation} exactly to authorize this Workshop upload."
+                    )));
+                }
+                let change_note = change_note.trim();
+                if change_note.len() > 500 {
+                    return Err(invalid_workshop_request(
+                        "Workshop change notes must be 500 bytes or fewer.",
+                    ));
+                }
+                WorkshopOperationKind::Publish {
+                    review: Box::new(review),
+                    account,
+                    change_note: (!change_note.is_empty()).then(|| change_note.to_owned()),
+                }
+            }
+            WorkshopAction::DiscardReview => {
+                return Err(invalid_workshop_request(
+                    "Workshop review discard must use the synchronous service path.",
+                ));
+            }
+        };
+        let operation_id = vapor_core::OperationId::fresh();
+        let id = operation_id.0.to_string();
+        let action_id = workshop_operation_action_id(&kind);
+        self.active_operation = Some(OperationSummary {
+            id: id.clone(),
+            profile_id: None,
+            action: action_id.to_owned(),
+            phase: OperationPhase::Resolving,
+            status: OperationStatus::Running,
+            progress: None,
+        });
+
+        let fixture_mode = self.bootstrap.fixture_mode;
+        let application_executable = self.bootstrap.application_executable.clone();
+        let workshop_app_id = self.bootstrap.workshop_app_id;
+        let fixture_subscriptions = self.fixture_workshop_subscriptions.clone();
+        let lifecycle_sender = self.operation_sender.clone();
+        let completion_sender = self.operation_sender.clone();
+        thread::Builder::new()
+            .name(format!("studio-workshop-{id}"))
+            .spawn(move || {
+                let request = vapor_core::CoreOperationRequest {
+                    id: operation_id,
+                    domain: "studio-workshop".to_owned(),
+                    action: action_id.to_owned(),
+                };
+                let sink: vapor_core::OperationEventSink = std::sync::Arc::new(move |event| {
+                    if matches!(event.status, vapor_core::OperationStatus::Running) {
+                        let _ = lifecycle_sender.send(BackgroundOperationMessage::Lifecycle(event));
+                    }
+                });
+                let action_for_worker = kind.clone();
+                let result = vapor_core::OperationService::run_observed(
+                    request,
+                    sink,
+                    |_| {
+                        execute_workshop_operation(
+                            &application_executable,
+                            fixture_mode,
+                            workshop_app_id,
+                            fixture_subscriptions,
+                            action_for_worker,
+                        )
+                    },
+                    workshop_result_outcome,
+                );
+                let _ = completion_sender.send(BackgroundOperationMessage::CompleteWorkshop(
+                    Box::new(WorkshopOperationCompletion {
+                        id,
+                        action: kind,
+                        result,
+                    }),
+                ));
+            })
+            .map_err(|error| {
+                self.active_operation = None;
+                StudioError {
+                    code: StudioErrorCode::InternalFailure,
+                    message: format!("Could not start Workshop operation: {error}"),
+                    retryable: true,
+                }
+            })?;
+        Ok(())
+    }
+
+    fn apply_workshop_completion(&mut self, completion: WorkshopOperationCompletion) {
+        let mut succeeded = completion.result.is_ok();
+        let mut failure = completion.result.as_ref().err().cloned();
+        let mut summary = None;
+        match completion.result {
+            Ok(WorkshopOperationResult::Search(page)) => {
+                summary = Some(format!(
+                    "Steam Workshop returned {} items on page {} of {}.",
+                    page.items.len(),
+                    page.page,
+                    page.total_results
+                ));
+                let revision = self
+                    .workshop
+                    .search
+                    .as_ref()
+                    .map_or(1, |search| search.revision.saturating_add(1));
+                self.workshop.search = Some(workshop_search_snapshot(
+                    match &completion.action {
+                        WorkshopOperationKind::Search { query, .. } => query.clone(),
+                        _ => String::new(),
+                    },
+                    page,
+                    revision,
+                ));
+            }
+            Ok(WorkshopOperationResult::Subscriptions(subscriptions)) => {
+                self.fixture_workshop_subscriptions = subscriptions
+                    .iter()
+                    .map(|item| item.published_file_id.clone())
+                    .collect();
+                self.workshop.subscriptions = subscriptions
+                    .iter()
+                    .map(workshop_subscription_snapshot)
+                    .collect();
+                self.workshop.subscriptions_loaded = true;
+                self.workshop.subscriptions_revision =
+                    self.workshop.subscriptions_revision.saturating_add(1);
+                summary = Some(format!(
+                    "Loaded {} Steam Workshop subscriptions.",
+                    subscriptions.len()
+                ));
+            }
+            Ok(WorkshopOperationResult::Acquisitions { items, requested }) => {
+                let revision = self
+                    .workshop
+                    .acquisition
+                    .as_ref()
+                    .map_or(1, |batch| batch.revision.saturating_add(1));
+                let items = items
+                    .iter()
+                    .map(workshop_acquisition_snapshot)
+                    .collect::<Vec<_>>();
+                let imported = items.len();
+                if self.bootstrap.fixture_mode {
+                    self.fixture_acquisitions
+                        .extend(items.iter().cloned().map(|item| (item.id.clone(), item)));
+                }
+                self.workshop.acquisition = Some(WorkshopAcquisitionBatchSnapshot {
+                    revision,
+                    requested,
+                    items,
+                });
+                summary = Some(format!(
+                    "Added {} Workshop items to content available on this device.",
+                    imported
+                ));
+                self.refresh_catalog();
+            }
+            Ok(WorkshopOperationResult::Review(preview)) => {
+                let (selector, workspace_root) = match &completion.action {
+                    WorkshopOperationKind::Stage {
+                        selector,
+                        workspace_root,
+                    } => (selector.clone(), workspace_root.clone()),
+                    _ => (String::new(), PathBuf::new()),
+                };
+                if self.bootstrap.workspace_root.as_deref() != Some(workspace_root.as_path()) {
+                    succeeded = false;
+                    failure = Some(
+                        "The active workspace changed while this Workshop item was being staged. Stage it again from the current workspace.".to_owned(),
+                    );
+                } else {
+                    self.workshop_review = Some(WorkshopReviewState {
+                        review_id: completion.id.clone(),
+                        selector,
+                        workspace_root,
+                        preview: preview.clone(),
+                    });
+                    summary = Some(format!(
+                        "Staged {} · {} files · {} bytes for review.",
+                        preview.id, preview.files, preview.bytes
+                    ));
+                }
+            }
+            Ok(WorkshopOperationResult::Publication(publication)) => {
+                self.workshop_review = None;
+                summary = Some(format!(
+                    "{} Workshop item {}{}; receipt saved at {}.",
+                    if publication.created {
+                        "Created"
+                    } else {
+                        "Updated"
+                    },
+                    publication.id,
+                    publication
+                        .published_file_id
+                        .as_ref()
+                        .map(|id| format!(" · PublishedFileId {id}"))
+                        .unwrap_or_default(),
+                    publication.receipt.display()
+                ));
+                self.refresh_catalog();
+            }
+            Err(_) => {}
+        }
+        self.active_operation = None;
+        self.revision.0 = self.revision.0.saturating_add(1);
+        let action = workshop_operation_action_id(&completion.action).to_owned();
+        let message = failure.or(summary);
+        self.operation_events
+            .push_back(StudioEvent::OperationChanged(OperationEvent {
+                revision: self.revision,
+                id: completion.id,
+                profile_id: None,
+                action,
+                phase: OperationPhase::Complete,
+                status: if succeeded {
+                    OperationStatus::Succeeded
+                } else {
+                    OperationStatus::Failed {
+                        message: message
+                            .clone()
+                            .unwrap_or_else(|| "Workshop operation failed.".to_owned()),
+                    }
+                },
+                progress: Some(1.0),
+                message,
+            }));
     }
 
     fn apply_composition_completion(&mut self, completion: CompositionOperationCompletion) {
@@ -783,6 +1731,22 @@ impl StudioSession {
                     install_source: None,
                 }],
             }];
+            self.catalog
+                .extend(self.fixture_acquisitions.values().map(|item| CatalogEntry {
+                    id: item.id.clone(),
+                    version: item.version.clone(),
+                    kind: item.kind.clone(),
+                    published_file_id: None,
+                    dependencies: Vec::new(),
+                    conflicts: Vec::new(),
+                    locations: vec![CatalogLocation {
+                        kind: CatalogLocationKind::Cache,
+                        root: item.cache_root.clone(),
+                        enabled: true,
+                        fingerprint: Some(item.fingerprint.clone()),
+                        install_source: None,
+                    }],
+                }));
             self.catalog_error = None;
             return;
         }
@@ -1102,6 +2066,885 @@ fn operation_action_id(kind: CompositionOperationKind) -> &'static str {
         CompositionOperationKind::Update => "composition.update",
         CompositionOperationKind::Launch => "composition.launch",
         CompositionOperationKind::RunSource => "composition.run-source",
+    }
+}
+
+fn invalid_workshop_request(message: &str) -> StudioError {
+    StudioError {
+        code: StudioErrorCode::InvalidRequest,
+        message: message.to_owned(),
+        retryable: false,
+    }
+}
+
+fn parse_workshop_ids(ids: Vec<String>) -> Result<Vec<u64>, StudioError> {
+    if ids.is_empty() {
+        return Err(invalid_workshop_request(
+            "Select at least one Workshop item.",
+        ));
+    }
+    if ids.len() > vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH {
+        return Err(invalid_workshop_request(&format!(
+            "At most {} Workshop items can be changed at once.",
+            vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    let mut parsed = Vec::new();
+    for id in ids {
+        let value = id.trim().parse::<u64>().ok().filter(|value| *value != 0);
+        let Some(value) = value else {
+            return Err(invalid_workshop_request(&format!(
+                "Invalid Steam PublishedFileId: {}",
+                id.trim()
+            )));
+        };
+        if seen.insert(value) {
+            parsed.push(value);
+        }
+    }
+    Ok(parsed)
+}
+
+fn workshop_operation_action_id(kind: &WorkshopOperationKind) -> &'static str {
+    match kind {
+        WorkshopOperationKind::Search { .. } => "workshop.search",
+        WorkshopOperationKind::LoadSubscriptions => "workshop.load-subscriptions",
+        WorkshopOperationKind::ChangeSubscriptions {
+            subscribe: true, ..
+        } => "workshop.subscribe",
+        WorkshopOperationKind::ChangeSubscriptions {
+            subscribe: false, ..
+        } => "workshop.unsubscribe",
+        WorkshopOperationKind::Acquire { .. } => "workshop.acquire",
+        WorkshopOperationKind::Stage { .. } => "workshop.stage",
+        WorkshopOperationKind::Publish { .. } => "workshop.publish",
+    }
+}
+
+fn validate_workspace_relative_path(path: &str) -> Result<PathBuf, StudioError> {
+    let path = PathBuf::from(path);
+    if path.as_os_str().is_empty()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(invalid_workspace_request(
+            "Choose a file path relative to the open workspace.",
+        ));
+    }
+    Ok(path)
+}
+
+fn authoring_action_id(action: &AuthoringAction) -> &'static str {
+    match action {
+        AuthoringAction::LoadComposition { .. } => "authoring.load-composition",
+        AuthoringAction::ListRegisteredSources => "authoring.list-registered-sources",
+        AuthoringAction::SaveComposition { .. } => "authoring.save-composition",
+        AuthoringAction::LoadWorkshopMetadata { .. } => "authoring.load-workshop-metadata",
+        AuthoringAction::SaveWorkshopMetadata { .. } => "authoring.save-workshop-metadata",
+        AuthoringAction::LoadRuntimeOutputs { .. } => "authoring.load-runtime-outputs",
+        AuthoringAction::ValidateContent { .. } => "authoring.validate-content",
+        AuthoringAction::SaveRuntimeOutputs { .. } => "authoring.save-runtime-outputs",
+        AuthoringAction::CreateContent { .. } => "authoring.create-content",
+        AuthoringAction::CreateWorkspace { .. } => "authoring.create-workspace",
+    }
+}
+
+fn execute_authoring_operation(
+    executable: &Path,
+    active_workspace: Option<&Path>,
+    action: AuthoringAction,
+) -> Result<AuthoringResultKind, String> {
+    use AuthoringAction as Action;
+    match action {
+        Action::ListRegisteredSources => {
+            let installation =
+                vapor_core::VaporInstallation::discover().map_err(|error| error.to_string())?;
+            let state =
+                vapor_core::source_state(&installation).map_err(|error| error.to_string())?;
+            Ok(AuthoringResultKind::RegisteredSources {
+                roots: state
+                    .known
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect(),
+                active: state.active.map(|path| path.to_string_lossy().into_owned()),
+            })
+        }
+        Action::LoadComposition { project_id } => {
+            let workspace = active_workspace.ok_or("Open a workspace before editing content.")?;
+            vapor_studio_core::load_source_composition(executable, workspace, &project_id).map(
+                |value| AuthoringResultKind::Composition {
+                    id: value.id,
+                    version: value.version,
+                    kind: value.kind,
+                    manifest: value.manifest.to_string_lossy().into_owned(),
+                    source: value.source,
+                    links: value
+                        .links
+                        .into_iter()
+                        .map(|link| AuthoringCompositionLink {
+                            id: link.id,
+                            relationship: link.relationship,
+                            optional: link.optional,
+                            version: link.version,
+                            workshop_id: link.workshop_id,
+                            reason: link.reason,
+                        })
+                        .collect(),
+                },
+            )
+        }
+        Action::SaveComposition {
+            project_id,
+            expected_fingerprint,
+            dependencies,
+        } => {
+            let workspace = active_workspace.ok_or("Open a workspace before editing content.")?;
+            let links = dependencies
+                .into_iter()
+                .map(|link| vapor_studio_core::SourceCompositionLink {
+                    id: link.project_id,
+                    relationship: link.relationship,
+                    optional: link.optional,
+                    version: link.version_requirement,
+                    workshop_id: link.workshop_id,
+                    reason: link.reason,
+                })
+                .collect::<Vec<_>>();
+            vapor_studio_core::save_source_composition(
+                executable,
+                workspace,
+                &project_id,
+                &expected_fingerprint,
+                &links,
+            )
+            .map(|value| AuthoringResultKind::Composition {
+                id: value.id,
+                version: value.version,
+                kind: value.kind,
+                manifest: value.manifest.to_string_lossy().into_owned(),
+                source: value.source,
+                links: value
+                    .links
+                    .into_iter()
+                    .map(|link| AuthoringCompositionLink {
+                        id: link.id,
+                        relationship: link.relationship,
+                        optional: link.optional,
+                        version: link.version,
+                        workshop_id: link.workshop_id,
+                        reason: link.reason,
+                    })
+                    .collect(),
+            })
+        }
+        Action::LoadWorkshopMetadata { project_id } => {
+            let workspace = active_workspace.ok_or("Open a workspace before editing content.")?;
+            vapor_studio_core::load_source_workshop_metadata(executable, workspace, &project_id)
+                .map(|value| AuthoringResultKind::WorkshopMetadata {
+                    id: value.id,
+                    version: value.version,
+                    kind: value.kind,
+                    manifest: value.manifest.to_string_lossy().into_owned(),
+                    source: value.source,
+                    policy: workshop_policy_to_protocol(value.policy),
+                })
+        }
+        Action::SaveWorkshopMetadata {
+            project_id,
+            expected_fingerprint,
+            app_id,
+            published_file_id,
+            visibility,
+            title,
+            description,
+            tags,
+            change_note,
+        } => {
+            let workspace = active_workspace.ok_or("Open a workspace before editing content.")?;
+            vapor_studio_core::save_source_workshop_metadata(
+                executable,
+                workspace,
+                &project_id,
+                &expected_fingerprint,
+                &vapor_studio_core::WorkshopPolicyDraft {
+                    app_id,
+                    published_file_id,
+                    visibility,
+                    title,
+                    description,
+                    tags,
+                    change_note,
+                },
+            )
+            .map(|value| AuthoringResultKind::WorkshopMetadata {
+                id: value.id,
+                version: value.version,
+                kind: value.kind,
+                manifest: value.manifest.to_string_lossy().into_owned(),
+                source: value.source,
+                policy: workshop_policy_to_protocol(value.policy),
+            })
+        }
+        Action::LoadRuntimeOutputs { project_id } => {
+            let workspace = active_workspace.ok_or("Open a workspace before editing content.")?;
+            vapor_studio_core::load_source_runtime_outputs(executable, workspace, &project_id).map(
+                |value| AuthoringResultKind::RuntimeOutputs {
+                    id: value.id,
+                    version: value.version,
+                    kind: value.kind,
+                    manifest: value.manifest.to_string_lossy().into_owned(),
+                    source: value.source,
+                    binaries: value.binaries,
+                    libraries: value.libraries,
+                },
+            )
+        }
+        Action::ValidateContent { project_id } => {
+            let workspace =
+                active_workspace.ok_or("Open a workspace before validating content.")?;
+            vapor_studio_core::validate_profile_source(executable, workspace, &project_id)
+                .map(|()| AuthoringResultKind::ContentValidated { id: project_id })
+        }
+        Action::SaveRuntimeOutputs {
+            project_id,
+            expected_fingerprint,
+            binaries,
+            libraries,
+        } => {
+            let workspace = active_workspace.ok_or("Open a workspace before editing content.")?;
+            vapor_studio_core::save_source_runtime_outputs(
+                executable,
+                workspace,
+                &project_id,
+                &expected_fingerprint,
+                &binaries,
+                &libraries,
+            )
+            .map(|value| AuthoringResultKind::RuntimeOutputs {
+                id: value.id,
+                version: value.version,
+                kind: value.kind,
+                manifest: value.manifest.to_string_lossy().into_owned(),
+                source: value.source,
+                binaries: value.binaries,
+                libraries: value.libraries,
+            })
+        }
+        Action::CreateContent {
+            workspace_root,
+            kind,
+            id,
+            version,
+            dependencies,
+            workshop,
+        } => {
+            let active = active_workspace.ok_or("Open a workspace before creating content.")?;
+            let requested = PathBuf::from(workspace_root)
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            let active = active.canonicalize().map_err(|error| error.to_string())?;
+            if requested != active {
+                return Err("Content creation must target the currently open workspace.".to_owned());
+            }
+            let kind = parse_authoring_content_kind(&kind)?;
+            let policy = vapor_studio_core::WorkshopPolicyDraft {
+                app_id: workshop.app_id,
+                published_file_id: workshop.published_file_id,
+                visibility: workshop.visibility,
+                title: workshop.title,
+                description: workshop.description,
+                tags: workshop.tags,
+                change_note: workshop.change_note,
+            };
+            let manifest = vapor_studio_core::create_content_workspace_with_workshop(
+                executable,
+                &active,
+                &id,
+                &version,
+                kind,
+                &dependencies,
+                &policy,
+            )?;
+            let contents = std::fs::read_to_string(&manifest)
+                .map_err(|error| format!("{}: {error}", manifest.display()))?;
+            let files = vapor_studio_core::discover_workspace_files(&active)?
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+            Ok(AuthoringResultKind::ContentCreated {
+                workspace_root: active.to_string_lossy().into_owned(),
+                manifest: manifest
+                    .strip_prefix(&active)
+                    .unwrap_or(&manifest)
+                    .to_string_lossy()
+                    .into_owned(),
+                manifest_contents: contents,
+                files,
+            })
+        }
+        Action::CreateWorkspace {
+            parent,
+            organization,
+            name,
+        } => {
+            if !valid_workspace_slug(&organization) || !valid_workspace_slug(&name) {
+                return Err(
+                    "Workspace organization and name must use lowercase letters, digits, and internal hyphens."
+                        .to_owned(),
+                );
+            }
+            let parent = PathBuf::from(parent);
+            let parent = parent
+                .canonicalize()
+                .map_err(|error| format!("{}: {error}", parent.display()))?;
+            if !parent.is_dir() {
+                return Err(format!("{} is not a directory", parent.display()));
+            }
+            let destination = parent.join(&name);
+            let root = vapor_studio_core::create_basic_content_workspace(
+                executable,
+                &destination,
+                &organization,
+                &name,
+            )?;
+            let files = vapor_studio_core::discover_workspace_files(&root)?
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+            Ok(AuthoringResultKind::WorkspaceCreated {
+                root: root.to_string_lossy().into_owned(),
+                files,
+            })
+        }
+    }
+}
+
+fn valid_workspace_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && value
+            .bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
+fn workshop_policy_to_protocol(
+    value: vapor_studio_core::WorkshopPolicyDraft,
+) -> WorkshopMetadataDraft {
+    WorkshopMetadataDraft {
+        app_id: value.app_id,
+        published_file_id: value.published_file_id,
+        visibility: value.visibility,
+        title: value.title,
+        description: value.description,
+        tags: value.tags,
+        change_note: value.change_note,
+    }
+}
+
+fn parse_authoring_content_kind(kind: &str) -> Result<vapor_core::ContentKind, String> {
+    Ok(match kind {
+        "engine" => vapor_core::ContentKind::Engine,
+        "game" => vapor_core::ContentKind::Game,
+        "packagepack" => vapor_core::ContentKind::Packagepack,
+        "enginepack" => vapor_core::ContentKind::Enginepack,
+        "gamepack" => vapor_core::ContentKind::Gamepack,
+        "modpack" => vapor_core::ContentKind::Modpack,
+        "engine-mod" => vapor_core::ContentKind::EngineMod,
+        "game-mod" => vapor_core::ContentKind::GameMod,
+        "extension-mod" => vapor_core::ContentKind::ExtensionMod,
+        _ => return Err(format!("Unsupported source content role: {kind}")),
+    })
+}
+
+fn authoring_result_outcome(
+    result: &Result<AuthoringResultKind, String>,
+) -> Result<String, String> {
+    result
+        .as_ref()
+        .map(authoring_result_message)
+        .map_err(Clone::clone)
+}
+
+fn authoring_result_message(result: &AuthoringResultKind) -> String {
+    match result {
+        AuthoringResultKind::Composition { id, .. } => format!("Loaded composition for {id}."),
+        AuthoringResultKind::RegisteredSources { roots, .. } => {
+            format!(
+                "Loaded {} registered workspace{}.",
+                roots.len(),
+                if roots.len() == 1 { "" } else { "s" }
+            )
+        }
+        AuthoringResultKind::WorkshopMetadata { id, .. } => {
+            format!("Loaded Workshop metadata for {id}.")
+        }
+        AuthoringResultKind::RuntimeOutputs { id, .. } => {
+            format!("Loaded runtime outputs for {id}.")
+        }
+        AuthoringResultKind::ContentValidated { id } => format!("Validated {id}."),
+        AuthoringResultKind::ContentCreated { manifest, .. } => {
+            format!("Created content at {manifest}.")
+        }
+        AuthoringResultKind::WorkspaceCreated { root, .. } => {
+            format!("Created workspace at {root}.")
+        }
+    }
+}
+
+fn invalid_workspace_request(message: &str) -> StudioError {
+    StudioError {
+        code: StudioErrorCode::InvalidRequest,
+        message: message.to_owned(),
+        retryable: false,
+    }
+}
+
+fn workspace_operation_action_id(kind: &WorkspaceOperationKind) -> &'static str {
+    match kind {
+        WorkspaceOperationKind::ListFiles => "workspace.list-files",
+        WorkspaceOperationKind::OpenFile(_) => "workspace.open-file",
+        WorkspaceOperationKind::SaveFile(_) => "workspace.save-file",
+        WorkspaceOperationKind::CreateFile(_) => "workspace.create-file",
+        WorkspaceOperationKind::Validate => "workspace.validate",
+        WorkspaceOperationKind::Remember => "workspace.remember",
+        WorkspaceOperationKind::AdoptProject(_) => "workspace.adopt-project",
+        WorkspaceOperationKind::UnregisterProject(_) => "workspace.unregister-project",
+    }
+}
+
+fn workspace_operation_phase(kind: &WorkspaceOperationKind) -> OperationPhase {
+    match kind {
+        WorkspaceOperationKind::ListFiles | WorkspaceOperationKind::OpenFile(_) => {
+            OperationPhase::Resolving
+        }
+        WorkspaceOperationKind::SaveFile(_) | WorkspaceOperationKind::CreateFile(_) => {
+            OperationPhase::Building
+        }
+        WorkspaceOperationKind::Validate
+        | WorkspaceOperationKind::Remember
+        | WorkspaceOperationKind::AdoptProject(_)
+        | WorkspaceOperationKind::UnregisterProject(_) => OperationPhase::Resolving,
+    }
+}
+
+fn execute_workspace_operation(
+    executable: &Path,
+    root: &Path,
+    kind: WorkspaceOperationKind,
+) -> Result<WorkspaceOperationResult, String> {
+    match kind {
+        WorkspaceOperationKind::ListFiles => {
+            vapor_studio_core::discover_workspace_files(root).map(WorkspaceOperationResult::Listed)
+        }
+        WorkspaceOperationKind::OpenFile(path) => {
+            vapor_studio_core::read_workspace_file_with_fingerprint(root, &path).map(
+                |(contents, fingerprint)| {
+                    WorkspaceOperationResult::Opened(Box::new(WorkspaceFileOpen {
+                        path,
+                        contents,
+                        fingerprint,
+                    }))
+                },
+            )
+        }
+        WorkspaceOperationKind::SaveFile(save) => {
+            vapor_studio_core::write_workspace_file_if_fingerprint(
+                root,
+                &save.path,
+                &save.expected_fingerprint,
+                &save.contents,
+            )
+            .map(|fingerprint| WorkspaceOperationResult::Saved {
+                path: save.path,
+                fingerprint,
+            })
+        }
+        WorkspaceOperationKind::CreateFile(path) => {
+            vapor_studio_core::create_new_workspace_file(root, &path)
+                .map(WorkspaceOperationResult::Created)
+        }
+        WorkspaceOperationKind::Validate => {
+            vapor_studio_core::validate_workspace_source(executable, root)
+                .map(|()| WorkspaceOperationResult::Completed)
+        }
+        WorkspaceOperationKind::Remember => {
+            vapor_studio_core::remember_workspace(root).map(WorkspaceOperationResult::Remembered)
+        }
+        WorkspaceOperationKind::AdoptProject(path) => {
+            vapor_studio_core::adopt_workspace_content_project(executable, root, &path)
+                .map(|_| WorkspaceOperationResult::Completed)
+        }
+        WorkspaceOperationKind::UnregisterProject(id) => {
+            vapor_studio_core::unregister_workspace_content_project(executable, root, &id)
+                .map(|(_, _, identity)| WorkspaceOperationResult::Unregistered(identity))
+        }
+    }
+}
+
+fn workspace_result_outcome(
+    result: &Result<WorkspaceOperationResult, String>,
+) -> Result<String, String> {
+    match result {
+        Ok(WorkspaceOperationResult::Listed(files)) => {
+            Ok(format!("Found {} workspace files.", files.len()))
+        }
+        Ok(WorkspaceOperationResult::Opened(opened)) => {
+            Ok(format!("Opened {}.", opened.path.display()))
+        }
+        Ok(WorkspaceOperationResult::Saved { path, .. }) => {
+            Ok(format!("Saved {}.", path.display()))
+        }
+        Ok(WorkspaceOperationResult::Created(path)) => Ok(format!("Created {}.", path.display())),
+        Ok(WorkspaceOperationResult::Completed) => Ok("Workspace operation completed.".to_owned()),
+        Ok(WorkspaceOperationResult::Remembered(paths)) => Ok(format!(
+            "Registered {} workspace{}.",
+            paths.len(),
+            if paths.len() == 1 { "" } else { "s" }
+        )),
+        Ok(WorkspaceOperationResult::Unregistered(identity)) => {
+            Ok(format!("Unregistered {}.", identity.id))
+        }
+        Err(error) => Err(error.clone()),
+    }
+}
+
+fn is_content_manifest_path(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name == "Vapor.toml" || name.to_string_lossy().ends_with(".vapor.toml"))
+}
+
+fn workshop_result_outcome(
+    result: &Result<WorkshopOperationResult, String>,
+) -> Result<String, String> {
+    match result {
+        Ok(WorkshopOperationResult::Search(page)) => Ok(format!(
+            "Steam Workshop returned {} items on page {} of {}.",
+            page.items.len(),
+            page.page,
+            page.total_results
+        )),
+        Ok(WorkshopOperationResult::Subscriptions(items)) => Ok(format!(
+            "Loaded {} Steam Workshop subscriptions.",
+            items.len()
+        )),
+        Ok(WorkshopOperationResult::Acquisitions { items, requested }) => {
+            if items.len() == *requested {
+                Ok(format!(
+                    "Added {} Workshop items to the local cache.",
+                    items.len()
+                ))
+            } else {
+                Err(format!(
+                    "Downloaded {} of {requested} requested Workshop items.",
+                    items.len()
+                ))
+            }
+        }
+        Ok(WorkshopOperationResult::Review(preview)) => Ok(format!(
+            "Staged {} · {} files · {} bytes for review.",
+            preview.id, preview.files, preview.bytes
+        )),
+        Ok(WorkshopOperationResult::Publication(publication)) => Ok(format!(
+            "{} Workshop item {}{}; receipt saved at {}.",
+            if publication.created {
+                "Created"
+            } else {
+                "Updated"
+            },
+            publication.id,
+            publication
+                .published_file_id
+                .as_ref()
+                .map(|id| format!(" · PublishedFileId {id}"))
+                .unwrap_or_default(),
+            publication.receipt.display()
+        )),
+        Err(error) => Err(error.clone()),
+    }
+}
+
+fn execute_workshop_operation(
+    application_executable: &Path,
+    fixture_mode: bool,
+    workshop_app_id: Option<u32>,
+    fixture_subscriptions: BTreeSet<String>,
+    kind: WorkshopOperationKind,
+) -> Result<WorkshopOperationResult, String> {
+    if fixture_mode {
+        return Ok(fixture_workshop_operation(fixture_subscriptions, kind));
+    }
+    match kind {
+        WorkshopOperationKind::Search { query, page } => {
+            let app_id = required_workshop_app_id(workshop_app_id)?;
+            vapor_studio_core::search_workshop(app_id, &query, page)
+                .map(WorkshopOperationResult::Search)
+        }
+        WorkshopOperationKind::LoadSubscriptions => {
+            let app_id = required_workshop_app_id(workshop_app_id)?;
+            vapor_studio_core::workshop_subscriptions(app_id)
+                .map(WorkshopOperationResult::Subscriptions)
+        }
+        WorkshopOperationKind::ChangeSubscriptions { ids, subscribe } => {
+            let app_id = required_workshop_app_id(workshop_app_id)?;
+            let change = if subscribe {
+                vapor_studio_core::subscribe_workshop_items(app_id, &ids)
+            } else {
+                vapor_studio_core::unsubscribe_workshop_items(app_id, &ids)
+            };
+            change?;
+            vapor_studio_core::workshop_subscriptions(app_id)
+                .map(WorkshopOperationResult::Subscriptions)
+                .map_err(|error| {
+                    format!(
+                        "Subscription change completed, but the updated list could not be loaded: {error}"
+                    )
+                })
+        }
+        WorkshopOperationKind::Acquire { ids } => {
+            let requested = ids.len();
+            vapor_studio_core::download_workshop_items(application_executable, &ids)
+                .map(|items| WorkshopOperationResult::Acquisitions { items, requested })
+        }
+        WorkshopOperationKind::Stage {
+            selector,
+            workspace_root,
+        } => vapor_studio_core::stage_workshop_preview(
+            application_executable,
+            &workspace_root,
+            &selector,
+        )
+        .map(WorkshopOperationResult::Review),
+        WorkshopOperationKind::Publish {
+            review,
+            account,
+            change_note,
+        } => vapor_studio_core::publish_reviewed_workshop_content(
+            application_executable,
+            &review.workspace_root,
+            &review.selector,
+            &review.preview,
+            &account,
+            change_note.as_deref(),
+        )
+        .map(WorkshopOperationResult::Publication),
+    }
+}
+
+fn required_workshop_app_id(app_id: Option<u32>) -> Result<u32, String> {
+    app_id.ok_or_else(|| {
+        "This Studio installation has no configured Workshop application.".to_owned()
+    })
+}
+
+fn fixture_workshop_operation(
+    mut subscriptions: BTreeSet<String>,
+    kind: WorkshopOperationKind,
+) -> WorkshopOperationResult {
+    let items = vec![
+        fixture_workshop_item("1001", "Fixture Starter Pack"),
+        fixture_workshop_item("1002", "Fixture Moon Pack"),
+    ];
+    match kind {
+        WorkshopOperationKind::Search { query, page } => {
+            let query = query.to_lowercase();
+            let items = items
+                .into_iter()
+                .filter(|item| item.title.to_lowercase().contains(&query))
+                .collect::<Vec<_>>();
+            WorkshopOperationResult::Search(vapor_studio_core::WorkshopPage {
+                total_results: items.len() as u32,
+                items,
+                page,
+            })
+        }
+        WorkshopOperationKind::LoadSubscriptions => WorkshopOperationResult::Subscriptions(
+            subscriptions
+                .iter()
+                .map(|id| fixture_workshop_subscription(id))
+                .collect(),
+        ),
+        WorkshopOperationKind::ChangeSubscriptions { ids, subscribe } => {
+            for id in ids {
+                if subscribe {
+                    subscriptions.insert(id.to_string());
+                } else {
+                    subscriptions.remove(&id.to_string());
+                }
+            }
+            WorkshopOperationResult::Subscriptions(
+                subscriptions
+                    .iter()
+                    .map(|id| fixture_workshop_subscription(id))
+                    .collect(),
+            )
+        }
+        WorkshopOperationKind::Acquire { ids } => {
+            let requested = ids.len();
+            let items = ids
+                .into_iter()
+                .map(|id| vapor_studio_core::WorkshopAcquisition {
+                    id: format!("fixture.content.{id}"),
+                    version: Some("1.0.0".to_owned()),
+                    kind: "mod".to_owned(),
+                    cache_root: PathBuf::from(format!("fixture/cache/fixture.content.{id}")),
+                    fingerprint: format!("fixture:{id}"),
+                })
+                .collect();
+            WorkshopOperationResult::Acquisitions { items, requested }
+        }
+        WorkshopOperationKind::Stage {
+            selector,
+            workspace_root: _,
+        } => {
+            let (id, version) = selector
+                .split_once('@')
+                .map(|(id, version)| (id.to_owned(), Some(version.to_owned())))
+                .unwrap_or((selector, Some("1.0.0".to_owned())));
+            WorkshopOperationResult::Review(vapor_studio_core::WorkshopPackagePreview {
+                id,
+                version,
+                app_id: Some(2122620),
+                published_file_id: None,
+                title: Some("Fixture Workshop artifact".to_owned()),
+                visibility: Some("public".to_owned()),
+                dependencies: Vec::new(),
+                root: PathBuf::from("fixture/staged/artifact"),
+                target: "fixture".to_owned(),
+                fingerprint: "fixture:review".to_owned(),
+                files: 1,
+                bytes: 128,
+                file_paths: vec!["Vapor.toml".to_owned()],
+            })
+        }
+        WorkshopOperationKind::Publish { review, .. } => {
+            WorkshopOperationResult::Publication(vapor_studio_core::WorkshopPublication {
+                id: review.preview.id.clone(),
+                published_file_id: Some("1002".to_owned()),
+                receipt: PathBuf::from("fixture/receipts/workshop.json"),
+                created: review.preview.published_file_id.is_none(),
+            })
+        }
+    }
+}
+
+fn fixture_workshop_item(id: &str, title: &str) -> vapor_studio_core::WorkshopItem {
+    vapor_studio_core::WorkshopItem {
+        published_file_id: id.to_owned(),
+        title: title.to_owned(),
+        description: "Deterministic Studio fixture; no Steam connection is used.".to_owned(),
+        preview_url: None,
+        updated_at_unix: 1_797_000_000,
+    }
+}
+
+fn fixture_workshop_subscription(id: &str) -> vapor_studio_core::WorkshopSubscription {
+    let item = match id {
+        "1001" => fixture_workshop_item(id, "Fixture Starter Pack"),
+        "1002" => fixture_workshop_item(id, "Fixture Moon Pack"),
+        _ => fixture_workshop_item(id, &format!("Fixture Workshop item {id}")),
+    };
+    vapor_studio_core::WorkshopSubscription {
+        published_file_id: item.published_file_id,
+        title: item.title,
+        description: item.description,
+        preview_url: item.preview_url,
+        updated_at_unix: item.updated_at_unix,
+        installed: false,
+        needs_update: false,
+        downloading: false,
+        download_progress: None,
+    }
+}
+
+fn workshop_search_snapshot(
+    query: String,
+    page: vapor_studio_core::WorkshopPage,
+    revision: u64,
+) -> WorkshopSearchSnapshot {
+    WorkshopSearchSnapshot {
+        revision,
+        query,
+        page: page.page,
+        total_results: page.total_results,
+        items: page.items.into_iter().map(workshop_item_snapshot).collect(),
+    }
+}
+
+fn workshop_item_snapshot(item: vapor_studio_core::WorkshopItem) -> WorkshopItemSnapshot {
+    WorkshopItemSnapshot {
+        published_file_id: item.published_file_id,
+        title: item.title,
+        description: item.description,
+        preview_url: item.preview_url,
+        updated_at_unix: item.updated_at_unix,
+    }
+}
+
+fn workshop_subscription_snapshot(
+    item: &vapor_studio_core::WorkshopSubscription,
+) -> WorkshopSubscriptionSnapshot {
+    WorkshopSubscriptionSnapshot {
+        published_file_id: item.published_file_id.clone(),
+        title: item.title.clone(),
+        description: item.description.clone(),
+        preview_url: item.preview_url.clone(),
+        updated_at_unix: item.updated_at_unix,
+        installed: item.installed,
+        needs_update: item.needs_update,
+        downloading: item.downloading,
+        download_progress: item.download_progress,
+    }
+}
+
+fn workshop_acquisition_snapshot(
+    item: &vapor_studio_core::WorkshopAcquisition,
+) -> WorkshopAcquisitionSnapshot {
+    WorkshopAcquisitionSnapshot {
+        id: item.id.clone(),
+        version: item.version.clone(),
+        kind: item.kind.clone(),
+        cache_root: item.cache_root.display().to_string(),
+        fingerprint: item.fingerprint.clone(),
+    }
+}
+
+fn workshop_review_snapshot(review: &WorkshopReviewState) -> WorkshopReviewSnapshot {
+    let preview = &review.preview;
+    let visible_paths = preview
+        .file_paths
+        .iter()
+        .take(MAX_WORKSHOP_REVIEW_FILE_PATHS)
+        .cloned()
+        .collect::<Vec<_>>();
+    WorkshopReviewSnapshot {
+        review_id: review.review_id.clone(),
+        selector: review.selector.clone(),
+        preview: WorkshopPackagePreviewSnapshot {
+            id: preview.id.clone(),
+            version: preview.version.clone(),
+            app_id: preview.app_id,
+            published_file_id: preview.published_file_id.clone(),
+            title: preview.title.clone(),
+            visibility: preview.visibility.clone(),
+            dependencies: preview.dependencies.clone(),
+            root: preview.root.display().to_string(),
+            target: preview.target.clone(),
+            fingerprint: preview.fingerprint.clone(),
+            files: preview.files,
+            bytes: preview.bytes,
+            omitted_file_paths: preview.file_paths.len().saturating_sub(visible_paths.len()),
+            file_paths: visible_paths,
+        },
     }
 }
 
@@ -1714,7 +3557,18 @@ mod tests {
     fn session() -> StudioSession {
         StudioSession::new(ServiceBootstrap {
             application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: None,
             workspace_root: None,
+            active_profile_id: Some("default".to_owned()),
+            fixture_mode: true,
+        })
+    }
+
+    fn fixture_workspace_session() -> StudioSession {
+        StudioSession::new(ServiceBootstrap {
+            application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: Some(2122620),
+            workspace_root: Some(PathBuf::from("/fixture/workspace")),
             active_profile_id: Some("default".to_owned()),
             fixture_mode: true,
         })
@@ -1759,6 +3613,187 @@ mod tests {
                 .snapshot
                 .workspace_content
                 .unregistered_projects_loaded
+        );
+    }
+
+    #[test]
+    fn fixture_workshop_search_is_owned_by_the_service_and_returns_results() {
+        let mut session = session();
+        let response = session.dispatch(request(
+            Some(0),
+            StudioAction::Workshop(vapor_studio_protocol::WorkshopAction::Search {
+                query: "moon".into(),
+                page: 1,
+            }),
+        ));
+
+        assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+        let events = wait_for_operation(&mut session);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StudioEvent::OperationChanged(event)
+                if event.action == "workshop.search"
+                    && event.status == OperationStatus::Succeeded
+        )));
+        let snapshot = serde_json::to_value(session.snapshot()).expect("encode snapshot");
+        assert_eq!(snapshot["workshop"]["search"]["query"], "moon");
+        assert_eq!(snapshot["workshop"]["search"]["page"], 1);
+        assert_eq!(
+            snapshot["workshop"]["search"]["items"][0]["published_file_id"],
+            "1002"
+        );
+    }
+
+    #[test]
+    fn fixture_workshop_acquisition_is_owned_by_the_service_and_updates_its_catalog() {
+        let mut session = session();
+        let response = session.dispatch(request(
+            Some(0),
+            StudioAction::Workshop(WorkshopAction::Acquire {
+                item_ids: vec!["1002".into(), "1002".into()],
+            }),
+        ));
+
+        assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+        let events = wait_for_operation(&mut session);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StudioEvent::OperationChanged(event)
+                if event.action == "workshop.acquire"
+                    && event.status == OperationStatus::Succeeded
+        )));
+        let snapshot = session.snapshot();
+        let acquisition = snapshot
+            .workshop
+            .acquisition
+            .expect("service publishes the acquired items");
+        assert_eq!(acquisition.requested, 1);
+        assert_eq!(acquisition.items.len(), 1);
+        assert_eq!(acquisition.items[0].id, "fixture.content.1002");
+        assert!(snapshot.catalog.iter().any(|item| {
+            item.id == "fixture.content.1002"
+                && item.locations.iter().any(|location| {
+                    location.kind == CatalogLocationKind::Cache
+                        && location.root == "fixture/cache/fixture.content.1002"
+                })
+        }));
+    }
+
+    #[test]
+    fn fixture_workshop_review_and_publish_are_service_owned_and_confirmation_bound() {
+        let mut session = fixture_workspace_session();
+        let staged = session.dispatch(request(
+            Some(0),
+            StudioAction::Workshop(WorkshopAction::Stage {
+                selector: "fixture.game@1.0.0".into(),
+            }),
+        ));
+        assert_eq!(staged.kind, StudioResponseKind::OperationAccepted);
+        let stage_events = wait_for_operation(&mut session);
+        assert!(stage_events.iter().any(|event| matches!(
+            event,
+            StudioEvent::OperationChanged(event)
+                if event.action == "workshop.stage"
+                    && event.status == OperationStatus::Succeeded
+        )));
+        let review = session
+            .snapshot()
+            .workshop
+            .review
+            .expect("stage result is retained by the service");
+        assert_eq!(review.selector, "fixture.game@1.0.0");
+        assert_eq!(review.preview.file_paths, ["Vapor.toml"]);
+
+        let rejected = session.dispatch(request(
+            None,
+            StudioAction::Workshop(WorkshopAction::Publish {
+                review_id: review.review_id.clone(),
+                account: "publisher".into(),
+                confirmation: "PUBLISH fixture.game".into(),
+                change_note: String::new(),
+            }),
+        ));
+        assert_eq!(rejected.kind, StudioResponseKind::Rejected);
+        assert!(session.snapshot().workshop.review.is_some());
+
+        let published = session.dispatch(request(
+            None,
+            StudioAction::Workshop(WorkshopAction::Publish {
+                review_id: review.review_id,
+                account: "publisher".into(),
+                confirmation: "PUBLISH fixture.game TO publisher".into(),
+                change_note: "Fixture only".into(),
+            }),
+        ));
+        assert_eq!(published.kind, StudioResponseKind::OperationAccepted);
+        let publish_events = wait_for_operation(&mut session);
+        assert!(publish_events.iter().any(|event| matches!(
+            event,
+            StudioEvent::OperationChanged(event)
+                if event.action == "workshop.publish"
+                    && event.status == OperationStatus::Succeeded
+        )));
+        assert!(session.snapshot().workshop.review.is_none());
+    }
+
+    #[test]
+    fn workshop_stage_requires_a_current_workspace_identity() {
+        let mut session = session();
+        let response = session.dispatch(request(
+            None,
+            StudioAction::Workshop(WorkshopAction::Stage {
+                selector: "fixture.game@1.0.0".into(),
+            }),
+        ));
+        assert_eq!(response.kind, StudioResponseKind::Rejected);
+        assert_eq!(
+            response.error.expect("workspace rejection").code,
+            StudioErrorCode::ActionUnavailable
+        );
+    }
+
+    #[test]
+    fn fixture_workshop_subscription_changes_return_the_service_owned_list() {
+        let mut session = session();
+        let loaded = session.dispatch(request(
+            None,
+            StudioAction::Workshop(WorkshopAction::LoadSubscriptions),
+        ));
+        assert_eq!(loaded.kind, StudioResponseKind::OperationAccepted);
+        wait_for_operation(&mut session);
+        assert!(session.snapshot().workshop.subscriptions_loaded);
+        assert_eq!(
+            session.snapshot().workshop.subscriptions[0].published_file_id,
+            "1001"
+        );
+
+        let subscribed = session.dispatch(request(
+            None,
+            StudioAction::Workshop(WorkshopAction::Subscribe {
+                item_ids: vec!["1002".into(), "1002".into()],
+            }),
+        ));
+        assert_eq!(subscribed.kind, StudioResponseKind::OperationAccepted);
+        wait_for_operation(&mut session);
+        let ids = session
+            .snapshot()
+            .workshop
+            .subscriptions
+            .iter()
+            .map(|item| item.published_file_id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["1001", "1002"]);
+
+        let invalid = session.dispatch(request(
+            None,
+            StudioAction::Workshop(WorkshopAction::Subscribe {
+                item_ids: vec!["not-an-id".into()],
+            }),
+        ));
+        assert_eq!(invalid.kind, StudioResponseKind::Rejected);
+        assert_eq!(
+            invalid.error.expect("invalid ID rejection").code,
+            StudioErrorCode::InvalidRequest
         );
     }
 
@@ -1896,6 +3931,7 @@ mod tests {
     fn workspace_project_discovery_is_a_service_action() {
         let mut session = StudioSession::new(ServiceBootstrap {
             application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: None,
             workspace_root: Some(PathBuf::from("/fixture/workspace")),
             active_profile_id: None,
             fixture_mode: true,
@@ -1945,6 +3981,7 @@ mod tests {
     fn workspace_open_returns_source_and_unregistered_projects_in_its_snapshot() {
         let mut session = StudioSession::new(ServiceBootstrap {
             application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: None,
             fixture_mode: true,
@@ -1967,9 +4004,109 @@ mod tests {
     }
 
     #[test]
+    fn workspace_file_lifecycle_runs_through_the_service_and_guards_external_edits() {
+        let root = std::env::temp_dir().join(format!(
+            "vapor-studio-service-workspace-files-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture workspace");
+        std::fs::write(root.join("Vapor.toml"), "before").expect("write fixture manifest");
+        let root = std::fs::canonicalize(root).expect("canonicalize fixture workspace");
+        let mut session = StudioSession::new(ServiceBootstrap {
+            application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: None,
+            workspace_root: Some(root.clone()),
+            active_profile_id: Some("default".to_owned()),
+            fixture_mode: true,
+        });
+
+        let response = session.dispatch(request(
+            None,
+            StudioAction::Workspace(WorkspaceAction::ListFiles { path: ".".into() }),
+        ));
+        assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+        let events = wait_for_operation(&mut session);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StudioEvent::WorkspaceFileResult(result)
+                if matches!(result.as_ref(), WorkspaceFileResult::Listed { files, .. }
+                    if files == &["Vapor.toml"])
+        )));
+
+        let response = session.dispatch(request(
+            None,
+            StudioAction::Workspace(WorkspaceAction::OpenFile {
+                path: "Vapor.toml".into(),
+            }),
+        ));
+        assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+        let events = wait_for_operation(&mut session);
+        let fingerprint = events
+            .iter()
+            .find_map(|event| match event {
+                StudioEvent::WorkspaceFileResult(result) => match result.as_ref() {
+                    WorkspaceFileResult::Opened {
+                        contents,
+                        fingerprint,
+                        ..
+                    } if contents == "before" => Some(fingerprint.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("open returns text and its save fingerprint");
+
+        std::fs::write(root.join("Vapor.toml"), "external").expect("simulate external edit");
+        let response = session.dispatch(request(
+            None,
+            StudioAction::Workspace(WorkspaceAction::SaveFile {
+                path: "Vapor.toml".into(),
+                expected_fingerprint: fingerprint,
+                contents: "mine".into(),
+            }),
+        ));
+        assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+        let events = wait_for_operation(&mut session);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StudioEvent::OperationChanged(event)
+                if event.action == "workspace.save-file"
+                    && matches!(&event.status, OperationStatus::Failed { message }
+                        if message.contains("changed on disk"))
+        )));
+        assert_eq!(
+            std::fs::read_to_string(root.join("Vapor.toml")).expect("read after stale save"),
+            "external"
+        );
+
+        let response = session.dispatch(request(
+            None,
+            StudioAction::Workspace(WorkspaceAction::CreateFile {
+                path: "nested/new.toml".into(),
+                contents: String::new(),
+            }),
+        ));
+        assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+        let events = wait_for_operation(&mut session);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            StudioEvent::WorkspaceFileResult(result)
+                if matches!(result.as_ref(), WorkspaceFileResult::Created { path, .. }
+                    if path == "nested/new.toml")
+        )));
+        assert!(root.join("nested/new.toml").is_file());
+        std::fs::remove_dir_all(root).expect("remove fixture workspace");
+    }
+
+    #[test]
     fn switching_workspace_clears_the_old_composition_in_service_state() {
         let mut session = StudioSession::new(ServiceBootstrap {
             application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: None,
             fixture_mode: true,
@@ -2050,6 +4187,7 @@ mod tests {
     fn profile_selection_requires_an_existing_profile() {
         let mut session = StudioSession::new(ServiceBootstrap {
             application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: None,
             fixture_mode: false,

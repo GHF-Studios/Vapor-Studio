@@ -38,6 +38,7 @@ fn main() {
     let mut workspace_root = None;
     let mut state_directory = None;
     let mut active_profile_id = None;
+    let mut workshop_app_id = None;
     let mut fixture_mode = false;
     let mut stdio_mode = first.as_deref().is_some_and(|arg| arg == "--stdio");
     if first
@@ -45,7 +46,7 @@ fn main() {
         .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "vapor-studio-service --stdio --application-executable PATH [--workspace PATH] [--state-dir PATH] [--active-profile ID] [--fixture]"
+            "vapor-studio-service --stdio --application-executable PATH [--workshop-app-id ID] [--workspace PATH] [--state-dir PATH] [--active-profile ID] [--fixture]"
         );
         return;
     }
@@ -54,6 +55,9 @@ fn main() {
             "--stdio" => stdio_mode = true,
             "--fixture" => fixture_mode = true,
             "--application-executable" => application_executable = args.next().map(PathBuf::from),
+            "--workshop-app-id" => {
+                workshop_app_id = args.next().and_then(|id| id.to_string_lossy().parse().ok())
+            }
             "--workspace" => workspace_root = args.next().map(PathBuf::from),
             "--state-dir" => state_directory = args.next().map(PathBuf::from),
             "--active-profile" => {
@@ -61,7 +65,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-                    "vapor-studio-service --stdio --application-executable PATH [--workspace PATH] [--state-dir PATH] [--active-profile ID] [--fixture]"
+                    "vapor-studio-service --stdio --application-executable PATH [--workshop-app-id ID] [--workspace PATH] [--state-dir PATH] [--active-profile ID] [--fixture]"
                 );
                 return;
             }
@@ -99,6 +103,7 @@ fn main() {
     };
     let bootstrap = ServiceBootstrap {
         application_executable: host_context.application_executable.clone(),
+        workshop_app_id,
         workspace_root: host_context.workspace_root.clone(),
         active_profile_id,
         fixture_mode,

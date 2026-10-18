@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf, time::Duration};
 use vapor_studio_client::{ServiceBootstrap, StudioClient};
 use vapor_studio_protocol::{
     CatalogAction, LegacyStorageSeed, ProfileAction, ProfileDocument, ProtocolFrame, StudioAction,
-    StudioResponseKind, WorkshopAction,
+    StudioEvent, StudioResponseKind, WorkshopAction, WorkspaceAction, WorkspaceFileResult,
 };
 use vapor_studio_service::run_simulator;
 
@@ -16,6 +16,7 @@ fn fixture_client() -> StudioClient {
         &executable,
         ServiceBootstrap {
             application_executable: executable.clone(),
+            workshop_app_id: Some(2122620),
             workspace_root: None,
             active_profile_id: Some("default".to_owned()),
             fixture_mode: true,
@@ -56,6 +57,331 @@ fn child_process_returns_deterministic_catalog_snapshot_and_shutdowns() {
 }
 
 #[test]
+fn fixture_workshop_search_round_trips_through_the_service_process() {
+    let mut client = fixture_client();
+    client
+        .send(
+            StudioAction::Workshop(WorkshopAction::Search {
+                query: "moon".into(),
+                page: 1,
+            }),
+            Some(client.latest_snapshot().revision),
+        )
+        .expect("send Workshop search");
+    let response = client
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive accepted operation");
+    let ProtocolFrame::Response(response) = response else {
+        panic!("expected operation response");
+    };
+    assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut saw_success = false;
+    while std::time::Instant::now() < deadline {
+        let frame = client
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("receive Workshop operation update");
+        match frame {
+            ProtocolFrame::Event(StudioEvent::OperationChanged(event))
+                if event.action == "workshop.search"
+                    && event.status == vapor_studio_protocol::OperationStatus::Succeeded =>
+            {
+                saw_success = true;
+            }
+            ProtocolFrame::Event(StudioEvent::Snapshot(snapshot))
+                if snapshot
+                    .workshop
+                    .search
+                    .as_ref()
+                    .is_some_and(|search| search.query == "moon" && search.page == 1) =>
+            {
+                assert_eq!(
+                    snapshot.workshop.search.as_ref().unwrap().items[0].published_file_id,
+                    "1002"
+                );
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_success, "service reports completed Workshop search");
+    assert_eq!(
+        client
+            .latest_snapshot()
+            .workshop
+            .search
+            .as_ref()
+            .unwrap()
+            .query,
+        "moon"
+    );
+    client
+        .shutdown(Duration::from_secs(2))
+        .expect("fixture service shuts down");
+}
+
+#[test]
+fn workspace_file_results_follow_the_terminal_service_event() {
+    let root = std::env::temp_dir().join(format!(
+        "vapor-studio-service-process-workspace-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows epoch")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("create fixture workspace");
+    fs::write(root.join("Vapor.toml"), "[workspace]").expect("write workspace manifest");
+    let executable = service_executable();
+    let mut client = StudioClient::spawn(
+        &executable,
+        ServiceBootstrap {
+            application_executable: executable.clone(),
+            workshop_app_id: None,
+            workspace_root: Some(root.clone()),
+            active_profile_id: Some("default".to_owned()),
+            fixture_mode: true,
+            legacy_storage: LegacyStorageSeed::default(),
+            state_directory: None,
+        },
+    )
+    .expect("fixture service starts");
+    client
+        .send(
+            StudioAction::Workspace(WorkspaceAction::ListFiles { path: ".".into() }),
+            Some(client.latest_snapshot().revision),
+        )
+        .expect("send workspace file listing");
+    let response = client
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive accepted workspace operation");
+    assert!(matches!(
+        response,
+        ProtocolFrame::Response(response)
+            if response.kind == StudioResponseKind::OperationAccepted
+    ));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut saw_success = false;
+    let mut saw_file_result = false;
+    while std::time::Instant::now() < deadline {
+        let frame = client
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("receive workspace operation update");
+        match frame {
+            ProtocolFrame::Event(StudioEvent::OperationChanged(event))
+                if event.action == "workspace.list-files"
+                    && event.status == vapor_studio_protocol::OperationStatus::Succeeded =>
+            {
+                saw_success = true;
+            }
+            ProtocolFrame::Event(StudioEvent::WorkspaceFileResult(result)) => {
+                assert!(saw_success, "success event precedes file data");
+                assert!(matches!(
+                    result.as_ref(),
+                    WorkspaceFileResult::Listed { files, .. }
+                        if files == &["Vapor.toml"]
+                ));
+                saw_file_result = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_success && saw_file_result);
+    client
+        .shutdown(Duration::from_secs(2))
+        .expect("fixture service shuts down");
+    fs::remove_dir_all(root).expect("remove fixture workspace");
+}
+
+#[test]
+fn fixture_workshop_acquisition_round_trips_through_the_service_process() {
+    let mut client = fixture_client();
+    client
+        .send(
+            StudioAction::Workshop(WorkshopAction::Acquire {
+                item_ids: vec!["1002".into()],
+            }),
+            Some(client.latest_snapshot().revision),
+        )
+        .expect("send Workshop acquisition");
+    let response = client
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive accepted acquisition");
+    let ProtocolFrame::Response(response) = response else {
+        panic!("expected operation response");
+    };
+    assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut saw_success = false;
+    while std::time::Instant::now() < deadline {
+        let frame = client
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("receive acquisition update");
+        match frame {
+            ProtocolFrame::Event(StudioEvent::OperationChanged(event))
+                if event.action == "workshop.acquire"
+                    && event.status == vapor_studio_protocol::OperationStatus::Succeeded =>
+            {
+                saw_success = true;
+            }
+            ProtocolFrame::Event(StudioEvent::Snapshot(snapshot))
+                if snapshot
+                    .workshop
+                    .acquisition
+                    .as_ref()
+                    .is_some_and(|batch| batch.revision > 0) =>
+            {
+                let batch = snapshot.workshop.acquisition.as_ref().unwrap();
+                assert_eq!(batch.requested, 1);
+                assert_eq!(batch.items[0].id, "fixture.content.1002");
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_success,
+        "service reports completed Workshop acquisition"
+    );
+    assert_eq!(
+        client
+            .latest_snapshot()
+            .workshop
+            .acquisition
+            .as_ref()
+            .unwrap()
+            .items[0]
+            .id,
+        "fixture.content.1002"
+    );
+    client
+        .shutdown(Duration::from_secs(2))
+        .expect("fixture service shuts down");
+}
+
+#[test]
+fn fixture_workshop_review_and_publish_round_trip_through_the_service_process() {
+    let executable = service_executable();
+    let mut client = StudioClient::spawn(
+        &executable,
+        ServiceBootstrap {
+            application_executable: executable.clone(),
+            workshop_app_id: Some(2122620),
+            workspace_root: Some(PathBuf::from("/fixture/workspace")),
+            active_profile_id: Some("default".to_owned()),
+            fixture_mode: true,
+            legacy_storage: LegacyStorageSeed::default(),
+            state_directory: None,
+        },
+    )
+    .expect("fixture service starts with its authored workspace");
+    client
+        .send(
+            StudioAction::Workshop(WorkshopAction::Stage {
+                selector: "fixture.game@1.0.0".into(),
+            }),
+            Some(client.latest_snapshot().revision),
+        )
+        .expect("send stage request");
+    let response = client
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive accepted stage");
+    let ProtocolFrame::Response(response) = response else {
+        panic!("expected stage response");
+    };
+    assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut saw_stage_success = false;
+    while std::time::Instant::now() < deadline {
+        match client
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("receive stage result")
+        {
+            ProtocolFrame::Event(StudioEvent::OperationChanged(event))
+                if event.action == "workshop.stage"
+                    && event.status == vapor_studio_protocol::OperationStatus::Succeeded =>
+            {
+                saw_stage_success = true;
+            }
+            ProtocolFrame::Event(StudioEvent::Snapshot(snapshot))
+                if snapshot.workshop.review.is_some() =>
+            {
+                assert_eq!(
+                    snapshot.workshop.review.as_ref().unwrap().selector,
+                    "fixture.game@1.0.0"
+                );
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_stage_success, "service completes Workshop staging");
+    let review = client
+        .latest_snapshot()
+        .workshop
+        .review
+        .as_ref()
+        .expect("service snapshot contains the review")
+        .clone();
+
+    client
+        .send(
+            StudioAction::Workshop(WorkshopAction::Publish {
+                review_id: review.review_id,
+                account: "publisher".into(),
+                confirmation: "PUBLISH fixture.game TO publisher".into(),
+                change_note: "Fixture only".into(),
+            }),
+            Some(client.latest_snapshot().revision),
+        )
+        .expect("send reviewed publish request");
+    let response = client
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive accepted fixture publication");
+    let ProtocolFrame::Response(response) = response else {
+        panic!("expected publish response");
+    };
+    assert_eq!(response.kind, StudioResponseKind::OperationAccepted);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut saw_publish_success = false;
+    while std::time::Instant::now() < deadline {
+        match client
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("receive publish result")
+        {
+            ProtocolFrame::Event(StudioEvent::OperationChanged(event))
+                if event.action == "workshop.publish"
+                    && event.status == vapor_studio_protocol::OperationStatus::Succeeded =>
+            {
+                saw_publish_success = true;
+            }
+            ProtocolFrame::Event(StudioEvent::Snapshot(snapshot))
+                if snapshot.workshop.review.is_none()
+                    && saw_publish_success
+                    && client.latest_snapshot().workshop.review.is_none() =>
+            {
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_publish_success,
+        "fixture publication reports completion"
+    );
+    assert!(client.latest_snapshot().workshop.review.is_none());
+    client
+        .shutdown(Duration::from_secs(2))
+        .expect("fixture service shuts down");
+}
+
+#[test]
 fn fixture_process_cannot_publish_to_workshop() {
     let mut client = fixture_client();
     let revision = client.latest_snapshot().revision;
@@ -63,7 +389,9 @@ fn fixture_process_cannot_publish_to_workshop() {
         .send(
             StudioAction::Workshop(WorkshopAction::Publish {
                 review_id: "fixture-review".into(),
+                account: "publisher".into(),
                 confirmation: "fixture-confirmation".into(),
+                change_note: String::new(),
             }),
             Some(revision),
         )
@@ -77,7 +405,7 @@ fn fixture_process_cannot_publish_to_workshop() {
     assert_eq!(response.kind, StudioResponseKind::Rejected);
     assert_eq!(
         response.error.expect("structured rejection").code,
-        vapor_studio_protocol::StudioErrorCode::ActionUnavailable
+        vapor_studio_protocol::StudioErrorCode::InvalidRequest
     );
 }
 
@@ -117,6 +445,7 @@ fn production_service_imports_legacy_state_then_uses_its_store_after_restart() {
         &executable,
         ServiceBootstrap {
             application_executable: executable.clone(),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: None,
             fixture_mode: false,
@@ -175,6 +504,7 @@ fn production_service_imports_legacy_state_then_uses_its_store_after_restart() {
         &executable,
         ServiceBootstrap {
             application_executable: executable.clone(),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: None,
             fixture_mode: false,

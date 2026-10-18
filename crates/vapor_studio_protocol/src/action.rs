@@ -1,3 +1,4 @@
+use crate::WorkshopMetadataDraft;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +155,7 @@ pub enum WorkspaceAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
 pub enum AuthoringAction {
+    ListRegisteredSources,
     LoadComposition {
         project_id: String,
     },
@@ -168,10 +170,18 @@ pub enum AuthoringAction {
     SaveWorkshopMetadata {
         project_id: String,
         expected_fingerprint: String,
-        title: String,
+        app_id: Option<u32>,
+        published_file_id: Option<String>,
+        visibility: Option<String>,
+        title: Option<String>,
+        description: Option<String>,
         tags: Vec<String>,
+        change_note: Option<String>,
     },
     LoadRuntimeOutputs {
+        project_id: String,
+    },
+    ValidateContent {
         project_id: String,
     },
     SaveRuntimeOutputs {
@@ -185,9 +195,12 @@ pub enum AuthoringAction {
         kind: String,
         id: String,
         version: String,
+        dependencies: Vec<String>,
+        workshop: WorkshopMetadataDraft,
     },
     CreateWorkspace {
-        root: String,
+        parent: String,
+        organization: String,
         name: String,
     },
 }
@@ -195,7 +208,9 @@ pub enum AuthoringAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompositionDependency {
     pub project_id: String,
-    pub version_requirement: String,
+    pub relationship: String,
+    pub version_requirement: Option<String>,
+    pub workshop_id: Option<String>,
     pub optional: bool,
     pub reason: Option<String>,
 }
@@ -218,12 +233,18 @@ pub enum WorkshopAction {
         item_ids: Vec<String>,
     },
     Stage {
-        project_id: String,
+        #[serde(alias = "project_id")]
+        selector: String,
     },
     Publish {
         review_id: String,
+        #[serde(default)]
+        account: String,
         confirmation: String,
+        #[serde(default)]
+        change_note: String,
     },
+    DiscardReview,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,11 +314,13 @@ impl StudioAction {
                 WorkspaceAction::CreateFile { .. } => "workspace.create-file",
             },
             Self::Authoring(action) => match action {
+                AuthoringAction::ListRegisteredSources => "authoring.list-registered-sources",
                 AuthoringAction::LoadComposition { .. } => "authoring.load-composition",
                 AuthoringAction::SaveComposition { .. } => "authoring.save-composition",
                 AuthoringAction::LoadWorkshopMetadata { .. } => "authoring.load-workshop-metadata",
                 AuthoringAction::SaveWorkshopMetadata { .. } => "authoring.save-workshop-metadata",
                 AuthoringAction::LoadRuntimeOutputs { .. } => "authoring.load-runtime-outputs",
+                AuthoringAction::ValidateContent { .. } => "authoring.validate-content",
                 AuthoringAction::SaveRuntimeOutputs { .. } => "authoring.save-runtime-outputs",
                 AuthoringAction::CreateContent { .. } => "authoring.create-content",
                 AuthoringAction::CreateWorkspace { .. } => "authoring.create-workspace",
@@ -310,6 +333,7 @@ impl StudioAction {
                 WorkshopAction::Acquire { .. } => "workshop.acquire",
                 WorkshopAction::Stage { .. } => "workshop.stage",
                 WorkshopAction::Publish { .. } => "workshop.publish",
+                WorkshopAction::DiscardReview => "workshop.discard-review",
             },
             Self::Publishing(action) => match action {
                 PublishingAction::StageRoot => "publishing.stage-root",

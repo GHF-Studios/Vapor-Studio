@@ -23,13 +23,19 @@ pub use profile::{
     WorkspaceAssociation,
 };
 pub use state::{
-    AvailableAction, CatalogConflict, CatalogEntry, CatalogLocation, CatalogLocationKind,
-    CompositionPreviewDependency, CompositionPreviewNode, CompositionPreviewSnapshot,
-    CompositionPreviewSource, DurableStateSnapshot, HostSummary, OperationEvent, OperationPhase,
-    OperationStatus, OperationSummary, StudioEvent, StudioRevision, StudioSnapshot,
-    WorkspaceContentSnapshot, WorkspaceProjectCandidate, WorkspaceSourceProject,
-    WorkspaceWorkshopPolicy,
+    AuthoringResult, AuthoringResultKind, AvailableAction, CatalogConflict, CatalogEntry,
+    CatalogLocation, CatalogLocationKind, CompositionPreviewDependency, CompositionPreviewNode,
+    CompositionPreviewSnapshot, CompositionPreviewSource, DurableStateSnapshot, HostSummary,
+    OperationEvent, OperationPhase, OperationStatus, OperationSummary, StudioEvent, StudioRevision,
+    StudioSnapshot, WorkshopAcquisitionBatchSnapshot, WorkshopAcquisitionSnapshot,
+    WorkshopItemSnapshot, WorkshopMetadataDraft, WorkshopPackagePreviewSnapshot,
+    WorkshopReviewSnapshot, WorkshopSearchSnapshot, WorkshopSnapshot, WorkshopSubscriptionSnapshot,
+    WorkspaceContentSnapshot, WorkspaceFileResult, WorkspaceProjectCandidate,
+    WorkspaceSourceProject, WorkspaceWorkshopPolicy,
 };
+
+/// Maximum serialized service protocol frame, including no line terminator.
+pub const MAX_PROTOCOL_FRAME_BYTES: usize = 32 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests {
@@ -153,6 +159,7 @@ mod tests {
             StudioAction::Authoring(AuthoringAction::LoadComposition {
                 project_id: "moon".into(),
             }),
+            StudioAction::Authoring(AuthoringAction::ListRegisteredSources),
             StudioAction::Authoring(AuthoringAction::SaveComposition {
                 project_id: "moon".into(),
                 expected_fingerprint: "abc".into(),
@@ -164,10 +171,18 @@ mod tests {
             StudioAction::Authoring(AuthoringAction::SaveWorkshopMetadata {
                 project_id: "moon".into(),
                 expected_fingerprint: "abc".into(),
-                title: "Moon".into(),
+                app_id: Some(1),
+                published_file_id: Some("123".into()),
+                visibility: Some("public".into()),
+                title: Some("Moon".into()),
+                description: Some("A moon".into()),
                 tags: vec![],
+                change_note: None,
             }),
             StudioAction::Authoring(AuthoringAction::LoadRuntimeOutputs {
+                project_id: "moon".into(),
+            }),
+            StudioAction::Authoring(AuthoringAction::ValidateContent {
                 project_id: "moon".into(),
             }),
             StudioAction::Authoring(AuthoringAction::SaveRuntimeOutputs {
@@ -181,9 +196,12 @@ mod tests {
                 kind: "mod".into(),
                 id: "moon".into(),
                 version: "1.0.0".into(),
+                dependencies: vec!["engine@1".into()],
+                workshop: WorkshopMetadataDraft::default(),
             }),
             StudioAction::Authoring(AuthoringAction::CreateWorkspace {
-                root: "/tmp".into(),
+                parent: "/tmp".into(),
+                organization: "ghf".into(),
                 name: "Demo".into(),
             }),
             StudioAction::Workshop(WorkshopAction::Search {
@@ -201,12 +219,15 @@ mod tests {
                 item_ids: vec!["123".into()],
             }),
             StudioAction::Workshop(WorkshopAction::Stage {
-                project_id: "moon".into(),
+                selector: "moon@1.0.0".into(),
             }),
             StudioAction::Workshop(WorkshopAction::Publish {
                 review_id: "review-1".into(),
+                account: "publisher".into(),
                 confirmation: "confirm".into(),
+                change_note: "Updated content".into(),
             }),
+            StudioAction::Workshop(WorkshopAction::DiscardReview),
             StudioAction::Publishing(PublishingAction::StageRoot),
             StudioAction::Publishing(PublishingAction::PublishRoot {
                 review_id: "root-review".into(),
@@ -222,7 +243,7 @@ mod tests {
         ];
         assert_eq!(
             actions.len(),
-            57,
+            58,
             "update this catalog when adding/removing action variants"
         );
         for action in actions {
@@ -238,6 +259,46 @@ mod tests {
             expected_revision: Some(StudioRevision(3)),
             action: StudioAction::Catalog(CatalogAction::Refresh),
         });
+        assert_round_trip(StudioEvent::WorkspaceFileResult(Box::new(
+            WorkspaceFileResult::Opened {
+                operation_id: "operation-1".into(),
+                path: "Vapor.toml".into(),
+                contents: "[workspace]".into(),
+                fingerprint: "fnv1a64:abc:11".into(),
+            },
+        )));
+        assert_round_trip(StudioEvent::WorkspaceFileResult(Box::new(
+            WorkspaceFileResult::RememberedSources {
+                operation_id: "operation-3".into(),
+                roots: vec!["/workspace".into()],
+            },
+        )));
+        assert_round_trip(StudioEvent::WorkspaceFileResult(Box::new(
+            WorkspaceFileResult::UnregisteredContent {
+                operation_id: "operation-4".into(),
+                content_id: "moon".into(),
+                version: Some("1.0.0".into()),
+            },
+        )));
+        assert_round_trip(StudioEvent::AuthoringResult(Box::new(AuthoringResult {
+            operation_id: "operation-2".into(),
+            result: AuthoringResultKind::WorkshopMetadata {
+                id: "moon".into(),
+                version: Some("1.0.0".into()),
+                kind: "game".into(),
+                manifest: "game/Vapor.toml".into(),
+                source: "[content]".into(),
+                policy: WorkshopMetadataDraft {
+                    app_id: Some(1),
+                    published_file_id: Some("123".into()),
+                    visibility: Some("public".into()),
+                    title: Some("Moon".into()),
+                    description: Some("A moon".into()),
+                    tags: vec!["planet".into()],
+                    change_note: None,
+                },
+            },
+        })));
         assert_round_trip(StudioEvent::Snapshot(Box::new(StudioSnapshot {
             revision: StudioRevision(3),
             host: HostSummary {
@@ -305,6 +366,65 @@ mod tests {
                 unregistered_projects_error: None,
                 workspace_validation_error: Some("metadata needs repair".into()),
             },
+            workshop: WorkshopSnapshot {
+                search: Some(WorkshopSearchSnapshot {
+                    revision: 4,
+                    query: "moon".into(),
+                    page: 2,
+                    total_results: 3,
+                    items: vec![WorkshopItemSnapshot {
+                        published_file_id: "1002".into(),
+                        title: "Fixture Moon Pack".into(),
+                        description: "Fixture content".into(),
+                        preview_url: None,
+                        updated_at_unix: 1_797_000_000,
+                    }],
+                }),
+                subscriptions: vec![WorkshopSubscriptionSnapshot {
+                    published_file_id: "1002".into(),
+                    title: "Fixture Moon Pack".into(),
+                    description: "Fixture content".into(),
+                    preview_url: None,
+                    updated_at_unix: 1_797_000_000,
+                    installed: false,
+                    needs_update: false,
+                    downloading: false,
+                    download_progress: None,
+                }],
+                subscriptions_loaded: true,
+                subscriptions_revision: 2,
+                acquisition: Some(WorkshopAcquisitionBatchSnapshot {
+                    revision: 3,
+                    requested: 1,
+                    items: vec![WorkshopAcquisitionSnapshot {
+                        id: "moon.pack".into(),
+                        version: Some("1.0.0".into()),
+                        kind: "packagepack".into(),
+                        cache_root: "/cache/moon.pack".into(),
+                        fingerprint: "sha256:abc".into(),
+                    }],
+                }),
+                review: Some(WorkshopReviewSnapshot {
+                    review_id: "review-1".into(),
+                    selector: "moon.pack@1.0.0".into(),
+                    preview: WorkshopPackagePreviewSnapshot {
+                        id: "moon.pack".into(),
+                        version: Some("1.0.0".into()),
+                        app_id: Some(2122620),
+                        published_file_id: None,
+                        title: Some("Moon Pack".into()),
+                        visibility: Some("public".into()),
+                        dependencies: vec!["spacetime-engine >=1.0.0".into()],
+                        root: "/stage/moon.pack".into(),
+                        target: "x86_64-unknown-linux-gnu".into(),
+                        fingerprint: "sha256:def".into(),
+                        files: 3,
+                        bytes: 1024,
+                        file_paths: vec!["Vapor.toml".into()],
+                        omitted_file_paths: 2,
+                    },
+                }),
+            },
             selected_content_id: None,
             available_actions: vec![AvailableAction {
                 id: "catalog.refresh".into(),
@@ -350,6 +470,7 @@ mod tests {
             snapshot.workspace_content,
             WorkspaceContentSnapshot::default()
         );
+        assert_eq!(snapshot.workshop, WorkshopSnapshot::default());
     }
 
     #[test]

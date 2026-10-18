@@ -19,6 +19,7 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone)]
 pub struct ServiceBootstrap {
     pub application_executable: PathBuf,
+    pub workshop_app_id: Option<u32>,
     pub workspace_root: Option<PathBuf>,
     pub active_profile_id: Option<String>,
     pub fixture_mode: bool,
@@ -71,6 +72,9 @@ impl StudioClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(app_id) = bootstrap.workshop_app_id {
+            command.arg("--workshop-app-id").arg(app_id.to_string());
+        }
         if let Some(workspace) = bootstrap.workspace_root {
             command.arg("--workspace").arg(workspace);
         }
@@ -349,6 +353,7 @@ fn empty_snapshot() -> StudioSnapshot {
         composition_preview: None,
         catalog: Vec::new(),
         workspace_content: vapor_studio_protocol::WorkspaceContentSnapshot::default(),
+        workshop: vapor_studio_protocol::WorkshopSnapshot::default(),
         selected_content_id: None,
         available_actions: Vec::new(),
     }
@@ -362,6 +367,7 @@ mod tests {
     fn bootstrap() -> ServiceBootstrap {
         ServiceBootstrap {
             application_executable: Path::new("/app/bin/vapor-gui").to_path_buf(),
+            workshop_app_id: None,
             workspace_root: None,
             active_profile_id: Some("default".to_owned()),
             fixture_mode: true,
@@ -416,15 +422,19 @@ mod tests {
         assert!(matches!(exited, ClientError::ServiceExited(_)));
 
         let malformed = root.join("malformed-service");
-        fs::write(&malformed, "#!/bin/sh\nprintf '{broken json}\\n'\n")
-            .expect("write malformed child");
+        fs::write(
+            &malformed,
+            "#!/bin/sh\nIFS= read -r initialization || exit 2\nprintf '{broken json}\\n'\n",
+        )
+        .expect("write malformed child");
         fs::set_permissions(&malformed, fs::Permissions::from_mode(0o700))
             .expect("make child executable");
         let error = StudioClient::spawn(&malformed, bootstrap())
             .err()
             .expect("malformed service output fails startup");
         assert!(
-            matches!(error, ClientError::Protocol(message) if message.contains("malformed protocol data"))
+            matches!(&error, ClientError::Protocol(message) if message.contains("malformed protocol data")),
+            "got {error:?}"
         );
         fs::remove_dir_all(root).expect("clean temporary test directory");
     }
