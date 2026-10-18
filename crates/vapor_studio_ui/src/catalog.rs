@@ -572,6 +572,41 @@ pub(crate) fn display_content_kind(kind: &str) -> String {
         .to_owned()
 }
 
+/// Player-facing title for a catalog item. Stable IDs remain available in
+/// technical details, while the authored name is used as the primary label.
+pub(crate) fn display_catalog_name(content: &vapor_client_application::CatalogContent) -> String {
+    content
+        .name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .map(str::trim)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            let words = content
+                .id
+                .rsplit(['/', ':', '.'])
+                .next()
+                .unwrap_or(&content.id)
+                .split(['-', '_'])
+                .filter(|word| !word.is_empty())
+                .map(|word| {
+                    let mut characters = word.chars();
+                    characters.next().map_or_else(String::new, |first| {
+                        first
+                            .to_uppercase()
+                            .chain(characters)
+                            .collect::<String>()
+                    })
+                })
+                .collect::<Vec<_>>();
+            if words.is_empty() {
+                content.id.clone()
+            } else {
+                words.join(" ")
+            }
+        })
+}
+
 pub(super) struct CatalogFilter {
     source: CatalogSourceFilter,
     kind: Option<String>,
@@ -658,6 +693,7 @@ impl CatalogFilter {
         }
         self.query.matches_fields([
             content.id.as_str(),
+            content.name.as_deref().unwrap_or_default(),
             content.kind.as_str(),
             content.version.as_deref().unwrap_or_default(),
             content.published_file_id.as_deref().unwrap_or_default(),
@@ -689,6 +725,7 @@ impl CatalogFilter {
 fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_client_application::CatalogContent {
     vapor_client_application::CatalogContent {
         id: entry.id.clone(),
+        name: entry.name.clone(),
         version: entry.version.clone(),
         kind: entry.kind.clone(),
         published_file_id: entry.published_file_id.clone(),
@@ -851,6 +888,7 @@ mod catalog_view_tests {
     fn browse_and_library_queries_do_not_filter_each_others_facts() {
         let content = vapor_client_application::CatalogContent {
             id: "moon".into(),
+            name: Some("Moon".into()),
             version: Some("1.0".into()),
             kind: "game-mod".into(),
             published_file_id: Some("3762162251".into()),

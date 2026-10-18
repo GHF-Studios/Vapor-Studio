@@ -37,7 +37,7 @@ pub(super) const NAVIGATION_GROUPS: &[NavigationGroup] = &[
         area: NavigationArea::Player,
     },
     NavigationGroup {
-        label: "CREATOR",
+        label: "CREATOR TOOLS",
         sections: &[
             Section::Create,
             Section::Compose,

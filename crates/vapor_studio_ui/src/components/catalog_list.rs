@@ -35,16 +35,13 @@ impl StudioApp {
             ui.horizontal_wrapped(|ui| {
                 let marker_width = if conflicted { 92.0 } else { 0.0 };
                 let row_width = (ui.available_width() - marker_width).max(1.0);
-                let label = format!(
-                    "{} · {} · {}",
-                    content.id,
-                    super::super::display_content_kind(&content.kind),
-                    content.version.as_deref().unwrap_or("unversioned"),
-                );
                 if ui
-                    .add(
-                        egui::Button::selectable(selected, label)
-                            .min_size(egui::vec2(row_width, LIST_ROW_HEIGHT)),
+                    .add_sized(
+                        egui::vec2(row_width, LIST_ROW_HEIGHT),
+                        egui::Button::selectable(
+                            selected,
+                            super::super::display_catalog_name(content),
+                        ),
                     )
                     .clicked()
                 {
@@ -55,6 +52,7 @@ impl StudioApp {
                 }
             });
             ui.horizontal_wrapped(|ui| {
+                ui.small(super::super::display_content_kind(&content.kind));
                 for location in &content.locations {
                     ui.small(super::super::catalog::catalog_location_label(location));
                 }

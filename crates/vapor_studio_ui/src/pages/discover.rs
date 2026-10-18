@@ -339,13 +339,10 @@ impl StudioApp {
                 |_| {},
             );
         } else {
-            let selected = self.catalog.selected.clone().unwrap_or_default();
             empty_state(
                 ui,
                 "Selected content is filtered out",
-                &format!(
-                    "{selected} is still selected, but the current search or filters hide it."
-                ),
+                "The selected item is still available, but the current search or filters hide it.",
                 |ui| {
                     if ui.button("Clear search and filters").clicked() {
                         self.catalog.search_query.clear();

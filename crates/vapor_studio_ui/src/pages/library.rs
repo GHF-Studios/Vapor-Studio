@@ -11,7 +11,7 @@ impl StudioApp {
             ui,
             "Library",
             "Your content",
-            "Downloaded or installed runtime content. Packagepacks are under Compositions; Rust Crates stay in Creator projects.",
+            "Content available to add to a composition. Find complete playable setups in Compositions; your projects live in Creator Tools.",
         );
         if let Some(error) = self.catalog.catalog_discovery_error.as_deref() {
             status_text(

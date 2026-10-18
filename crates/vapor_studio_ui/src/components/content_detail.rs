@@ -24,13 +24,8 @@ impl StudioApp {
                     super::super::catalog_content_selector_matches(content, identity)
                 })
             {
-                ui.heading("Content details");
-                ui.label(format!(
-                    "{} · {} · {}",
-                    content.id,
-                    super::super::display_content_kind(&content.kind),
-                    content.version.as_deref().unwrap_or("unversioned")
-                ));
+                ui.heading(super::super::display_catalog_name(content));
+                ui.label(super::super::display_content_kind(&content.kind));
                 if !content.is_unambiguous() {
                     status_text(
                         ui,
@@ -52,10 +47,7 @@ impl StudioApp {
                         ui.small(super::super::catalog::catalog_location_label(location));
                     }
                 });
-                egui::CollapsingHeader::new(format!(
-                    "Included content · {}",
-                    content.dependencies.len()
-                ))
+                egui::CollapsingHeader::new(format!("Requirements · {}", content.dependencies.len()))
                 .default_open(false)
                 .show(ui, |ui| {
                     if content.dependencies.is_empty() {
@@ -66,6 +58,18 @@ impl StudioApp {
                         }
                     }
                 });
+                egui::CollapsingHeader::new("Technical details")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.small(format!("Content ID: {}", content.id));
+                        ui.small(format!(
+                            "Version: {}",
+                            content.version.as_deref().unwrap_or("not specified")
+                        ));
+                        if let Some(published_file_id) = content.published_file_id.as_deref() {
+                            ui.small(format!("Workshop item: {published_file_id}"));
+                        }
+                    });
                 let is_authored_here =
                     self.catalog.sources.iter().any(|source| {
                         super::super::source_content_selector_matches(source, identity)
