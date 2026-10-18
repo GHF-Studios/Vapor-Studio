@@ -149,6 +149,11 @@ impl StudioApp {
                 self.operation.operation_history.truncate(20);
             }
             self.operation.active_operation = None;
+            if self.service.is_some()
+                && let Err(error) = self.persist_session_state()
+            {
+                self.status = format!("Could not save recent activity: {error}");
+            }
             if refresh_content_catalog {
                 self.refresh_content_catalog();
             }

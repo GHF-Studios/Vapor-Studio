@@ -2,6 +2,7 @@ use super::operation_protocol::OperationResult;
 use super::{StudioApp, source_content_selector};
 use std::path::PathBuf;
 use vapor_studio_core::{ContentIdentity, OperationKind};
+use vapor_studio_protocol::StudioAction;
 
 #[derive(Clone, Copy)]
 pub(super) enum PendingManifestDraftDiscard {
@@ -426,23 +427,30 @@ impl StudioApp {
 
     pub(super) fn invalidate_profiles_for_source_content(&mut self, identity: &ContentIdentity) {
         self.invalidate_workshop_review();
-        for (index, profile) in self.profile.items.iter_mut().enumerate() {
-            let affected = profile
-                .root_package
-                .as_ref()
-                .is_some_and(|root| root == identity)
-                || profile
-                    .resolved_graph
+        let active_profile_affected = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .is_some_and(|profile| {
+                profile
+                    .root_package
                     .as_ref()
-                    .is_some_and(|graph| graph.nodes.iter().any(|node| &node.content == identity));
-            if affected {
-                profile.resolved_graph = None;
-                profile.installation = vapor_studio_core::InstallationState::NotInstalled;
-                if index == self.profile.active_index {
-                    self.profile_composition
-                        .request_repreview_after_catalog_refresh();
-                }
-            }
+                    .is_some_and(|root| root == identity)
+                    || profile.resolved_graph.as_ref().is_some_and(|graph| {
+                        graph.nodes.iter().any(|node| &node.content == identity)
+                    })
+            });
+        if active_profile_affected {
+            self.profile_composition
+                .request_repreview_after_catalog_refresh();
+        }
+        if let Err(error) = self.apply_service_action(StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::InvalidateContent {
+                content_id: identity.id.clone(),
+                content_version: identity.version.clone(),
+            },
+        )) {
+            self.status = error;
         }
     }
 

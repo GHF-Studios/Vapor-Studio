@@ -1,48 +1,14 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
 };
-
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
-
-/// Stable identity for the root content selected by a launchable profile.
-/// A missing version means the profile was migrated from an older ID-only selection.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ContentIdentity {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedDependencyIdentity {
-    pub binding: String,
-    pub content: ContentIdentity,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedNodeIdentity {
-    pub content: ContentIdentity,
-    pub kind: String,
-    /// Fingerprint of the exact installed payload represented by this node.
-    /// Older saved graphs have no payload lock and deserialize as `None`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fingerprint: Option<String>,
-    /// Source recorded by Vapor for the installed artifact, when known.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    pub dependencies: Vec<ResolvedDependencyIdentity>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedCompositionGraph {
-    pub root: ContentIdentity,
-    pub effective_engine: ContentIdentity,
-    #[serde(default)]
-    pub effective_game: Option<ContentIdentity>,
-    pub nodes: Vec<ResolvedNodeIdentity>,
-}
+pub use vapor_studio_protocol::{
+    CompositionProfile, ContentIdentity, InstallationState, InstalledArtifactRecord,
+    LaunchSettings, ProfileDocument, ResolvedCompositionGraph, ResolvedDependencyIdentity,
+    ResolvedNodeIdentity, WorkspaceAssociation,
+};
+pub const CURRENT_SCHEMA_VERSION: u32 = vapor_studio_protocol::PROFILE_SCHEMA_VERSION;
 
 /// Stable fingerprint for an installed graph with exact payload and source
 /// records for every node. Returns `None` for legacy or partial snapshots.
@@ -294,7 +260,7 @@ mod resolved_graph_tests {
     }
 
     #[test]
-    fn installed_file_verification_does_not_survive_profile_reload() {
+    fn verified_installation_state_survives_protocol_serialization() {
         let state = InstallationState::OutOfDate {
             detail: "graph changed".to_owned(),
             actual_graph: graph("sha256:engine"),
@@ -302,14 +268,11 @@ mod resolved_graph_tests {
             verified: true,
         };
         let encoded = serde_json::to_string(&state).unwrap();
-        assert!(!encoded.contains("verified"));
+        assert!(encoded.contains("\"verified\":true"));
         let decoded: InstallationState = serde_json::from_str(&encoded).unwrap();
         assert!(matches!(
             decoded,
-            InstallationState::OutOfDate {
-                verified: false,
-                ..
-            }
+            InstallationState::OutOfDate { verified: true, .. }
         ));
     }
 
@@ -330,99 +293,6 @@ mod resolved_graph_tests {
                 content: identity("org.asset", "1.0.0"),
             });
         assert!(!resolved_graph_matches(&legacy, &actual));
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkspaceAssociation {
-    pub root: PathBuf,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LaunchSettings {
-    pub arguments: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InstalledArtifactRecord {
-    pub id: String,
-    #[serde(default)]
-    pub version: Option<String>,
-    pub root: PathBuf,
-    pub fingerprint: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(tag = "state", rename_all = "kebab-case")]
-pub enum InstallationState {
-    #[default]
-    Unknown,
-    NotInstalled,
-    Installed {
-        artifacts: Vec<InstalledArtifactRecord>,
-        graph_fingerprint: Option<String>,
-    },
-    OutOfDate {
-        detail: String,
-        actual_graph: ResolvedCompositionGraph,
-        artifacts: Vec<InstalledArtifactRecord>,
-        /// Session-local proof; installed files must be checked again after restart.
-        #[serde(skip)]
-        verified: bool,
-    },
-    Partial {
-        detail: String,
-    },
-    NeedsRepair {
-        detail: String,
-        artifacts: Vec<InstalledArtifactRecord>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CompositionProfile {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub root_package: Option<ContentIdentity>,
-    #[serde(default)]
-    pub resolved_graph: Option<ResolvedCompositionGraph>,
-    #[serde(default)]
-    pub workspace: Option<WorkspaceAssociation>,
-    #[serde(default)]
-    pub launch: LaunchSettings,
-    /// Live installation observation; intentionally omitted from saved profiles.
-    #[serde(skip)]
-    pub installation: InstallationState,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProfileDocument {
-    pub schema_version: u32,
-    pub profiles: Vec<CompositionProfile>,
-}
-
-impl Default for ProfileDocument {
-    fn default() -> Self {
-        Self {
-            schema_version: CURRENT_SCHEMA_VERSION,
-            profiles: vec![CompositionProfile::default_profile()],
-        }
-    }
-}
-
-impl CompositionProfile {
-    pub fn default_profile() -> Self {
-        Self {
-            id: "default".to_owned(),
-            name: "Default".to_owned(),
-            root_package: None,
-            resolved_graph: None,
-            workspace: None,
-            launch: LaunchSettings::default(),
-            installation: InstallationState::Unknown,
-        }
     }
 }
 

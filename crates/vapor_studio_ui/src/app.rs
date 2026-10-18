@@ -57,7 +57,7 @@ use source_authoring::AuthoringState;
 use std::path::PathBuf;
 use vapor_studio_client::{ServiceBootstrap, StudioClient, service_sibling_path};
 use vapor_studio_core::decode_profiles;
-use vapor_studio_protocol::StudioAction;
+use vapor_studio_protocol::{LegacyStorageSeed, StudioAction};
 use workshop::WorkshopState;
 use workspace_ops::WorkspaceState;
 
@@ -96,8 +96,9 @@ impl StudioApp {
             .storage
             .and_then(|storage| storage.get_string("workspace_editor_drafts"));
         let current_directory = std::env::current_dir().ok();
+        let explicit_workspace = workspace.clone();
         let requested_workspace = workspace
-            .or_else(|| saved_workspace.map(PathBuf::from))
+            .or_else(|| saved_workspace.clone().map(PathBuf::from))
             .or_else(|| {
                 current_directory
                     .as_ref()
@@ -119,6 +120,19 @@ impl StudioApp {
         let saved_operation_history = creation
             .storage
             .and_then(|storage| storage.get_string("operation_history"));
+        let legacy_storage = LegacyStorageSeed {
+            profiles: saved_profiles.clone(),
+            active_profile_id: saved_profile_id.clone(),
+            active_profile_index: creation
+                .storage
+                .and_then(|storage| storage.get_string("active_profile")),
+            workspace_root: saved_workspace.clone(),
+            editor_drafts: saved_editor_drafts.clone(),
+            operation_history: saved_operation_history.clone(),
+            recovery_backup: creation
+                .storage
+                .and_then(|storage| storage.get_string("profiles.recovery_backup")),
+        };
         let active_profile = saved_profile_id
             .as_deref()
             .and_then(|id| {
@@ -185,13 +199,10 @@ impl StudioApp {
             command_palette_focus_search: false,
             command_palette_selected_index: 0,
         };
-        let service_workspace = app.profile.items[app.profile.active_index]
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.root.clone());
         app.start_service(
-            service_workspace,
+            explicit_workspace,
             Some(app.profile.items[app.profile.active_index].id.clone()),
+            legacy_storage,
         );
         app.refresh_registered_sources();
         if !play_mode
@@ -222,6 +233,7 @@ impl StudioApp {
         &mut self,
         workspace_root: Option<PathBuf>,
         active_profile_id: Option<String>,
+        legacy_storage: LegacyStorageSeed,
     ) {
         let executable = match std::env::current_exe() {
             Ok(path) => path,
@@ -240,11 +252,19 @@ impl StudioApp {
                 workspace_root,
                 active_profile_id,
                 fixture_mode: false,
+                legacy_storage,
+                state_directory: None,
             },
         ) {
             Ok(client) => {
+                let initial_snapshot = client.latest_snapshot().clone();
                 self.service = Some(client);
                 self.service_error = None;
+                self.apply_service_catalog_snapshot(&initial_snapshot);
+                self.workspace.editor.draft_recovery =
+                    initial_snapshot.durable_state.editor_drafts.clone();
+                self.operation
+                    .restore_history(initial_snapshot.durable_state.operation_history.as_deref());
             }
             Err(error) => {
                 let message = format!("Studio service is unavailable: {error}");

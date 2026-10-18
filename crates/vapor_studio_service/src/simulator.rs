@@ -29,6 +29,8 @@ fn spawn_fixture_client(executable: &Path) -> Result<StudioClient, String> {
             workspace_root: None,
             active_profile_id: Some("default".to_owned()),
             fixture_mode: true,
+            legacy_storage: vapor_studio_protocol::LegacyStorageSeed::default(),
+            state_directory: None,
         },
     )
     .map_err(|error| error.to_string())

@@ -1,13 +1,19 @@
+use crate::{
+    host::StudioHostContext,
+    persistence::{StudioPersistentState, StudioStateStore},
+};
 use std::path::{Path, PathBuf};
 use vapor_studio_core::{
-    CatalogContent, SourceContent, discover_content_catalog, discover_source_content,
-    scan_unregistered_content_projects,
+    CatalogContent, SourceContent, add_profile, discover_content_catalog, discover_source_content,
+    duplicate_profile, remove_profile, rename_profile, scan_unregistered_content_projects,
 };
 use vapor_studio_protocol::{
     AvailableAction, CatalogAction, CatalogConflict, CatalogEntry, CatalogLocation,
-    CatalogLocationKind, HostSummary, StudioAction, StudioError, StudioErrorCode, StudioRequest,
-    StudioResponse, StudioResponseKind, StudioRevision, StudioSnapshot, WorkspaceContentSnapshot,
-    WorkspaceProjectCandidate, WorkspaceSourceProject, WorkspaceWorkshopPolicy,
+    CatalogLocationKind, CompositionProfile, ContentIdentity, DurableStateSnapshot, HostSummary,
+    InstallationState, LegacyStorageSeed, ProfileAction, SessionAction, StudioAction, StudioError,
+    StudioErrorCode, StudioRequest, StudioResponse, StudioResponseKind, StudioRevision,
+    StudioSnapshot, WorkspaceAssociation, WorkspaceContentSnapshot, WorkspaceProjectCandidate,
+    WorkspaceSourceProject, WorkspaceWorkshopPolicy,
 };
 
 const MAX_CATALOG_ITEMS: usize = 10_000;
@@ -31,11 +37,78 @@ pub struct StudioSession {
     catalog_query: String,
     catalog_error: Option<String>,
     workspace_content: WorkspaceContentSnapshot,
+    durable_state: StudioPersistentState,
+    state_store: Option<StudioStateStore>,
+    host_context: Option<StudioHostContext>,
 }
 
 impl StudioSession {
     pub fn new(bootstrap: ServiceBootstrap) -> Self {
-        let active_profile_id = bootstrap.active_profile_id.clone();
+        let mut durable_state = StudioPersistentState::default();
+        if let Some(active_profile_id) = bootstrap.active_profile_id.as_ref()
+            && durable_state
+                .profiles
+                .profiles
+                .iter()
+                .any(|profile| profile.id == *active_profile_id)
+        {
+            durable_state.active_profile_id = active_profile_id.clone();
+        }
+        durable_state.workspace_root = bootstrap
+            .workspace_root
+            .as_ref()
+            .map(|root| root.display().to_string());
+        Self::with_state(bootstrap, durable_state, None, None)
+    }
+
+    pub fn with_persistent_state(
+        mut bootstrap: ServiceBootstrap,
+        host_context: StudioHostContext,
+        store: StudioStateStore,
+        legacy_storage: Option<&LegacyStorageSeed>,
+    ) -> Result<Self, String> {
+        let mut loaded = store.load_or_import(legacy_storage)?;
+        if let Some(workspace_root) = bootstrap.workspace_root.as_ref() {
+            let workspace = Some(workspace_root.display().to_string());
+            let mut profile_changed = loaded.state.workspace_root != workspace;
+            loaded.state.workspace_root = workspace;
+            if let Some(profile) = loaded
+                .state
+                .profiles
+                .profiles
+                .iter_mut()
+                .find(|profile| profile.id == loaded.state.active_profile_id)
+            {
+                let association = Some(WorkspaceAssociation {
+                    root: workspace_root.clone(),
+                });
+                profile_changed |= profile.workspace != association;
+                profile.workspace = association;
+            }
+            if profile_changed {
+                loaded.state.profile_revision = loaded.state.profile_revision.saturating_add(1);
+            }
+            store.save(&loaded.state)?;
+        }
+        if bootstrap.workspace_root.is_none() {
+            bootstrap.workspace_root = loaded.state.workspace_root.as_deref().map(PathBuf::from);
+        }
+        bootstrap.active_profile_id = Some(loaded.state.active_profile_id.clone());
+        let mut session =
+            Self::with_state(bootstrap, loaded.state, Some(store), Some(host_context));
+        if let Some(message) = loaded.recovery_message {
+            session.catalog_error = Some(message);
+        }
+        Ok(session)
+    }
+
+    fn with_state(
+        bootstrap: ServiceBootstrap,
+        durable_state: StudioPersistentState,
+        state_store: Option<StudioStateStore>,
+        host_context: Option<StudioHostContext>,
+    ) -> Self {
+        let active_profile_id = Some(durable_state.active_profile_id.clone());
         Self {
             bootstrap,
             revision: StudioRevision(0),
@@ -45,6 +118,9 @@ impl StudioSession {
             catalog_query: String::new(),
             catalog_error: None,
             workspace_content: WorkspaceContentSnapshot::default(),
+            durable_state,
+            state_store,
+            host_context,
         }
     }
 
@@ -92,12 +168,18 @@ impl StudioSession {
             revision: self.revision,
             host: HostSummary {
                 app_root: self
-                    .bootstrap
-                    .application_executable
-                    .parent()
-                    .and_then(|path| path.parent())
-                    .and_then(|path| path.parent())
-                    .map(|root| root.display().to_string()),
+                    .host_context
+                    .as_ref()
+                    .and_then(|context| context.app_root.as_ref())
+                    .map(|root| root.display().to_string())
+                    .or_else(|| {
+                        self.bootstrap
+                            .application_executable
+                            .parent()
+                            .and_then(|path| path.parent())
+                            .and_then(|path| path.parent())
+                            .map(|root| root.display().to_string())
+                    }),
                 workspace: self
                     .bootstrap
                     .workspace_root
@@ -108,8 +190,25 @@ impl StudioSession {
                 } else {
                     "production".to_owned()
                 },
+                platform: self.host_context.as_ref().map_or_else(
+                    || std::env::consts::OS.to_owned(),
+                    |context| format!("{:?}", context.platform).to_lowercase(),
+                ),
+                steam_client_available: self
+                    .host_context
+                    .as_ref()
+                    .is_some_and(|context| context.steam_client_available),
             },
             active_profile_id: self.active_profile_id.clone(),
+            durable_state: DurableStateSnapshot {
+                profile_revision: self.durable_state.profile_revision,
+                profiles: self.durable_state.profiles.clone(),
+                active_profile_id: self.durable_state.active_profile_id.clone(),
+                workspace_root: self.durable_state.workspace_root.clone(),
+                editor_drafts: self.durable_state.editor_drafts.clone(),
+                operation_history: self.durable_state.operation_history.clone(),
+                recovery_backup: self.durable_state.recovery_backup.clone(),
+            },
             active_operation: None,
             catalog: self
                 .catalog
@@ -180,9 +279,61 @@ impl StudioSession {
                     let requested = PathBuf::from(root);
                     match std::fs::canonicalize(&requested) {
                         Ok(root) if root.is_dir() => {
+                            let previous_state = self.durable_state.clone();
+                            let previous_workspace = self.bootstrap.workspace_root.clone();
                             let root_changed =
                                 self.bootstrap.workspace_root.as_deref() != Some(&root);
                             self.bootstrap.workspace_root = Some(root);
+                            self.durable_state.workspace_root = self
+                                .bootstrap
+                                .workspace_root
+                                .as_ref()
+                                .map(|root| root.display().to_string());
+                            let workspace = self
+                                .bootstrap
+                                .workspace_root
+                                .clone()
+                                .map(|root| WorkspaceAssociation { root });
+                            let workspace_profile_changed = self
+                                .durable_state
+                                .profiles
+                                .profiles
+                                .iter()
+                                .find(|profile| profile.id == self.durable_state.active_profile_id)
+                                .is_some_and(|profile| profile.workspace != workspace);
+                            if workspace_profile_changed {
+                                self.durable_state.profile_revision =
+                                    self.durable_state.profile_revision.saturating_add(1);
+                            }
+                            if workspace_profile_changed
+                                && let Some(profile) = self.active_profile_mut()
+                            {
+                                profile.workspace = workspace;
+                                profile.root_package = None;
+                                profile.resolved_graph = None;
+                                profile.installation = InstallationState::Unknown;
+                            }
+                            if let Some(store) = &self.state_store
+                                && let Err(message) = store.save(&self.durable_state)
+                            {
+                                self.durable_state = previous_state;
+                                self.bootstrap.workspace_root = previous_workspace;
+                                response_kind = StudioResponseKind::Rejected;
+                                error = Some(StudioError {
+                                    code: StudioErrorCode::PersistenceFailure,
+                                    message,
+                                    retryable: true,
+                                });
+                                let snapshot = self.snapshot();
+                                return StudioResponse {
+                                    protocol_version: vapor_studio_protocol::PROTOCOL_VERSION,
+                                    request_id: request.request_id,
+                                    revision: snapshot.revision,
+                                    kind: response_kind,
+                                    snapshot,
+                                    error,
+                                };
+                            }
                             self.selected_content_id = None;
                             if root_changed {
                                 self.workspace_content = WorkspaceContentSnapshot::default();
@@ -245,12 +396,34 @@ impl StudioSession {
                         });
                     }
                 }
-                StudioAction::Profile(vapor_studio_protocol::ProfileAction::Select {
-                    profile_id,
-                }) if !profile_id.trim().is_empty() => {
-                    self.active_profile_id = Some(profile_id);
-                    self.revision.0 = self.revision.0.saturating_add(1);
+                StudioAction::Session(SessionAction::CheckpointLocalState {
+                    editor_drafts,
+                    operation_history,
+                }) => {
+                    let previous_state = self.durable_state.clone();
+                    self.durable_state.editor_drafts = editor_drafts;
+                    self.durable_state.operation_history = operation_history;
+                    if let Some(store) = &self.state_store
+                        && let Err(message) = store.save(&self.durable_state)
+                    {
+                        self.durable_state = previous_state;
+                        response_kind = StudioResponseKind::Rejected;
+                        error = Some(StudioError {
+                            code: StudioErrorCode::PersistenceFailure,
+                            message,
+                            retryable: true,
+                        });
+                    } else {
+                        self.revision.0 = self.revision.0.saturating_add(1);
+                    }
                 }
+                StudioAction::Profile(action) => match self.apply_profile_action(action) {
+                    Ok(()) => self.revision.0 = self.revision.0.saturating_add(1),
+                    Err(profile_error) => {
+                        response_kind = StudioResponseKind::Rejected;
+                        error = Some(profile_error);
+                    }
+                },
                 action => {
                     response_kind = StudioResponseKind::Rejected;
                     error = Some(StudioError {
@@ -366,6 +539,218 @@ impl StudioSession {
             }
             Err(error) => self.workspace_content.unregistered_projects_error = Some(error),
         }
+    }
+
+    fn active_profile_mut(&mut self) -> Option<&mut CompositionProfile> {
+        let active = self.durable_state.active_profile_id.clone();
+        self.durable_state
+            .profiles
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == active)
+    }
+
+    fn apply_profile_action(&mut self, action: ProfileAction) -> Result<(), StudioError> {
+        let previous_state = self.durable_state.clone();
+        let previous_workspace = self.bootstrap.workspace_root.clone();
+        let transition = match action {
+            ProfileAction::Create { name } => add_profile(
+                &mut self.durable_state.profiles.profiles,
+                &name,
+                self.bootstrap.workspace_root.clone(),
+            )
+            .map(|index| {
+                self.durable_state.active_profile_id =
+                    self.durable_state.profiles.profiles[index].id.clone();
+            }),
+            ProfileAction::Duplicate { profile_id, name } => self
+                .profile_index(&profile_id)
+                .ok_or_else(|| "The selected profile no longer exists.".to_owned())
+                .and_then(|index| {
+                    duplicate_profile(&mut self.durable_state.profiles.profiles, index)
+                })
+                .and_then(|index| {
+                    if name.trim().is_empty() {
+                        Ok(index)
+                    } else {
+                        rename_profile(&mut self.durable_state.profiles.profiles, index, &name)?;
+                        Ok(index)
+                    }
+                })
+                .map(|index| {
+                    self.durable_state.active_profile_id =
+                        self.durable_state.profiles.profiles[index].id.clone();
+                }),
+            ProfileAction::Rename { profile_id, name } => self
+                .profile_index(&profile_id)
+                .ok_or_else(|| "The selected profile no longer exists.".to_owned())
+                .and_then(|index| {
+                    rename_profile(&mut self.durable_state.profiles.profiles, index, &name)
+                }),
+            ProfileAction::Remove { profile_id } => self
+                .profile_index(&profile_id)
+                .ok_or_else(|| "The selected profile no longer exists.".to_owned())
+                .and_then(|index| {
+                    remove_profile(&mut self.durable_state.profiles.profiles, index).map(|_| ())
+                })
+                .map(|()| {
+                    if self.durable_state.active_profile_id == profile_id {
+                        self.durable_state.active_profile_id =
+                            self.durable_state.profiles.profiles[0].id.clone();
+                    }
+                }),
+            ProfileAction::Select { profile_id } => self
+                .profile_index(&profile_id)
+                .ok_or_else(|| "The selected profile no longer exists.".to_owned())
+                .map(|index| {
+                    self.durable_state.active_profile_id =
+                        self.durable_state.profiles.profiles[index].id.clone();
+                }),
+            ProfileAction::SetRoot {
+                profile_id,
+                content_id,
+                content_version,
+                workspace_root,
+            } => self
+                .profile_index(&profile_id)
+                .ok_or_else(|| "The selected profile no longer exists.".to_owned())
+                .map(|index| {
+                    self.durable_state.profiles.profiles[index].root_package =
+                        content_id.map(|id| ContentIdentity {
+                            id,
+                            version: content_version,
+                        });
+                    self.durable_state.profiles.profiles[index].resolved_graph = None;
+                    self.durable_state.profiles.profiles[index].installation =
+                        InstallationState::Unknown;
+                    self.durable_state.profiles.profiles[index].workspace = workspace_root
+                        .map(PathBuf::from)
+                        .map(|root| WorkspaceAssociation { root });
+                }),
+            ProfileAction::SetLaunchArguments {
+                profile_id,
+                arguments,
+            } => {
+                if arguments.len() > 64 || arguments.iter().any(|argument| argument.len() > 4096) {
+                    Err(
+                        "A profile can have at most 64 launch arguments, each 4096 bytes or fewer."
+                            .to_owned(),
+                    )
+                } else {
+                    self.profile_index(&profile_id)
+                        .ok_or_else(|| "The selected profile no longer exists.".to_owned())
+                        .map(|index| {
+                            self.durable_state.profiles.profiles[index].launch.arguments =
+                                arguments;
+                        })
+                }
+            }
+            ProfileAction::SetCompositionState {
+                profile_id,
+                root_package,
+                resolved_graph,
+                installation,
+            } => {
+                if resolved_graph.as_ref().is_some_and(|graph| {
+                    root_package.as_ref().is_none_or(|root| {
+                        graph.root.id != root.id
+                            || root
+                                .version
+                                .as_ref()
+                                .is_some_and(|version| graph.root.version.as_ref() != Some(version))
+                    })
+                }) {
+                    Err(
+                        "The resolved graph root must match the profile's selected root."
+                            .to_owned(),
+                    )
+                } else {
+                    self.profile_index(&profile_id)
+                        .ok_or_else(|| "The selected profile no longer exists.".to_owned())
+                        .map(|index| {
+                            let profile = &mut self.durable_state.profiles.profiles[index];
+                            profile.root_package = root_package;
+                            profile.resolved_graph = resolved_graph.map(|graph| *graph);
+                            profile.installation = *installation;
+                        })
+                }
+            }
+            ProfileAction::InvalidateContent {
+                content_id,
+                content_version,
+            } => {
+                let matches_content = |identity: &ContentIdentity| {
+                    identity.id == content_id
+                        && content_version
+                            .as_ref()
+                            .is_none_or(|version| identity.version.as_ref() == Some(version))
+                };
+                for profile in &mut self.durable_state.profiles.profiles {
+                    let affected = profile.root_package.as_ref().is_some_and(&matches_content)
+                        || profile.resolved_graph.as_ref().is_some_and(|graph| {
+                            graph
+                                .nodes
+                                .iter()
+                                .any(|node| matches_content(&node.content))
+                        });
+                    if affected {
+                        profile.resolved_graph = None;
+                        profile.installation = InstallationState::Unknown;
+                    }
+                }
+                Ok(())
+            }
+        };
+        if let Err(message) = transition {
+            self.durable_state = previous_state;
+            self.active_profile_id = Some(self.durable_state.active_profile_id.clone());
+            self.bootstrap.workspace_root = previous_workspace;
+            return Err(StudioError {
+                code: StudioErrorCode::InvalidRequest,
+                message,
+                retryable: true,
+            });
+        }
+        self.durable_state.profile_revision = previous_state.profile_revision.saturating_add(1);
+        self.active_profile_id = Some(self.durable_state.active_profile_id.clone());
+        self.bootstrap.workspace_root = self.active_profile_mut().and_then(|profile| {
+            profile
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root.clone())
+        });
+        self.durable_state.workspace_root = self
+            .bootstrap
+            .workspace_root
+            .as_ref()
+            .map(|root| root.display().to_string());
+        let workspace_changed = previous_workspace != self.bootstrap.workspace_root;
+        if workspace_changed {
+            self.selected_content_id = None;
+            self.workspace_content = WorkspaceContentSnapshot::default();
+            self.refresh_catalog();
+        }
+        if let Some(store) = &self.state_store
+            && let Err(message) = store.save(&self.durable_state)
+        {
+            self.durable_state = previous_state;
+            self.active_profile_id = Some(self.durable_state.active_profile_id.clone());
+            self.bootstrap.workspace_root = previous_workspace;
+            return Err(StudioError {
+                code: StudioErrorCode::PersistenceFailure,
+                message,
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn profile_index(&self, profile_id: &str) -> Option<usize> {
+        self.durable_state
+            .profiles
+            .profiles
+            .iter()
+            .position(|profile| profile.id == profile_id)
     }
 }
 
@@ -576,6 +961,46 @@ mod tests {
     }
 
     #[test]
+    fn switching_workspace_clears_the_old_composition_in_service_state() {
+        let mut session = StudioSession::new(ServiceBootstrap {
+            application_executable: PathBuf::from("/app/bin/vapor-gui"),
+            workspace_root: None,
+            active_profile_id: None,
+            fixture_mode: true,
+        });
+        let assigned = session.dispatch(request(
+            Some(0),
+            StudioAction::Profile(ProfileAction::SetCompositionState {
+                profile_id: "default".to_owned(),
+                root_package: Some(ContentIdentity {
+                    id: "old.game".to_owned(),
+                    version: Some("1.0".to_owned()),
+                }),
+                resolved_graph: None,
+                installation: Box::new(InstallationState::NotInstalled),
+            }),
+        ));
+        assert_eq!(assigned.kind, StudioResponseKind::Applied);
+
+        let root = std::env::current_dir().expect("current directory");
+        let opened = session.dispatch(request(
+            Some(1),
+            StudioAction::Workspace(vapor_studio_protocol::WorkspaceAction::Open {
+                root: root.display().to_string(),
+            }),
+        ));
+        assert_eq!(opened.kind, StudioResponseKind::Applied);
+        let profile = &opened.snapshot.durable_state.profiles.profiles[0];
+        assert_eq!(
+            profile.workspace.as_ref().map(|value| &value.root),
+            Some(&root)
+        );
+        assert_eq!(profile.root_package, None);
+        assert_eq!(profile.resolved_graph, None);
+        assert_eq!(profile.installation, InstallationState::Unknown);
+    }
+
+    #[test]
     fn catalog_search_filters_snapshot_without_destroying_catalog() {
         let mut session = session();
         let _ = session.dispatch(request(
@@ -619,32 +1044,102 @@ mod tests {
     }
 
     #[test]
-    fn profile_selection_rejects_empty_ids_and_changes_active_profile() {
+    fn profile_selection_requires_an_existing_profile() {
         let mut session = StudioSession::new(ServiceBootstrap {
             application_executable: PathBuf::from("/app/bin/vapor-gui"),
             workspace_root: None,
             active_profile_id: None,
             fixture_mode: false,
         });
-        let accepted = session.dispatch(request(
+        let created = session.dispatch(request(
             Some(0),
-            StudioAction::Profile(vapor_studio_protocol::ProfileAction::Select {
-                profile_id: "profile-2".to_owned(),
+            StudioAction::Profile(ProfileAction::Create {
+                name: "Second".to_owned(),
             }),
         ));
-        assert_eq!(accepted.kind, StudioResponseKind::Applied);
-        assert_eq!(accepted.revision, StudioRevision(1));
+        assert_eq!(created.kind, StudioResponseKind::Applied);
+        assert_eq!(created.revision, StudioRevision(1));
         assert_eq!(
-            accepted.snapshot.active_profile_id.as_deref(),
-            Some("profile-2")
+            created.snapshot.active_profile_id.as_deref(),
+            Some("profile-1")
         );
+        assert_eq!(created.snapshot.durable_state.profiles.profiles.len(), 2);
+        assert_eq!(created.snapshot.durable_state.profile_revision, 1);
         let rejected = session.dispatch(request(
             Some(1),
-            StudioAction::Profile(vapor_studio_protocol::ProfileAction::Select {
-                profile_id: "  ".to_owned(),
+            StudioAction::Profile(ProfileAction::Select {
+                profile_id: "unknown".to_owned(),
             }),
         ));
         assert_eq!(rejected.kind, StudioResponseKind::Rejected);
         assert_eq!(rejected.revision, StudioRevision(1));
+    }
+
+    #[test]
+    fn profile_launch_arguments_are_validated_and_profile_revision_is_projected() {
+        let mut session = session();
+        let update = session.dispatch(request(
+            Some(0),
+            StudioAction::Profile(ProfileAction::SetLaunchArguments {
+                profile_id: "default".to_owned(),
+                arguments: vec!["--windowed".to_owned()],
+            }),
+        ));
+        assert_eq!(update.kind, StudioResponseKind::Applied);
+        assert_eq!(update.snapshot.durable_state.profile_revision, 1);
+        assert_eq!(
+            update.snapshot.durable_state.profiles.profiles[0]
+                .launch
+                .arguments,
+            ["--windowed"]
+        );
+
+        let rejected = session.dispatch(request(
+            Some(1),
+            StudioAction::Profile(ProfileAction::SetLaunchArguments {
+                profile_id: "default".to_owned(),
+                arguments: vec!["x".repeat(4097)],
+            }),
+        ));
+        assert_eq!(rejected.kind, StudioResponseKind::Rejected);
+        assert_eq!(rejected.snapshot.durable_state.profile_revision, 1);
+        assert_eq!(
+            rejected.snapshot.durable_state.profiles.profiles[0]
+                .launch
+                .arguments,
+            ["--windowed"]
+        );
+    }
+
+    #[test]
+    fn content_invalidation_clears_stale_graph_and_installation_without_removing_root() {
+        let mut session = session();
+        let root = ContentIdentity {
+            id: "fixture.game".to_owned(),
+            version: Some("1.0.0".to_owned()),
+        };
+        let assigned = session.dispatch(request(
+            Some(0),
+            StudioAction::Profile(ProfileAction::SetCompositionState {
+                profile_id: "default".to_owned(),
+                root_package: Some(root.clone()),
+                resolved_graph: None,
+                installation: Box::new(InstallationState::NotInstalled),
+            }),
+        ));
+        assert_eq!(assigned.kind, StudioResponseKind::Applied);
+
+        let invalidated = session.dispatch(request(
+            Some(1),
+            StudioAction::Profile(ProfileAction::InvalidateContent {
+                content_id: root.id.clone(),
+                content_version: root.version.clone(),
+            }),
+        ));
+        assert_eq!(invalidated.kind, StudioResponseKind::Applied);
+        let profile = &invalidated.snapshot.durable_state.profiles.profiles[0];
+        assert_eq!(profile.root_package, Some(root));
+        assert_eq!(profile.resolved_graph, None);
+        assert_eq!(profile.installation, InstallationState::Unknown);
     }
 }

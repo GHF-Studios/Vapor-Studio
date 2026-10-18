@@ -1,7 +1,7 @@
-use crate::{StudioAction, StudioEvent, StudioRevision, StudioSnapshot};
+use crate::{LegacyStorageSeed, StudioAction, StudioEvent, StudioRevision, StudioSnapshot};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -57,6 +57,10 @@ pub enum StudioErrorCode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "kebab-case")]
 pub enum ProtocolFrame {
+    Initialize {
+        protocol_version: u16,
+        legacy_storage: LegacyStorageSeed,
+    },
     Request(StudioRequest),
     Response(Box<StudioResponse>),
     Event(StudioEvent),

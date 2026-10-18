@@ -495,30 +495,45 @@ impl eframe::App for StudioApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string("workspace_root", self.workspace.root.clone());
-        storage.set_string(
-            "workspace_editor_drafts",
-            self.workspace
-                .editor
-                .save_editor_drafts(&self.workspace.root)
-                .unwrap_or_default(),
-        );
-        let document = ProfileDocument {
-            schema_version: CURRENT_SCHEMA_VERSION,
-            profiles: self.profile.items.clone(),
-        };
-        if let Ok(encoded) = serde_json::to_string(&document) {
-            storage.set_string("profiles", encoded);
+        let editor_drafts = self
+            .workspace
+            .editor
+            .save_editor_drafts(&self.workspace.root);
+        let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
+        if self.service.is_some() {
+            if let Err(error) = self.persist_session_state() {
+                self.status = format!("Could not save Studio state: {error}");
+                save_legacy_egui_state(self, storage, editor_drafts, operation_history);
+            }
+        } else {
+            save_legacy_egui_state(self, storage, editor_drafts, operation_history);
         }
-        if let Some(original) = &self.profile.recovery_backup {
-            storage.set_string("profiles.recovery_backup", original.clone());
-        }
-        storage.set_string("active_profile", self.profile.active_index.to_string());
-        if let Some(profile) = self.profile.items.get(self.profile.active_index) {
-            storage.set_string("active_profile_id", profile.id.clone());
-        }
-        if let Ok(history) = serde_json::to_string(&self.operation.operation_history) {
-            storage.set_string("operation_history", history);
-        }
+    }
+}
+
+fn save_legacy_egui_state(
+    app: &StudioApp,
+    storage: &mut dyn eframe::Storage,
+    editor_drafts: Option<String>,
+    operation_history: Option<String>,
+) {
+    storage.set_string("workspace_root", app.workspace.root.clone());
+    storage.set_string("workspace_editor_drafts", editor_drafts.unwrap_or_default());
+    let document = ProfileDocument {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        profiles: app.profile.items.clone(),
+    };
+    if let Ok(encoded) = serde_json::to_string(&document) {
+        storage.set_string("profiles", encoded);
+    }
+    if let Some(original) = &app.profile.recovery_backup {
+        storage.set_string("profiles.recovery_backup", original.clone());
+    }
+    storage.set_string("active_profile", app.profile.active_index.to_string());
+    if let Some(profile) = app.profile.items.get(app.profile.active_index) {
+        storage.set_string("active_profile_id", profile.id.clone());
+    }
+    if let Some(history) = operation_history {
+        storage.set_string("operation_history", history);
     }
 }

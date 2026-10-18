@@ -12,7 +12,7 @@
 
 ## Current checkpoint (2026-10-18)
 
-Implemented and managed-validated: the typed protocol (51 semantic action
+Implemented and managed-validated: the typed protocol (55 semantic action
 variants), child client/server lifecycle, fixture simulator, protocol and
 process tests, and the first GUI adapter slice for local catalog refresh/search,
 exact content selection, workspace activation, and profile selection. The
@@ -29,6 +29,17 @@ project discovery behind the service snapshot and removed the matching GUI
 worker scans. The full managed validation gate passes with 33 tests. Durable
 profile state and migration remain the next service ownership boundary.
 
+The 2026-10-18 durable-state tranche adds the service host context, one-time
+legacy egui import, atomic profile/draft/history persistence, typed profile
+mutations, and revision-gated profile projection. Workspace activation now
+clears the prior composition in the service and waits for that transition
+before the GUI switches its editor context. Protocol snapshots carry transient
+installation state; the durable store explicitly clears that state on write and
+restart. Managed validation passes with 45 tests. Remaining work includes
+catalog adoption, composition execution, workspace/editor ownership, authoring,
+Workshop/publishing, operation lifecycle, and terminal simulation gaps called
+out below.
+
 ## Part 1 checkpoint (2026-10-18)
 
 Workspace source-project discovery and unregistered-project scanning now run in
@@ -36,7 +47,8 @@ Workspace source-project discovery and unregistered-project scanning now run in
 workspace open, and explicit project scans use this service state; GUI workers
 no longer perform these reads. The protocol addition defaults when decoded by a
 new client, and deterministic child-process scenarios cover workspace open and
-refresh. Profile CRUD and durable profile migration remain open.
+refresh. Durable profile migration and CRUD now have a service-owned typed
+path; the larger workflow migrations remain open.
 
 ## Global Constraints
 

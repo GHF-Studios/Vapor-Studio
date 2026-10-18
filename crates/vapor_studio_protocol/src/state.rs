@@ -9,6 +9,10 @@ pub struct HostSummary {
     pub app_root: Option<String>,
     pub workspace: Option<String>,
     pub mode: String,
+    #[serde(default)]
+    pub platform: String,
+    #[serde(default)]
+    pub steam_client_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,12 +27,26 @@ pub struct StudioSnapshot {
     pub revision: StudioRevision,
     pub host: HostSummary,
     pub active_profile_id: Option<String>,
+    #[serde(default)]
+    pub durable_state: DurableStateSnapshot,
     pub active_operation: Option<OperationSummary>,
     pub catalog: Vec<CatalogEntry>,
     #[serde(default)]
     pub workspace_content: WorkspaceContentSnapshot,
     pub selected_content_id: Option<String>,
     pub available_actions: Vec<AvailableAction>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DurableStateSnapshot {
+    #[serde(default)]
+    pub profile_revision: u64,
+    pub profiles: crate::ProfileDocument,
+    pub active_profile_id: String,
+    pub workspace_root: Option<String>,
+    pub editor_drafts: Option<String>,
+    pub operation_history: Option<String>,
+    pub recovery_backup: Option<String>,
 }
 
 /// Authoritative discovery state for source projects in the active workspace.

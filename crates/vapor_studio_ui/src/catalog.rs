@@ -1,6 +1,9 @@
 use super::StudioApp;
 use crate::navigation::CatalogSourceFilter;
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use vapor_core::ContentKind;
 use vapor_studio_core::ContentIdentity;
 use vapor_studio_protocol::{
@@ -82,6 +85,68 @@ impl StudioApp {
         ));
     }
 
+    pub(super) fn apply_service_action(&mut self, action: StudioAction) -> Result<(), String> {
+        let Some(service) = self.service.as_mut() else {
+            return Err(self
+                .service_error
+                .clone()
+                .unwrap_or_else(|| "Studio service is not connected.".to_owned()));
+        };
+        let request_id = service
+            .send(action, None)
+            .map_err(|error| format!("Could not send the action to Studio: {error}"))?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("Studio did not finish saving the change in time.".to_owned());
+            }
+            let frame = self
+                .service
+                .as_mut()
+                .ok_or_else(|| "Studio service disconnected.".to_owned())?
+                .recv_timeout(remaining)
+                .map_err(|error| format!("Studio could not confirm the change: {error}"))?;
+            match frame {
+                ProtocolFrame::Response(response) if response.request_id == request_id => {
+                    self.apply_service_catalog_snapshot(&response.snapshot);
+                    return if response.kind == StudioResponseKind::Applied {
+                        Ok(())
+                    } else {
+                        Err(response.error.map_or_else(
+                            || "Studio rejected the change.".to_owned(),
+                            |error| error.message,
+                        ))
+                    };
+                }
+                ProtocolFrame::Response(response) => {
+                    self.apply_service_catalog_snapshot(&response.snapshot);
+                }
+                ProtocolFrame::Event(StudioEvent::Snapshot(snapshot)) => {
+                    self.apply_service_catalog_snapshot(&snapshot);
+                }
+                ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
+                    return Err(error.message);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub(super) fn persist_session_state(&mut self) -> Result<(), String> {
+        let editor_drafts = self
+            .workspace
+            .editor
+            .save_editor_drafts(&self.workspace.root);
+        let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
+        self.apply_service_action(StudioAction::Session(
+            vapor_studio_protocol::SessionAction::CheckpointLocalState {
+                editor_drafts,
+                operation_history,
+            },
+        ))
+    }
+
     pub(super) fn submit_service_action(&mut self, action: StudioAction) {
         let Some(service) = self.service.as_mut() else {
             if self.service_error.is_none() {
@@ -152,7 +217,35 @@ impl StudioApp {
         }
     }
 
-    fn apply_service_catalog_snapshot(&mut self, snapshot: &vapor_studio_protocol::StudioSnapshot) {
+    pub(super) fn apply_service_catalog_snapshot(
+        &mut self,
+        snapshot: &vapor_studio_protocol::StudioSnapshot,
+    ) {
+        let durable = &snapshot.durable_state;
+        if !durable.profiles.profiles.is_empty()
+            && self.profile.service_revision != Some(durable.profile_revision)
+        {
+            self.profile.items = durable.profiles.profiles.clone();
+            self.profile.active_index = self
+                .profile
+                .items
+                .iter()
+                .position(|profile| profile.id == durable.active_profile_id)
+                .unwrap_or(0);
+            self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
+            self.profile.recovery_backup = durable.recovery_backup.clone();
+            self.profile.service_revision = Some(durable.profile_revision);
+        }
+        let service_workspace = durable.workspace_root.clone().unwrap_or_default();
+        if self.workspace.root != service_workspace && !self.workspace.editor.has_dirty_documents()
+        {
+            self.workspace.root = service_workspace.clone();
+            self.workspace.root_draft = if service_workspace.is_empty() {
+                self.workspace.fallback_root.display().to_string()
+            } else {
+                service_workspace
+            };
+        }
         self.catalog.items = snapshot.catalog.iter().map(service_catalog_entry).collect();
         self.catalog.catalog_discovery_loaded = true;
         self.catalog.sources = snapshot

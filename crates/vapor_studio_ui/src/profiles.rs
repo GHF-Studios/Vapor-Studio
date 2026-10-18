@@ -1,10 +1,12 @@
 use super::{StudioApp, catalog_content_selector, content_selector};
 use crate::navigation::{CatalogSourceFilter, Section};
 use std::path::{Path, PathBuf};
-use vapor_studio_core::{ContentIdentity, WorkspaceAssociation};
+use vapor_studio_core::ContentIdentity;
+use vapor_studio_protocol::StudioAction;
 
 pub(super) struct ProfileState {
     pub(super) items: Vec<vapor_studio_core::CompositionProfile>,
+    pub(super) service_revision: Option<u64>,
     pub(super) active_index: usize,
     pub(super) recovery: Option<String>,
     pub(super) recovery_backup: Option<String>,
@@ -23,6 +25,7 @@ impl ProfileState {
     ) -> Self {
         Self {
             items,
+            service_revision: None,
             active_index,
             recovery,
             recovery_backup,
@@ -198,6 +201,23 @@ impl StudioApp {
         self.activate_profile_context(index);
     }
 
+    pub(super) fn persist_active_profile_composition(&mut self) {
+        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
+            return;
+        };
+        if let Err(error) = self.apply_service_action(StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::SetCompositionState {
+                profile_id: profile.id,
+                root_package: profile.root_package,
+                resolved_graph: profile.resolved_graph.map(Box::new),
+                installation: Box::new(profile.installation),
+            },
+        )) {
+            self.service_error = Some(error.clone());
+            self.status = error;
+        }
+    }
+
     fn activate_profile_context(&mut self, index: usize) {
         self.profile.active_index = index;
         self.profile.name_draft = self.profile.items[index].name.clone();
@@ -231,7 +251,7 @@ impl StudioApp {
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
     ) -> bool {
-        self.assign_profile_root_inner(identity, workspace, true)
+        self.assign_profile_root_inner(identity, workspace)
     }
 
     fn assign_profile_root_without_catalog_refresh(
@@ -239,14 +259,13 @@ impl StudioApp {
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
     ) -> bool {
-        self.assign_profile_root_inner(identity, workspace, false)
+        self.assign_profile_root_inner(identity, workspace)
     }
 
     fn assign_profile_root_inner(
         &mut self,
         identity: ContentIdentity,
         workspace: Option<PathBuf>,
-        refresh_catalog: bool,
     ) -> bool {
         if self.authoring.manifest_metadata_dirty
             || self.authoring.composition_has_unsaved_changes()
@@ -294,33 +313,23 @@ impl StudioApp {
             self.activate_navigation_section(Section::Library);
             return true;
         }
-        let profile = &mut self.profile.items[self.profile.active_index];
-        profile.root_package = Some(identity.clone());
-        profile.workspace = workspace.clone().map(|root| WorkspaceAssociation { root });
-        profile.resolved_graph = None;
-        profile.installation = vapor_studio_core::InstallationState::NotInstalled;
+        let profile_id = self.profile.items[self.profile.active_index].id.clone();
+        if let Err(error) = self.apply_service_action(StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::SetRoot {
+                profile_id,
+                content_id: Some(identity.id.clone()),
+                content_version: identity.version.clone(),
+                workspace_root: workspace.as_ref().map(|root| root.display().to_string()),
+            },
+        )) {
+            self.status = error;
+            return false;
+        }
         if workspace_changed {
             self.authoring.clear_selected_source();
             self.profile_composition.clear_context();
-            self.workspace.root = workspace
-                .as_ref()
-                .map(|root| root.display().to_string())
-                .unwrap_or_default();
-            self.workspace.root_draft = if self.workspace.root.is_empty() {
-                self.workspace.fallback_root.display().to_string()
-            } else {
-                self.workspace.root.clone()
-            };
             self.workspace.workspace_validation_error = None;
-            self.catalog.clear_workspace_content();
             self.workspace.clear_file_context();
-            self.workspace.unregistered_projects =
-                vapor_studio_core::UnregisteredProjectScan::default();
-            self.workspace.unregistered_scan_completed = false;
-            self.workspace.unregistered_scan_error = None;
-            if refresh_catalog {
-                self.discover();
-            }
         } else {
             self.profile_composition.invalidate_preview();
         }
@@ -375,18 +384,13 @@ impl StudioApp {
             self.status = "Discard the Create draft or save or discard workspace, composition, or manifest edits before creating a profile.".to_owned();
             return;
         }
-        let name = self.profile.new_name.trim();
-        let workspace = (!self.workspace.root.trim().is_empty())
-            .then(|| PathBuf::from(self.workspace.root.trim()));
-        let index = match vapor_studio_core::add_profile(&mut self.profile.items, name, workspace) {
-            Ok(index) => index,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
-        self.profile.active_index = index;
-        self.profile.name_draft = self.profile.items[index].name.clone();
+        let name = self.profile.new_name.trim().to_owned();
+        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::Create { name },
+        )) {
+            self.status = error;
+            return;
+        }
         self.profile.confirm_removal = false;
         self.profile.new_name.clear();
         self.profile_composition.clear_context();
@@ -398,22 +402,16 @@ impl StudioApp {
     }
 
     pub(super) fn rename_active_profile(&mut self) {
-        match vapor_studio_core::rename_profile(
-            &mut self.profile.items,
-            self.profile.active_index,
-            &self.profile.name_draft,
-        ) {
-            Ok(()) => {
-                self.profile.name_draft =
-                    self.profile.items[self.profile.active_index].name.clone();
-                self.status = format!("Renamed profile to {}.", self.profile.name_draft);
-            }
-            Err(error) => {
-                self.profile.name_draft =
-                    self.profile.items[self.profile.active_index].name.clone();
-                self.status = error;
-            }
+        let profile_id = self.profile.items[self.profile.active_index].id.clone();
+        let name = self.profile.name_draft.clone();
+        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::Rename { profile_id, name },
+        )) {
+            self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
+            self.status = error;
+            return;
         }
+        self.status = format!("Renamed profile to {}.", self.profile.name_draft);
     }
 
     pub(super) fn remove_active_profile(&mut self) {
@@ -423,19 +421,18 @@ impl StudioApp {
                     .to_owned();
             return;
         }
-        let index = self.profile.active_index;
-        let removed = match vapor_studio_core::remove_profile(&mut self.profile.items, index) {
-            Ok(profile) => profile,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
+        let removed = self.profile.items[self.profile.active_index].name.clone();
+        let profile_id = self.profile.items[self.profile.active_index].id.clone();
+        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::Remove { profile_id },
+        )) {
+            self.status = error;
+            return;
+        }
         self.profile.confirm_removal = false;
         self.profile.name_draft.clear();
-        let next_index = index.min(self.profile.items.len() - 1);
-        self.activate_profile_context(next_index);
-        self.status = format!("Removed profile {}.", removed.name);
+        self.activate_profile_context(self.profile.active_index);
+        self.status = format!("Removed profile {}.", removed);
     }
 
     pub(super) fn duplicate_active_profile(&mut self) {
@@ -444,20 +441,21 @@ impl StudioApp {
             return;
         }
         let source_name = self.profile.items[self.profile.active_index].name.clone();
-        let index = match vapor_studio_core::duplicate_profile(
-            &mut self.profile.items,
-            self.profile.active_index,
-        ) {
-            Ok(index) => index,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
-        self.select_profile(index);
+        let profile_id = self.profile.items[self.profile.active_index].id.clone();
+        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::Duplicate {
+                profile_id,
+                name: String::new(),
+            },
+        )) {
+            self.status = error;
+            return;
+        }
+        self.profile_composition.clear_context();
+        self.invalidate_workshop_review();
         self.status = format!(
             "Duplicated {source_name} as {}.",
-            self.profile.items[index].name
+            self.profile.items[self.profile.active_index].name
         );
     }
 }

@@ -1,5 +1,8 @@
 use std::{env, path::PathBuf, process};
-use vapor_studio_service::{ServiceBootstrap, run_simulator, run_stdio_service};
+use vapor_studio_service::{
+    HostPlatform, ServiceBootstrap, StudioHostArguments, StudioHostContext, run_simulator,
+    run_stdio_service,
+};
 
 fn main() {
     let mut args = env::args_os().skip(1);
@@ -33,6 +36,7 @@ fn main() {
     }
     let mut application_executable = None;
     let mut workspace_root = None;
+    let mut state_directory = None;
     let mut active_profile_id = None;
     let mut fixture_mode = false;
     let mut stdio_mode = first.as_deref().is_some_and(|arg| arg == "--stdio");
@@ -41,7 +45,7 @@ fn main() {
         .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "vapor-studio-service --stdio --application-executable PATH [--workspace PATH] [--active-profile ID] [--fixture]"
+            "vapor-studio-service --stdio --application-executable PATH [--workspace PATH] [--state-dir PATH] [--active-profile ID] [--fixture]"
         );
         return;
     }
@@ -51,12 +55,13 @@ fn main() {
             "--fixture" => fixture_mode = true,
             "--application-executable" => application_executable = args.next().map(PathBuf::from),
             "--workspace" => workspace_root = args.next().map(PathBuf::from),
+            "--state-dir" => state_directory = args.next().map(PathBuf::from),
             "--active-profile" => {
                 active_profile_id = args.next().map(|id| id.to_string_lossy().into_owned())
             }
             "--help" | "-h" => {
                 println!(
-                    "vapor-studio-service --stdio --application-executable PATH [--workspace PATH] [--active-profile ID] [--fixture]"
+                    "vapor-studio-service --stdio --application-executable PATH [--workspace PATH] [--state-dir PATH] [--active-profile ID] [--fixture]"
                 );
                 return;
             }
@@ -76,13 +81,29 @@ fn main() {
         eprintln!("--application-executable is required");
         process::exit(2);
     };
+    let environment = env::vars_os().collect();
+    let host_context = match StudioHostContext::resolve(
+        StudioHostArguments {
+            application_executable: application_executable.clone(),
+            workspace_root,
+            state_directory,
+        },
+        &environment,
+        HostPlatform::current(),
+    ) {
+        Ok(context) => context,
+        Err(error) => {
+            eprintln!("Vapor Studio service could not resolve its host context: {error}");
+            process::exit(2);
+        }
+    };
     let bootstrap = ServiceBootstrap {
-        application_executable,
-        workspace_root,
+        application_executable: host_context.application_executable.clone(),
+        workspace_root: host_context.workspace_root.clone(),
         active_profile_id,
         fixture_mode,
     };
-    if let Err(error) = run_stdio_service(bootstrap) {
+    if let Err(error) = run_stdio_service(bootstrap, host_context) {
         eprintln!("Vapor Studio service stopped: {error}");
         process::exit(1);
     }

@@ -11,6 +11,16 @@ pub enum StudioAction {
     Workshop(WorkshopAction),
     Publishing(PublishingAction),
     Developer(DeveloperAction),
+    Session(SessionAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "kebab-case")]
+pub enum SessionAction {
+    CheckpointLocalState {
+        editor_drafts: Option<String>,
+        operation_history: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +46,22 @@ pub enum ProfileAction {
     SetRoot {
         profile_id: String,
         content_id: Option<String>,
+        content_version: Option<String>,
+        workspace_root: Option<String>,
+    },
+    SetLaunchArguments {
+        profile_id: String,
+        arguments: Vec<String>,
+    },
+    SetCompositionState {
+        profile_id: String,
+        root_package: Option<crate::ContentIdentity>,
+        resolved_graph: Option<Box<crate::ResolvedCompositionGraph>>,
+        installation: Box<crate::InstallationState>,
+    },
+    InvalidateContent {
+        content_id: String,
+        content_version: Option<String>,
     },
 }
 
@@ -214,6 +240,9 @@ impl StudioAction {
                 ProfileAction::Remove { .. } => "profile.remove",
                 ProfileAction::Select { .. } => "profile.select",
                 ProfileAction::SetRoot { .. } => "profile.set-root",
+                ProfileAction::SetLaunchArguments { .. } => "profile.set-launch-arguments",
+                ProfileAction::SetCompositionState { .. } => "profile.set-composition-state",
+                ProfileAction::InvalidateContent { .. } => "profile.invalidate-content",
             },
             Self::Catalog(action) => match action {
                 CatalogAction::Refresh => "catalog.refresh",
@@ -274,6 +303,9 @@ impl StudioAction {
                 DeveloperAction::Build => "developer.build",
                 DeveloperAction::Clean { .. } => "developer.clean",
             },
+            Self::Session(SessionAction::CheckpointLocalState { .. }) => {
+                "session.checkpoint-local-state"
+            }
         }
     }
 }

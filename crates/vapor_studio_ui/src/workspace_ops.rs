@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use vapor_core::{DevelopmentOperation, VaporWorkspace};
-use vapor_studio_core::{OperationKind, WorkspaceAssociation};
+use vapor_studio_core::OperationKind;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum WorkspacePanel {
@@ -171,21 +171,20 @@ impl StudioApp {
         let previous_files =
             (!workspace_changed && files_error.is_some() && self.workspace.editor.files_loaded)
                 .then(|| self.workspace.editor.files.clone());
-        self.workspace.root = root.display().to_string();
-        self.workspace.root_draft = self.workspace.root.clone();
-        self.submit_service_action(vapor_studio_protocol::StudioAction::Workspace(
-            vapor_studio_protocol::WorkspaceAction::Open {
-                root: self.workspace.root.clone(),
-            },
-        ));
-        self.authoring.clear_workspace_context();
-        let profile = &mut self.profile.items[self.profile.active_index];
-        profile.workspace = Some(WorkspaceAssociation { root });
-        if workspace_changed {
-            profile.root_package = None;
-            profile.resolved_graph = None;
-            profile.installation = vapor_studio_core::InstallationState::Unknown;
+        let requested_root = root.display().to_string();
+        if let Err(error) =
+            self.apply_service_action(vapor_studio_protocol::StudioAction::Workspace(
+                vapor_studio_protocol::WorkspaceAction::Open {
+                    root: requested_root.clone(),
+                },
+            ))
+        {
+            self.status = format!("Could not open this workspace in the Studio service: {error}");
+            return;
         }
+        self.workspace.root = requested_root;
+        self.workspace.root_draft = self.workspace.root.clone();
+        self.authoring.clear_workspace_context();
         self.workspace.clear_file_context();
         if workspace_changed {
             self.catalog.clear_workspace_content();

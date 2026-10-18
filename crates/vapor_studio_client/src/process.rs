@@ -9,8 +9,8 @@ use std::{
     time::{Duration, Instant},
 };
 use vapor_studio_protocol::{
-    PROTOCOL_VERSION, ProtocolFrame, RequestId, StudioAction, StudioEvent, StudioRequest,
-    StudioRevision, StudioSnapshot,
+    LegacyStorageSeed, PROTOCOL_VERSION, ProtocolFrame, RequestId, StudioAction, StudioEvent,
+    StudioRequest, StudioRevision, StudioSnapshot,
 };
 
 const START_TIMEOUT: Duration = Duration::from_secs(5);
@@ -22,6 +22,8 @@ pub struct ServiceBootstrap {
     pub workspace_root: Option<PathBuf>,
     pub active_profile_id: Option<String>,
     pub fixture_mode: bool,
+    pub legacy_storage: LegacyStorageSeed,
+    pub state_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +77,9 @@ impl StudioClient {
         if let Some(profile_id) = bootstrap.active_profile_id {
             command.arg("--active-profile").arg(profile_id);
         }
+        if let Some(state_directory) = bootstrap.state_directory {
+            command.arg("--state-dir").arg(state_directory);
+        }
         if bootstrap.fixture_mode {
             command.arg("--fixture");
         }
@@ -85,6 +90,26 @@ impl StudioClient {
             .stdin
             .take()
             .ok_or_else(|| ClientError::Spawn("service stdin was not piped".into()))?;
+        let mut writer = BufWriter::new(stdin);
+        let initialization = ProtocolFrame::Initialize {
+            protocol_version: PROTOCOL_VERSION,
+            legacy_storage: bootstrap.legacy_storage,
+        };
+        let bytes = encode_frame(&initialization).map_err(ClientError::Protocol)?;
+        if let Err(error) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
+            drop(writer);
+            let status = match child.try_wait() {
+                Ok(Some(status)) => Some(status),
+                _ => {
+                    let _ = child.kill();
+                    child.wait().ok()
+                }
+            };
+            return match status {
+                Some(status) => Err(ClientError::ServiceExited(status.code())),
+                None => Err(ClientError::Io(error.to_string())),
+            };
+        }
         let stdout = child
             .stdout
             .take()
@@ -106,7 +131,7 @@ impl StudioClient {
 
         let mut client = Self {
             child,
-            writer: Some(BufWriter::new(stdin)),
+            writer: Some(writer),
             incoming,
             next_request: 1,
             latest_snapshot: empty_snapshot(),
@@ -315,8 +340,11 @@ fn empty_snapshot() -> StudioSnapshot {
             app_root: None,
             workspace: None,
             mode: "starting".into(),
+            platform: String::new(),
+            steam_client_available: false,
         },
         active_profile_id: None,
+        durable_state: vapor_studio_protocol::DurableStateSnapshot::default(),
         active_operation: None,
         catalog: Vec::new(),
         workspace_content: vapor_studio_protocol::WorkspaceContentSnapshot::default(),
@@ -336,6 +364,8 @@ mod tests {
             workspace_root: None,
             active_profile_id: Some("default".to_owned()),
             fixture_mode: true,
+            legacy_storage: vapor_studio_protocol::LegacyStorageSeed::default(),
+            state_directory: None,
         }
     }
 

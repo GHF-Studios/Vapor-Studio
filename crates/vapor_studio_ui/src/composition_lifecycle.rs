@@ -1,7 +1,8 @@
 use super::operation_protocol::OperationResult;
 use super::{StudioApp, content_selector};
 use std::path::PathBuf;
-use vapor_studio_core::{ContentIdentity, InstalledArtifactRecord, OperationKind};
+use vapor_studio_core::{InstalledArtifactRecord, OperationKind};
+use vapor_studio_protocol::StudioAction;
 
 pub(super) enum RepreviewAfterCatalogRefresh {
     ActiveProfile,
@@ -88,6 +89,7 @@ impl StudioApp {
                 artifacts: installed_records(composition.artifacts),
                 graph_fingerprint,
             };
+        self.persist_active_profile_composition();
         self.status = status.to_owned();
     }
 
@@ -113,6 +115,7 @@ impl StudioApp {
                     artifacts: installed_records(composition.artifacts),
                     verified: false,
                 };
+            self.persist_active_profile_composition();
             self.status = format!("Profile lock differs from the installed content: {detail}");
             return;
         }
@@ -143,6 +146,7 @@ impl StudioApp {
                     artifacts: installed_records(composition.artifacts),
                     verified: false,
                 };
+            self.persist_active_profile_composition();
             self.status =
                 format!("{detail} Review the installed graph, then update or explicitly adopt it.");
             return;
@@ -179,6 +183,7 @@ impl StudioApp {
                             artifacts,
                             verified: true,
                         };
+                    self.persist_active_profile_composition();
                     self.status = format!(
                         "{message} Review the installed content, then update or save it to the profile."
                     );
@@ -191,6 +196,7 @@ impl StudioApp {
                     artifacts,
                     graph_fingerprint,
                 };
+            self.persist_active_profile_composition();
             self.status =
                 format!("Installed composition verified. {checked} content items checked.");
         } else {
@@ -199,6 +205,7 @@ impl StudioApp {
                     detail: detail.clone(),
                     artifacts,
                 };
+            self.persist_active_profile_composition();
             self.status = format!("Installed composition needs repair: {detail}");
         }
     }
@@ -223,6 +230,7 @@ impl StudioApp {
                 artifacts,
                 graph_fingerprint,
             };
+        self.persist_active_profile_composition();
         self.status = "Saved the verified installed setup to this profile.".to_owned();
     }
 
@@ -241,6 +249,7 @@ impl StudioApp {
                 detail: error.clone(),
                 artifacts,
             };
+        self.persist_active_profile_composition();
         self.status = format!("Could not verify the full composition: {error}");
     }
 
@@ -249,6 +258,7 @@ impl StudioApp {
             vapor_studio_core::InstallationState::Partial {
                 detail: error.clone(),
             };
+        self.persist_active_profile_composition();
         self.status = error;
     }
 
@@ -505,9 +515,25 @@ impl StudioApp {
         };
         match vapor_studio_core::default_packagepack_selector(&executable, "default") {
             Ok(id) => {
-                self.profile.items[self.profile.active_index].root_package =
-                    Some(ContentIdentity { id, version: None });
-                true
+                let profile_id = self.profile.items[self.profile.active_index].id.clone();
+                let workspace_root = self.profile.items[self.profile.active_index]
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.root.display().to_string());
+                match self.apply_service_action(StudioAction::Profile(
+                    vapor_studio_protocol::ProfileAction::SetRoot {
+                        profile_id,
+                        content_id: Some(id),
+                        content_version: None,
+                        workspace_root,
+                    },
+                )) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        self.status = error;
+                        false
+                    }
+                }
             }
             Err(error) => {
                 self.status = format!("This app has no default playable composition: {error}");

@@ -1,8 +1,10 @@
 use super::super::StudioApp;
 use eframe::egui;
+use vapor_studio_protocol::{ProfileAction, StudioAction};
 
 impl StudioApp {
     pub(super) fn draw_profile_launch_panel(&mut self, ui: &mut eframe::egui::Ui) {
+        let mut persist_arguments = false;
         let argument_count = self.profile.items[self.profile.active_index]
             .launch
             .arguments
@@ -27,13 +29,15 @@ impl StudioApp {
                     ui.horizontal_wrapped(|ui| {
                         let input_width = (ui.available_width() - 100.0).clamp(120.0, 360.0);
                         ui.label(format!("{}", index + 1));
-                        ui.add_enabled(
+                        let response = ui.add_enabled(
                             can_edit,
                             egui::TextEdit::singleline(
                                 &mut self.profile.items[active_profile].launch.arguments[index],
                             )
+                            .char_limit(4096)
                             .desired_width(input_width),
                         );
+                        persist_arguments |= response.changed() && response.lost_focus();
                         if ui
                             .add_enabled(can_edit, egui::Button::new("Remove"))
                             .clicked()
@@ -47,16 +51,31 @@ impl StudioApp {
                         .launch
                         .arguments
                         .remove(index);
+                    persist_arguments = true;
                 }
                 if ui
-                    .add_enabled(can_edit, egui::Button::new("Add argument"))
+                    .add_enabled(
+                        can_edit && argument_count < 64,
+                        egui::Button::new("Add argument"),
+                    )
                     .clicked()
                 {
                     self.profile.items[active_profile]
                         .launch
                         .arguments
                         .push(String::new());
+                    persist_arguments = true;
                 }
             });
+        if persist_arguments {
+            let profile = &self.profile.items[self.profile.active_index];
+            let action = StudioAction::Profile(ProfileAction::SetLaunchArguments {
+                profile_id: profile.id.clone(),
+                arguments: profile.launch.arguments.clone(),
+            });
+            if let Err(error) = self.apply_service_action(action) {
+                self.status = error;
+            }
+        }
     }
 }

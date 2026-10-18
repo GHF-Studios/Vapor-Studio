@@ -1,19 +1,67 @@
-use crate::{ServiceBootstrap, StudioSession};
+use crate::{
+    ServiceBootstrap, StudioSession, host::StudioHostContext, persistence::StudioStateStore,
+};
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use vapor_studio_protocol::{
-    PROTOCOL_VERSION, ProtocolFrame, StudioError, StudioErrorCode, StudioEvent,
+    LegacyStorageSeed, PROTOCOL_VERSION, ProtocolFrame, StudioError, StudioErrorCode, StudioEvent,
 };
 
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
-pub fn run_stdio_service(bootstrap: ServiceBootstrap) -> Result<(), String> {
+pub fn run_stdio_service(
+    bootstrap: ServiceBootstrap,
+    host_context: StudioHostContext,
+) -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    serve(
-        BufReader::new(stdin.lock()),
-        BufWriter::new(stdout.lock()),
-        StudioSession::new(bootstrap),
-    )
+    let mut input = BufReader::new(stdin.lock());
+    let seed = read_initialization(&mut input)?;
+    let session = if bootstrap.fixture_mode {
+        StudioSession::new(bootstrap)
+    } else {
+        StudioSession::with_persistent_state(
+            bootstrap,
+            host_context.clone(),
+            StudioStateStore::new(host_context.state_directory.clone()),
+            Some(&seed),
+        )?
+    };
+    serve(input, BufWriter::new(stdout.lock()), session)
+}
+
+fn read_initialization(input: &mut impl BufRead) -> Result<LegacyStorageSeed, String> {
+    let mut buffer = Vec::new();
+    let read = input
+        .by_ref()
+        .take((MAX_FRAME_BYTES + 1) as u64)
+        .read_until(b'\n', &mut buffer)
+        .map_err(|error| format!("failed reading service initialization: {error}"))?;
+    if read == 0 {
+        return Err("client closed before service initialization".to_owned());
+    }
+    if buffer.len() > MAX_FRAME_BYTES {
+        return Err("service initialization exceeds the 1 MiB limit".to_owned());
+    }
+    if buffer.last() == Some(&b'\n') {
+        buffer.pop();
+    }
+    if buffer.last() == Some(&b'\r') {
+        buffer.pop();
+    }
+    let frame: ProtocolFrame = serde_json::from_slice(&buffer)
+        .map_err(|error| format!("invalid service initialization: {error}"))?;
+    match frame {
+        ProtocolFrame::Initialize {
+            protocol_version,
+            legacy_storage,
+        } if protocol_version == PROTOCOL_VERSION => Ok(legacy_storage),
+        ProtocolFrame::Initialize {
+            protocol_version, ..
+        } => Err(format!(
+            "client protocol {protocol_version} is unsupported; service protocol is {PROTOCOL_VERSION}"
+        )),
+        _ => Err("expected a service initialization frame".to_owned()),
+    }
 }
 
 fn serve(
@@ -65,6 +113,17 @@ fn serve(
             continue;
         }
         match serde_json::from_slice::<ProtocolFrame>(&buffer) {
+            Ok(ProtocolFrame::Initialize { .. }) => {
+                let error = StudioError {
+                    code: StudioErrorCode::InvalidRequest,
+                    message: "service initialization is only valid as the first frame".to_owned(),
+                    retryable: false,
+                };
+                write_frame(
+                    &mut output,
+                    &ProtocolFrame::Event(StudioEvent::ProtocolError(error)),
+                )?;
+            }
             Ok(ProtocolFrame::Request(request)) => {
                 let response = if request.protocol_version != PROTOCOL_VERSION {
                     vapor_studio_protocol::StudioResponse {

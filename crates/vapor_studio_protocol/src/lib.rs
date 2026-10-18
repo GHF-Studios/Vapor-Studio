@@ -5,21 +5,28 @@
 
 mod action;
 mod message;
+mod profile;
 mod state;
 
 pub use action::{
     AuthoringAction, CatalogAction, CompositionAction, DeveloperAction, ProfileAction,
-    PublishingAction, StudioAction, WorkshopAction, WorkspaceAction,
+    PublishingAction, SessionAction, StudioAction, WorkshopAction, WorkspaceAction,
 };
 pub use message::{
     PROTOCOL_VERSION, ProtocolFrame, RequestId, StudioError, StudioErrorCode, StudioRequest,
     StudioResponse, StudioResponseKind,
 };
+pub use profile::{
+    CompositionProfile, ContentIdentity, InstallationState, InstalledArtifactRecord,
+    LaunchSettings, LegacyStorageSeed, PROFILE_SCHEMA_VERSION, ProfileDocument,
+    ResolvedCompositionGraph, ResolvedDependencyIdentity, ResolvedNodeIdentity,
+    WorkspaceAssociation,
+};
 pub use state::{
     AvailableAction, CatalogConflict, CatalogEntry, CatalogLocation, CatalogLocationKind,
-    HostSummary, OperationEvent, OperationPhase, OperationStatus, OperationSummary, StudioEvent,
-    StudioRevision, StudioSnapshot, WorkspaceContentSnapshot, WorkspaceProjectCandidate,
-    WorkspaceSourceProject, WorkspaceWorkshopPolicy,
+    DurableStateSnapshot, HostSummary, OperationEvent, OperationPhase, OperationStatus,
+    OperationSummary, StudioEvent, StudioRevision, StudioSnapshot, WorkspaceContentSnapshot,
+    WorkspaceProjectCandidate, WorkspaceSourceProject, WorkspaceWorkshopPolicy,
 };
 
 #[cfg(test)]
@@ -58,6 +65,29 @@ mod tests {
             StudioAction::Profile(ProfileAction::SetRoot {
                 profile_id: "p1".into(),
                 content_id: Some("root".into()),
+                content_version: Some("1.0.0".into()),
+                workspace_root: Some("/workspace".into()),
+            }),
+            StudioAction::Profile(ProfileAction::SetLaunchArguments {
+                profile_id: "p1".into(),
+                arguments: vec!["--safe".into()],
+            }),
+            StudioAction::Profile(ProfileAction::SetCompositionState {
+                profile_id: "p1".into(),
+                root_package: Some(ContentIdentity {
+                    id: "root".into(),
+                    version: Some("1.0.0".into()),
+                }),
+                resolved_graph: None,
+                installation: Box::new(InstallationState::Unknown),
+            }),
+            StudioAction::Profile(ProfileAction::InvalidateContent {
+                content_id: "root".into(),
+                content_version: Some("1.0.0".into()),
+            }),
+            StudioAction::Session(SessionAction::CheckpointLocalState {
+                editor_drafts: Some("{}".into()),
+                operation_history: Some("[]".into()),
             }),
             StudioAction::Catalog(CatalogAction::Refresh),
             StudioAction::Catalog(CatalogAction::DiscoverContentProjects),
@@ -177,7 +207,7 @@ mod tests {
         ];
         assert_eq!(
             actions.len(),
-            51,
+            55,
             "update this catalog when adding/removing action variants"
         );
         for action in actions {
@@ -199,8 +229,11 @@ mod tests {
                 app_root: Some("/app".into()),
                 workspace: None,
                 mode: "production".into(),
+                platform: "linux".into(),
+                steam_client_available: true,
             },
             active_profile_id: None,
+            durable_state: DurableStateSnapshot::default(),
             active_operation: Some(OperationSummary {
                 id: "operation-1".into(),
                 action: "catalog.refresh".into(),
@@ -299,5 +332,15 @@ mod tests {
             snapshot.workspace_content,
             WorkspaceContentSnapshot::default()
         );
+    }
+
+    #[test]
+    fn profile_runtime_installation_state_round_trips_over_the_protocol() {
+        let mut profile = CompositionProfile::default_profile();
+        profile.installation = InstallationState::NotInstalled;
+        assert_round_trip(ProfileDocument {
+            schema_version: PROFILE_SCHEMA_VERSION,
+            profiles: vec![profile],
+        });
     }
 }
