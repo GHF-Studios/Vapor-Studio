@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 struct LocalWorkshopContent {
     available: bool,
     conflicted: bool,
-    included_in_active_profile: bool,
-    selected_as_profile_root: bool,
+    included_in_active_composition: bool,
+    selected_as_composition_root: bool,
     packagepack_available: bool,
 }
 
@@ -19,9 +19,9 @@ enum SubscriptionAction {
     ImportMany(Vec<String>),
     UnsubscribeMany(Vec<String>),
     ReviewLocal(String),
-    UseAsProfileRoot(String),
-    LaunchAsProfileRoot(String),
-    ReviewProfile,
+    UseAsCompositionRoot(String),
+    LaunchAsCompositionRoot(String),
+    ReviewComposition,
     Import(String),
     Unsubscribe(String),
 }
@@ -77,10 +77,10 @@ impl StudioApp {
             }
         }
         if !self.workshop.subscriptions.is_empty() {
-            // Build the local/profile view once. The old row renderer scanned the
+            // Build the local/composition view once. The old row renderer scanned the
             // whole catalog (and graph) several times for every subscription.
-            let active_profile = &self.profile.items[self.profile.active_index];
-            let active_content = active_profile
+            let active_composition = &self.composition.items[self.composition.active_index];
+            let active_content = active_composition
                 .resolved_graph
                 .as_ref()
                 .map(|graph| {
@@ -105,10 +105,10 @@ impl StudioApp {
                 let status = local_by_workshop_id.entry(id).or_default();
                 status.available = true;
                 status.conflicted |= !content.is_unambiguous();
-                status.included_in_active_profile |=
+                status.included_in_active_composition |=
                     active_content.contains(&(content.id.as_str(), content.version.as_deref()));
-                status.selected_as_profile_root |=
-                    self.is_active_profile_root(&content.id, content.version.as_deref());
+                status.selected_as_composition_root |=
+                    self.is_active_composition_root(&content.id, content.version.as_deref());
                 status.packagepack_available |= content.kind
                     == vapor_core::ContentKind::Packagepack.as_str()
                     && content.is_unambiguous();
@@ -153,7 +153,7 @@ impl StudioApp {
                 .collect::<Vec<_>>();
             let selected_visible = visible_selected_ids.len();
             let subscription_batch_supported =
-                selected_visible <= vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH;
+                selected_visible <= vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH;
             let all_visible_selected =
                 matching_subscriptions > 0 && selected_visible == matching_subscriptions;
             let mut action = None;
@@ -199,7 +199,7 @@ impl StudioApp {
                         )
                         .on_disabled_hover_text(format!(
                             "Select at most {} visible items for one Steam subscription change.",
-                            vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH
+                            vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH
                         ))
                         .clicked()
                 {
@@ -313,13 +313,13 @@ impl StudioApp {
                             if local.available && local.conflicted {
                                 status_text(
                                     ui,
-                                    "Local records disagree. Review them in Discover before using this item.",
+                                    "Copies of this item on this device disagree. Review the item details before using it.",
                                     StatusTone::Caution,
                                 );
                                 if ui
                                     .add_enabled(
                                         !self.operation.running,
-                                        egui::Button::new("Review local records"),
+                                        egui::Button::new("Review item details"),
                                     )
                                     .clicked()
                                 {
@@ -330,8 +330,8 @@ impl StudioApp {
                                 let create_draft_blocks_assignment = self
                                     .workshop_root_change_blocked_by_create_draft(id);
                                 let local_catalog_current = self.catalog.local_catalog_current();
-                                if local.selected_as_profile_root {
-                                    ui.strong("Used as this profile's game setup");
+                                if local.selected_as_composition_root {
+                                    ui.strong("Used by this composition");
                                 } else if ui
                                     .add_enabled(
                                         !self.operation.running
@@ -339,22 +339,22 @@ impl StudioApp {
                                             && !self.has_unsaved_workspace_edits()
                                             && !create_draft_blocks_assignment,
                                         egui::Button::new(format!(
-                                            "Set {}'s game setup",
-                                            self.profile.items[self.profile.active_index].name
+                                            "Set {}'s composition",
+                                            self.composition.items[self.composition.active_index].name
                                         )),
                                     )
                                     .on_disabled_hover_text(if !local_catalog_current {
-                                        "Refresh the on-device content list before choosing this as your profile's game setup."
+                                        "Refresh the content list before choosing this for your composition."
                                     } else if create_draft_blocks_assignment {
-                                        "Discard the Create draft before changing the profile to this item's workspace."
+                                        "Discard the Create draft before changing the composition to this item's workspace."
                                     } else if self.has_unsaved_workspace_edits() {
-                                        "Save or discard workspace edits before changing the active profile."
+                                        "Save or discard workspace edits before changing the active composition."
                                     } else {
-                                        "Finish the current operation before changing the active profile."
+                                        "Finish the current operation before changing the active composition."
                                     })
                                     .clicked()
                                 {
-                                    action = Some(SubscriptionAction::UseAsProfileRoot(id.clone()));
+                                    action = Some(SubscriptionAction::UseAsCompositionRoot(id.clone()));
                                 }
                                 if ui
                                     .add_enabled(
@@ -362,47 +362,47 @@ impl StudioApp {
                                             && local_catalog_current
                                             && !self.has_unsaved_workspace_edits()
                                             && !create_draft_blocks_assignment,
-                                        egui::Button::new("Launch this game setup"),
+                                        egui::Button::new("Launch this composition"),
                                     )
                                     .on_disabled_hover_text(
                                         if !local_catalog_current {
-                                            "Refresh the on-device content list before launching this game setup."
+                                            "Refresh the on-device content list before launching this composition."
                                         } else if create_draft_blocks_assignment {
-                                            "Discard the Create draft before switching this profile."
+                                            "Discard the Create draft before switching this composition."
                                         } else if self.has_unsaved_workspace_edits() {
-                                            "Save or discard project edits before switching this profile."
+                                            "Save or discard project edits before switching this composition."
                                         } else {
                                             "Wait for the current operation to finish."
                                         },
                                     )
                                     .clicked()
                                 {
-                                    action = Some(SubscriptionAction::LaunchAsProfileRoot(id.clone()));
+                                    action = Some(SubscriptionAction::LaunchAsCompositionRoot(id.clone()));
                                 }
-                                if (local.included_in_active_profile || local.selected_as_profile_root)
+                                if (local.included_in_active_composition || local.selected_as_composition_root)
                                     && ui
                                         .add_enabled(
                                             !self.operation.running
                                                 && !self.has_unsaved_workspace_edits(),
-                                            egui::Button::new("Review game setup"),
+                                            egui::Button::new("Review composition"),
                                         )
                                         .on_hover_text(
-                                            "Check that every item in this game setup is available here.",
+                                            "Check that every item in this composition is available here.",
                                         )
                                         .clicked()
                                 {
-                                    action = Some(SubscriptionAction::ReviewProfile);
+                                    action = Some(SubscriptionAction::ReviewComposition);
                                 }
                             }
                             if local.available
-                                && self.profile.items[self.profile.active_index]
+                                && self.composition.items[self.composition.active_index]
                                     .root_package
                                     .is_some()
-                                && !local.included_in_active_profile
-                                && !local.selected_as_profile_root
+                                && !local.included_in_active_composition
+                                && !local.selected_as_composition_root
                             {
                                 ui.small(
-                                    "Available here · not included in this profile's game setup",
+                                    "Available here · not included in this composition",
                                 );
                             }
                             let import_label = if local.available {
@@ -470,14 +470,14 @@ impl StudioApp {
                     self.set_workshop_subscriptions(ids, false);
                 }
                 Some(SubscriptionAction::ReviewLocal(id)) => self.review_workshop_content(&id),
-                Some(SubscriptionAction::UseAsProfileRoot(id)) => {
-                    self.use_available_workshop_package_as_profile_root(&id);
+                Some(SubscriptionAction::UseAsCompositionRoot(id)) => {
+                    self.use_available_workshop_package_as_composition_root(&id);
                 }
-                Some(SubscriptionAction::LaunchAsProfileRoot(id)) => {
-                    self.launch_workshop_package_as_profile_root(&id);
+                Some(SubscriptionAction::LaunchAsCompositionRoot(id)) => {
+                    self.launch_workshop_package_as_composition_root(&id);
                 }
-                Some(SubscriptionAction::ReviewProfile) => {
-                    self.activate_navigation_section(super::super::Section::Library);
+                Some(SubscriptionAction::ReviewComposition) => {
+                    self.activate_navigation_section(super::super::Section::Compositions);
                     self.preview_selected_composition();
                 }
                 Some(SubscriptionAction::Import(id)) => {
@@ -496,7 +496,7 @@ impl StudioApp {
 fn subscription_matches_query(
     id: &str,
     query: &str,
-    details: &BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
+    details: &BTreeMap<String, vapor_client_application::WorkshopSubscription>,
     results: &BTreeMap<&str, &str>,
 ) -> bool {
     if query.is_empty() {

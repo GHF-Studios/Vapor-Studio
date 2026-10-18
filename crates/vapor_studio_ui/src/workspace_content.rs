@@ -1,6 +1,6 @@
 use super::{StudioApp, content_selector, source_content_selector};
 use std::path::PathBuf;
-use vapor_studio_core::OperationKind;
+use vapor_client_application::OperationKind;
 
 impl StudioApp {
     pub(super) fn apply_remembered_sources(&mut self, known: Vec<PathBuf>) {
@@ -10,20 +10,20 @@ impl StudioApp {
         self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
     }
 
-    pub(super) fn validate_source_project(&mut self, content: &vapor_studio_core::SourceContent) {
+    pub(super) fn validate_source_project(&mut self, content: &vapor_client_application::SourceContent) {
         if !self.require_open_workspace("validate this content project") {
             return;
         }
         let selector = source_content_selector(content);
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Authoring(
-                vapor_studio_protocol::AuthoringAction::ValidateContent {
+            vapor_client_protocol::ClientAction::Authoring(
+                vapor_client_protocol::AuthoringAction::ValidateContent {
                     project_id: selector.clone(),
                 },
             ),
             None,
             OperationKind::Validate,
-            vapor_studio_core::OperationPhase::Verifying,
+            vapor_client_application::OperationPhase::Verifying,
             &format!("Validating {selector} through the Studio service…"),
         );
     }
@@ -33,23 +33,23 @@ impl StudioApp {
             return;
         }
         let Some(root_package) = self
-            .profile
+            .composition
             .items
-            .get(self.profile.active_index)
-            .and_then(|profile| profile.root_package.clone())
+            .get(self.composition.active_index)
+            .and_then(|composition| composition.root_package.clone())
         else {
             return;
         };
         let selector = content_selector(&root_package);
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Authoring(
-                vapor_studio_protocol::AuthoringAction::ValidateContent {
+            vapor_client_protocol::ClientAction::Authoring(
+                vapor_client_protocol::AuthoringAction::ValidateContent {
                     project_id: selector,
                 },
             ),
             None,
             OperationKind::Validate,
-            vapor_studio_core::OperationPhase::Verifying,
+            vapor_client_application::OperationPhase::Verifying,
             "Validating the selected source through the Studio service…",
         );
     }
@@ -59,12 +59,12 @@ impl StudioApp {
             return;
         }
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workspace(
-                vapor_studio_protocol::WorkspaceAction::Validate,
+            vapor_client_protocol::ClientAction::Workspace(
+                vapor_client_protocol::WorkspaceAction::Validate,
             ),
             None,
             OperationKind::Validate,
-            vapor_studio_core::OperationPhase::Verifying,
+            vapor_client_application::OperationPhase::Verifying,
             "Validating authored content through the Studio service…",
         );
     }
@@ -73,8 +73,8 @@ impl StudioApp {
         if !self.require_open_workspace("scan for unregistered content") {
             return;
         }
-        self.submit_service_action(vapor_studio_protocol::StudioAction::Catalog(
-            vapor_studio_protocol::CatalogAction::DiscoverContentProjects,
+        self.submit_service_action(vapor_client_protocol::ClientAction::Catalog(
+            vapor_client_protocol::CatalogAction::DiscoverContentProjects,
         ));
         self.status = "Finding unregistered content manifests in this Workspace…".to_owned();
     }
@@ -85,14 +85,14 @@ impl StudioApp {
         }
         let display_path = project_path.display().to_string();
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workspace(
-                vapor_studio_protocol::WorkspaceAction::AdoptProject {
+            vapor_client_protocol::ClientAction::Workspace(
+                vapor_client_protocol::WorkspaceAction::AdoptProject {
                     path: project_path.to_string_lossy().into_owned(),
                 },
             ),
             None,
             OperationKind::AdoptContentProject,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             &format!("Checking and adding {display_path}…"),
         );
     }
@@ -108,12 +108,12 @@ impl StudioApp {
         let id = project.id.clone();
         let display = format!("{} · {}", project.id, project.root.display());
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workspace(
-                vapor_studio_protocol::WorkspaceAction::UnregisterProject { project_id: id },
+            vapor_client_protocol::ClientAction::Workspace(
+                vapor_client_protocol::WorkspaceAction::UnregisterProject { project_id: id },
             ),
             None,
             OperationKind::UnregisterContentProject,
-            vapor_studio_core::OperationPhase::Building,
+            vapor_client_application::OperationPhase::Building,
             &format!("Removing {display} from Vapor's content registry…"),
         );
     }
@@ -137,24 +137,24 @@ impl StudioApp {
             return;
         }
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workspace(
-                vapor_studio_protocol::WorkspaceAction::Remember,
+            vapor_client_protocol::ClientAction::Workspace(
+                vapor_client_protocol::WorkspaceAction::Remember,
             ),
             None,
             OperationKind::RememberWorkspace,
-            vapor_studio_core::OperationPhase::Building,
+            vapor_client_application::OperationPhase::Building,
             "Adding the open workspace to this Vapor installation…",
         );
     }
 
     pub(super) fn refresh_registered_sources(&mut self) {
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Authoring(
-                vapor_studio_protocol::AuthoringAction::ListRegisteredSources,
+            vapor_client_protocol::ClientAction::Authoring(
+                vapor_client_protocol::AuthoringAction::ListRegisteredSources,
             ),
             None,
             OperationKind::Discover,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             "Loading registered workspaces through the Studio service…",
         );
     }

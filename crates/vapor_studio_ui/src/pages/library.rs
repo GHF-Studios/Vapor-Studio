@@ -1,151 +1,243 @@
-use super::super::StudioApp;
-use super::super::components::design::{page_header, section_header, use_stacked_panels};
-use super::library_composition_panel::ProfileCompositionAction;
-use super::library_installation_panel::ProfileInstallationAction;
+use super::super::components::design::{
+    contextual_split, empty_state, page_header, search_field_width, section_header, status_text,
+    use_stacked_panels,
+};
+use super::super::{CatalogFilter, StudioApp};
 use eframe::egui;
 
 impl StudioApp {
     pub(in crate::app) fn draw_library(&mut self, ui: &mut egui::Ui) {
         page_header(
             ui,
-            "Profiles",
-            "Your profiles",
-            "Each profile keeps one game setup and its launch options. Switch profiles to keep separate setups for different games or add-ons.",
+            "Library",
+            "Your content",
+            "Downloaded or installed runtime content. Packagepacks are under Compositions; Rust Crates stay in Creator projects.",
         );
-        let profile_index = self.profile.active_index;
-        let Some(profile_name) = self
-            .profile
-            .items
-            .get(profile_index)
-            .map(|profile| profile.name.clone())
-        else {
-            return;
-        };
-        let mut composition_action = None;
-        let mut installation_action = None;
-        if use_stacked_panels(ui) {
-            section_header(
+        if let Some(error) = self.catalog.catalog_discovery_error.as_deref() {
+            status_text(
                 ui,
-                "Saved profiles",
-                "A profile remembers one game setup and its launch options.",
+                &format!(
+                    "The Library could not refresh; {}. {error}",
+                    if self.catalog.catalog_discovery_loaded {
+                        "showing the last successful list"
+                    } else {
+                        "no successful list is available yet"
+                    }
+                ),
+                super::super::components::design::StatusTone::Caution,
             );
+        }
+
+        if self.catalog.catalog_omitted > 0 {
+            status_text(
+                ui,
+                &format!(
+                    "Showing a bounded content list; {} additional items are omitted. Results are incomplete.",
+                    self.catalog.catalog_omitted,
+                ),
+                super::super::components::design::StatusTone::Caution,
+            );
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            let search_width = search_field_width(ui);
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut self.catalog.library_search_query)
+                    .desired_width(search_width)
+                    .hint_text("Search your Library"),
+            );
+            if search.changed() {
+                self.submit_service_action(vapor_client_protocol::ClientAction::Catalog(
+                    vapor_client_protocol::CatalogAction::Search {
+                        query: self.catalog.library_search_query.clone(),
+                    },
+                ));
+            }
+            let kinds = self
+                .catalog
+                .items
+                .iter()
+                .filter(|content| CatalogFilter::library(None, "").matches_catalog(content))
+                .map(|content| content.kind.clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            egui::ComboBox::from_id_salt("library-kind-filter")
+                .selected_text(
+                    self.catalog
+                        .library_kind_filter
+                        .as_deref()
+                        .unwrap_or("All content types"),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.catalog.library_kind_filter,
+                        None,
+                        "All content types",
+                    );
+                    for kind in kinds {
+                        ui.selectable_value(
+                            &mut self.catalog.library_kind_filter,
+                            Some(kind.clone()),
+                            super::super::display_content_kind(&kind),
+                        );
+                    }
+                });
             if ui
                 .add_enabled(
-                    !self.operation.running && !self.has_unsaved_context_switch_edits(),
-                    egui::Button::new("Make a copy of this profile"),
+                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                    egui::Button::new("Refresh Library"),
                 )
                 .on_disabled_hover_text(
-                    "Discard the Create draft or save/discard workspace edits before duplicating a profile.",
+                    "Save or discard your open edits before refreshing saved content details.",
                 )
                 .clicked()
             {
-                self.duplicate_active_profile();
+                self.discover();
             }
-            self.draw_profile_selector_panel(ui);
-            ui.separator();
+            if (!self.catalog.library_search_query.trim().is_empty()
+                || self.catalog.library_kind_filter.is_some())
+                && ui.button("Clear filters").clicked()
+            {
+                self.catalog.library_search_query.clear();
+                self.catalog.library_kind_filter = None;
+                self.submit_service_action(vapor_client_protocol::ClientAction::Catalog(
+                    vapor_client_protocol::CatalogAction::Search {
+                        query: String::new(),
+                    },
+                ));
+            }
+        });
+
+        let filter = CatalogFilter::library(
+            self.catalog.library_kind_filter.clone(),
+            &self.catalog.library_search_query,
+        );
+        let matching = self
+            .catalog
+            .items
+            .iter()
+            .filter(|content| filter.matches_catalog(content))
+            .count();
+        let selected_identity = self.catalog.selected.as_deref();
+        let mut selected_exists = false;
+        let mut selected_is_visible = false;
+        for content in &self.catalog.items {
+            let is_selected = selected_identity.is_some_and(|identity| {
+                super::super::catalog_content_selector_matches(content, identity)
+            });
+            if is_selected {
+                selected_exists = true;
+                selected_is_visible = filter.matches_catalog(content);
+            }
+        }
+        ui.weak(format!("{matching} items in your Library"));
+
+        if matching == 0 {
+            let has_filters = !self.catalog.library_search_query.trim().is_empty()
+                || self.catalog.library_kind_filter.is_some();
+            let needs_refresh = !self.catalog.catalog_discovery_loaded
+                || self.catalog.catalog_discovery_error.is_some();
+            empty_state(
+                ui,
+                if has_filters {
+                    "No Library items match"
+                } else if needs_refresh {
+                    "Library is not up to date"
+                } else {
+                    "Your Library is empty"
+                },
+                if has_filters {
+                    "Clear the search and content type filter to see everything in your Library."
+                } else if needs_refresh {
+                    "Refresh the Library to check which content is available on this device."
+                } else {
+                    "Browse content to find items, or visit Steam Workshop to download something new."
+                },
+                |ui| {
+                    if has_filters {
+                        if ui.button("Clear filters").clicked() {
+                            self.catalog.library_search_query.clear();
+                            self.catalog.library_kind_filter = None;
+                        }
+                    } else if needs_refresh {
+                        if ui
+                            .add_enabled(
+                                !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                egui::Button::new("Refresh Library"),
+                            )
+                            .clicked()
+                        {
+                            self.discover();
+                        }
+                    } else {
+                        if ui.button("Browse content").clicked() {
+                            self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
+                        }
+                        if ui.button("Browse Steam Workshop").clicked() {
+                            self.open_workshop_tab(super::super::workshop::WorkshopTab::Browse);
+                        }
+                    }
+                },
+            );
+            return;
+        }
+
+        if use_stacked_panels(ui) {
             section_header(
                 ui,
-                "Current game setup",
-                "Launch this profile or prepare its game setup.",
+                "Available content",
+                "Downloaded or installed items, ready to review.",
             );
-            {
-                let profile = &self.profile.items[profile_index];
-                installation_action = self.draw_profile_installation_panel(ui, profile);
-            }
+            self.draw_catalog_list(ui, &filter);
             ui.separator();
-            section_header(ui, &profile_name, "Profile and game setup details.");
-            self.draw_profile_management_panel(ui, &profile_name);
-            {
-                let profile = &self.profile.items[profile_index];
-                composition_action = self.draw_profile_composition_panel(ui, profile);
-            }
-            self.draw_profile_launch_panel(ui);
+            section_header(ui, "Details", "Select an item to review it.");
+            draw_selected_details(self, ui, selected_is_visible, selected_exists);
         } else {
-            ui.columns(2, |columns| {
-                section_header(&mut columns[0], "Saved profiles", "A profile remembers one game setup and its launch options.");
-                if columns[0]
-                    .add_enabled(
-                        !self.operation.running && !self.has_unsaved_context_switch_edits(),
-                        egui::Button::new("Make a copy of this profile"),
-                    )
-                    .on_disabled_hover_text("Discard the Create draft or save/discard workspace edits before duplicating a profile.")
-                    .clicked()
-                {
-                    self.duplicate_active_profile();
-                }
-                self.draw_profile_selector_panel(&mut columns[0]);
-
-                section_header(&mut columns[1], "Current game setup", "Launch this profile or prepare its game setup.");
-                {
-                    let profile = &self.profile.items[profile_index];
-                    installation_action = self.draw_profile_installation_panel(&mut columns[1], profile);
-                }
-                columns[1].separator();
-                section_header(&mut columns[1], &profile_name, "Profile and game setup details.");
-                self.draw_profile_management_panel(&mut columns[1], &profile_name);
-                {
-                    let profile = &self.profile.items[profile_index];
-                    composition_action = self.draw_profile_composition_panel(&mut columns[1], profile);
-                }
-                self.draw_profile_launch_panel(&mut columns[1]);
+            contextual_split(ui, 0.62, |items, details| {
+                section_header(
+                    items,
+                    "Available content",
+                    "Downloaded or installed items, ready to review.",
+                );
+                egui::ScrollArea::vertical().show(items, |ui| {
+                    self.draw_catalog_list(ui, &filter);
+                });
+                section_header(details, "Details", "Selected item");
+                egui::ScrollArea::vertical().show(details, |ui| {
+                    draw_selected_details(self, ui, selected_is_visible, selected_exists);
+                });
             });
         }
-        if let Some(action) = composition_action {
-            match action {
-                ProfileCompositionAction::BrowseContent => {
-                    self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
+    }
+}
+
+fn draw_selected_details(
+    app: &mut StudioApp,
+    ui: &mut egui::Ui,
+    selected_is_visible: bool,
+    selected_exists: bool,
+) {
+    if selected_is_visible {
+        app.draw_content_detail(ui);
+    } else if selected_exists {
+        empty_state(
+            ui,
+            "Selected item is outside this Library",
+            "It may be a project-folder item or a playable Packagepack. Browse content or Compositions to find it.",
+            |ui| {
+                if ui.button("Browse content").clicked() {
+                    app.open_discover_tab(super::super::catalog::DiscoverTab::Local);
                 }
-                ProfileCompositionAction::CreateContent => {
-                    self.activate_navigation_section(super::super::Section::Create);
+                if ui.button("Open Compositions").clicked() {
+                    app.activate_navigation_section(super::super::Section::Compositions);
                 }
-                ProfileCompositionAction::EditComposition(selector) => {
-                    if self.authoring.pending_composition_role_change.is_some() {
-                        self.status = "Confirm or keep the pending game engine or game choice before opening another project.".to_owned();
-                    } else {
-                        self.authoring.composition_edit_selector = selector;
-                        self.authoring.composition_edit = None;
-                        self.authoring.composition_original_links = None;
-                        self.activate_navigation_section(super::super::Section::Compose);
-                        self.load_source_composition();
-                    }
-                }
-                ProfileCompositionAction::PreviewPlan => self.preview_selected_composition(),
-                ProfileCompositionAction::DownloadDependencies(ids) => {
-                    self.download_profile_composition_dependencies(ids);
-                }
-            }
-        }
-        if let Some(action) = installation_action {
-            match action {
-                ProfileInstallationAction::Play => self.run_installed_selected(),
-                ProfileInstallationAction::Repair => {
-                    self.repair_selected_installation();
-                }
-                ProfileInstallationAction::Verify => {
-                    self.verify_selected_installation();
-                }
-                ProfileInstallationAction::Update => {
-                    self.update_selected();
-                }
-                ProfileInstallationAction::ReviewPlan => {
-                    self.preview_selected_composition();
-                }
-                ProfileInstallationAction::BuildAndPlay => self.run_selected(),
-                ProfileInstallationAction::Install => {
-                    self.install_selected();
-                }
-                ProfileInstallationAction::ValidateSource => self.validate_selected_source(),
-                ProfileInstallationAction::VerifyInstalled => {
-                    self.verify_selected_installation();
-                }
-                ProfileInstallationAction::AdoptInstalledGraph => {
-                    self.adopt_installed_profile_graph();
-                }
-                ProfileInstallationAction::DiscoverContent => {
-                    self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
-                    self.discover();
-                }
-            }
-        }
+            },
+        );
+    } else {
+        empty_state(
+            ui,
+            "Choose content",
+            "Select an item to review its details and available actions.",
+            |_| {},
+        );
     }
 }

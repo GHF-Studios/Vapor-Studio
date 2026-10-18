@@ -1,7 +1,7 @@
 use super::super::catalog::DiscoverTab;
 use super::super::components::design::{
-    StatusTone, empty_state, page_header, search_field_width, section_header, status_text,
-    use_stacked_panels,
+    StatusTone, contextual_split, empty_state, page_header, search_field_width, section_header,
+    status_text, use_stacked_panels,
 };
 use super::super::{CatalogFilter, StudioApp};
 use crate::navigation::CatalogSourceFilter;
@@ -12,9 +12,20 @@ impl StudioApp {
         page_header(
             ui,
             "Browse",
-            "Find a game or add-on",
-            "Browse content already on this device or find game setups and add-ons in Steam Workshop.",
+            "Find content",
+            "Find playable compositions and add-on content on this device or in Steam Workshop.",
         );
+        if self.catalog.catalog_omitted > 0 {
+            status_text(
+                ui,
+                &format!(
+                    "Showing a bounded content list; {} additional items are omitted. Results are incomplete.",
+                    self.catalog.catalog_omitted,
+                ),
+                super::super::components::design::StatusTone::Caution,
+            );
+        }
+
         ui.horizontal_wrapped(|ui| {
             ui.add(egui::Button::selectable(
                 self.catalog.discover_tab == DiscoverTab::Local,
@@ -84,8 +95,8 @@ impl StudioApp {
                     .hint_text("Search on-device content"),
             );
             if search.changed() {
-                self.submit_service_action(vapor_studio_protocol::StudioAction::Catalog(
-                    vapor_studio_protocol::CatalogAction::Search {
+                self.submit_service_action(vapor_client_protocol::ClientAction::Catalog(
+                    vapor_client_protocol::CatalogAction::Search {
                         query: self.catalog.search_query.clone(),
                     },
                 ));
@@ -151,8 +162,8 @@ impl StudioApp {
                 self.catalog.search_query.clear();
                 self.catalog.source_filter = CatalogSourceFilter::All;
                 self.catalog.kind_filter = None;
-                self.submit_service_action(vapor_studio_protocol::StudioAction::Catalog(
-                    vapor_studio_protocol::CatalogAction::Search {
+                self.submit_service_action(vapor_client_protocol::ClientAction::Catalog(
+                    vapor_client_protocol::CatalogAction::Search {
                         query: String::new(),
                     },
                 ));
@@ -260,7 +271,7 @@ impl StudioApp {
                     });
                 } else {
                     ui.heading("Nothing else is available locally");
-                    ui.label("Create a project in an open folder, or search Workshop for content to add to the active game setup.");
+                    ui.label("Create a project in an open folder, or search Workshop for content to add to the active composition.");
                     ui.horizontal_wrapped(|ui| {
                         if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Create content")).clicked() {
                             self.activate_navigation_section(super::super::Section::Create);
@@ -293,27 +304,21 @@ impl StudioApp {
             );
             self.draw_selected_content_detail(ui, selected_is_visible, selected_is_hidden);
         } else {
-            ui.columns(2, |columns| {
+            contextual_split(ui, 0.64, |main, context| {
                 section_header(
-                    &mut columns[0],
+                    main,
                     "On this device",
-                    "Content already downloaded or included in an open project folder.",
+                    "Downloaded here or included in an open project folder.",
                 );
-                egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
+                egui::ScrollArea::vertical().show(main, |ui| {
                     self.draw_workspace_candidates(ui, &filter);
                     self.draw_catalog_list(ui, &filter);
                 });
 
-                section_header(
-                    &mut columns[1],
-                    "Details",
-                    "Select an item to see what it needs and what you can do with it.",
-                );
-                self.draw_selected_content_detail(
-                    &mut columns[1],
-                    selected_is_visible,
-                    selected_is_hidden,
-                );
+                section_header(context, "Details", "Selected item");
+                egui::ScrollArea::vertical().show(context, |ui| {
+                    self.draw_selected_content_detail(ui, selected_is_visible, selected_is_hidden);
+                });
             });
         }
     }

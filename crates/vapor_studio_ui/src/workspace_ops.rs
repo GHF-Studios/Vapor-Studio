@@ -4,7 +4,7 @@ use super::workspace_editor::WorkspaceEditorState;
 use crate::navigation::Section;
 use std::path::{Path, PathBuf};
 use vapor_core::{DevelopmentOperation, VaporWorkspace};
-use vapor_studio_core::OperationKind;
+use vapor_client_application::OperationKind;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum WorkspacePanel {
@@ -12,6 +12,14 @@ pub(super) enum WorkspacePanel {
     Sources,
     Content,
     Build,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum WorkspaceContentPanel {
+    #[default]
+    Projects,
+    AddExisting,
+    ProjectSettings,
 }
 
 pub(super) struct WorkspaceState {
@@ -22,16 +30,17 @@ pub(super) struct WorkspaceState {
     pub(super) starter_organization: String,
     pub(super) starter_name: String,
     pub(super) workspace_validation_error: Option<String>,
-    pub(super) unregistered_projects: vapor_studio_core::UnregisteredProjectScan,
+    pub(super) unregistered_projects: vapor_client_application::UnregisteredProjectScan,
     pub(super) unregistered_scan_completed: bool,
     pub(super) unregistered_scan_error: Option<String>,
-    pub(super) pending_unregistration: Option<vapor_studio_core::SourceContent>,
+    pub(super) pending_unregistration: Option<vapor_client_application::SourceContent>,
     pub(super) pending_clean_confirmation: Option<PathBuf>,
     pub(super) registered_sources: Vec<PathBuf>,
     pub(super) active_source: Option<PathBuf>,
     pub(super) registered_sources_loaded: bool,
     pub(super) registered_sources_error: Option<String>,
     pub(super) overview_panel: WorkspacePanel,
+    pub(super) content_panel: WorkspaceContentPanel,
     pub(super) content_search: String,
     pub(super) editor: WorkspaceEditorState,
 }
@@ -46,7 +55,7 @@ impl WorkspaceState {
             starter_organization: "my-workshop".to_owned(),
             starter_name: "my-game".to_owned(),
             workspace_validation_error: None,
-            unregistered_projects: vapor_studio_core::UnregisteredProjectScan::default(),
+            unregistered_projects: vapor_client_application::UnregisteredProjectScan::default(),
             unregistered_scan_completed: false,
             unregistered_scan_error: None,
             pending_unregistration: None,
@@ -56,6 +65,7 @@ impl WorkspaceState {
             registered_sources_loaded: false,
             registered_sources_error: None,
             overview_panel: WorkspacePanel::default(),
+            content_panel: WorkspaceContentPanel::default(),
             content_search: String::new(),
             editor: WorkspaceEditorState::default(),
         }
@@ -129,10 +139,10 @@ impl StudioApp {
             DevelopmentOperation::Clean => OperationKind::Clean,
         };
         self.spawn(kind, move |context| {
-            OperationResult::Workspace(
+            OperationResult::Workspace(Box::new(
                 vapor_core::run_workspace_operation_at_with_context(&root, operation, &context)
                     .map_err(|error| error.to_string()),
-            )
+            ))
         });
         self.status = format!("Running Vapor-managed {operation}…");
     }
@@ -177,8 +187,8 @@ impl StudioApp {
         let requested_root = root.display().to_string();
         if !service_already_opened
             && let Err(error) =
-                self.apply_service_action(vapor_studio_protocol::StudioAction::Workspace(
-                    vapor_studio_protocol::WorkspaceAction::Open {
+                self.apply_service_action(vapor_client_protocol::ClientAction::Workspace(
+                    vapor_client_protocol::WorkspaceAction::Open {
                         root: requested_root.clone(),
                     },
                 ))
@@ -194,12 +204,12 @@ impl StudioApp {
             self.catalog.clear_workspace_content();
             self.workspace.workspace_validation_error = None;
             self.workspace.unregistered_projects =
-                vapor_studio_core::UnregisteredProjectScan::default();
+                vapor_client_application::UnregisteredProjectScan::default();
             self.workspace.unregistered_scan_completed = false;
             self.workspace.unregistered_scan_error = None;
         }
         self.catalog.selected = None;
-        self.profile_composition.clear_context();
+        self.composition_preview.clear_context();
         self.invalidate_workshop_review();
         self.workspace.editor.files = match workspace_files {
             Ok(files) => files,
@@ -285,8 +295,8 @@ impl StudioApp {
         }
         let previous_root = self.workspace.root.clone();
         if let Err(error) =
-            self.apply_service_action(vapor_studio_protocol::StudioAction::Workspace(
-                vapor_studio_protocol::WorkspaceAction::Open {
+            self.apply_service_action(vapor_client_protocol::ClientAction::Workspace(
+                vapor_client_protocol::WorkspaceAction::Open {
                     root: path.to_string_lossy().into_owned(),
                 },
             ))
@@ -309,14 +319,14 @@ impl StudioApp {
             true,
         );
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workspace(
-                vapor_studio_protocol::WorkspaceAction::ListFiles {
+            vapor_client_protocol::ClientAction::Workspace(
+                vapor_client_protocol::WorkspaceAction::ListFiles {
                     path: ".".to_owned(),
                 },
             ),
             None,
             OperationKind::DiscoverWorkspace,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             "Loading workspace files through the Studio service…",
         );
     }
@@ -371,10 +381,10 @@ impl StudioApp {
 
     pub(super) fn require_workspace_association(&mut self, action: &str) -> bool {
         if self
-            .profile
+            .composition
             .items
-            .get(self.profile.active_index)
-            .and_then(|profile| profile.workspace.as_ref())
+            .get(self.composition.active_index)
+            .and_then(|composition| composition.workspace.as_ref())
             .is_some()
             && !self.workspace.root.trim().is_empty()
         {

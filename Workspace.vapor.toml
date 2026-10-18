@@ -5,7 +5,7 @@ name = "vapor-studio"
 organization = "ghf-studios"
 version = "0.5.0"
 repository = "https://github.com/GHF-Studios/Vapor-Studio"
-binaries = ["vapor-studio-service"]
+binaries = []
 
 [toolchain]
 channel = "stable"

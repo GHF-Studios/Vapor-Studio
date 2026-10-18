@@ -4,7 +4,7 @@ use super::super::components::design::{
 };
 use eframe::egui;
 use std::path::PathBuf;
-use vapor_studio_core::SourceCompositionLink;
+use vapor_client_application::SourceCompositionLink;
 
 #[derive(Clone, PartialEq, Eq)]
 enum PackagepackRoleSelection {
@@ -18,18 +18,18 @@ impl StudioApp {
     pub(in crate::app) fn draw_composition(&mut self, ui: &mut egui::Ui) {
         page_header(
             ui,
-            "Game setup",
-            "Choose what this profile launches",
-            "Choose the game engine, game, and add-ons that belong in this playable setup.",
+            "Compose",
+            "Build a composition",
+            "Choose the engine, game, and add-ons that this composition launches.",
         );
         ui.weak(
-            "This chooses what the selected play profile launches. Your project files stay in their project folders.",
+            "This chooses what the selected composition launches. Your project files stay in their project folders.",
         );
         if let Some(error) = self.catalog.source_discovery_error.as_deref() {
             status_text(
                 ui,
                 &format!(
-                    "The project list could not refresh, so some results may be out of date. Refresh it before loading dependencies, reviewing this setup, or changing the active profile. {error}"
+                    "The project list could not refresh, so some results may be out of date. Refresh it before loading dependencies, reviewing this setup, or changing the active composition. {error}"
                 ),
                 StatusTone::Caution,
             );
@@ -49,8 +49,8 @@ impl StudioApp {
         }
 
         let mut remove_link = None;
-        let mut use_profile_root = false;
-        let mut review_profile_plan = false;
+        let mut use_composition_root = false;
+        let mut review_composition_plan = false;
         let mut preview_source_selector = None;
         let mut stage_source_selector = None;
         let mut save_dependencies = false;
@@ -59,11 +59,11 @@ impl StudioApp {
         let operation_running = self.operation.running;
         let workspace_manifest_saved =
             !self.workspace.editor.has_dirty_documents() && !self.authoring.manifest_metadata_dirty;
-        let active_profile_root = self
-            .profile
+        let active_composition_root = self
+            .composition
             .items
-            .get(self.profile.active_index)
-            .and_then(|profile| profile.root_package.clone());
+            .get(self.composition.active_index)
+            .and_then(|composition| composition.root_package.clone());
         let source_contents = &self.catalog.sources;
         if let Some(composition) = self.authoring.composition_edit.as_mut() {
             ui.separator();
@@ -283,7 +283,7 @@ impl StudioApp {
                     let relationship = super::super::source_content_kind(&composition.kind)
                         .and_then(|parent| {
                             super::super::source_content_kind(&content.kind).and_then(|child| {
-                                vapor_studio_core::source_dependency_relationship(parent, child)
+                                vapor_client_application::source_dependency_relationship(parent, child)
                             })
                         })
                         .unwrap_or("dependency");
@@ -362,11 +362,11 @@ impl StudioApp {
                     {
                         preview_source_selector = Some(source_selector);
                     }
-                    let already_profile_root = active_profile_root.as_ref().is_some_and(|root| {
+                    let already_composition_root = active_composition_root.as_ref().is_some_and(|root| {
                         root.id == composition.id && root.version == composition.version
                     });
-                    if already_profile_root {
-                        ui.strong("Already selected for the active profile");
+                    if already_composition_root {
+                        ui.strong("Already selected for the active composition");
                         if ui
                             .add_enabled(
                                 !operation_running
@@ -376,13 +376,13 @@ impl StudioApp {
                                 egui::Button::new("Review play setup"),
                             )
                             .on_disabled_hover_text(if !workspace_manifest_saved {
-                                "Save or reload dirty workspace files and structured manifest changes before resolving the profile."
+                                "Save or reload dirty workspace files and structured manifest changes before resolving the composition."
                             } else {
                                 "Resolve the pending role choice and save composition changes first."
                             })
                             .clicked()
                         {
-                            review_profile_plan = true;
+                            review_composition_plan = true;
                         }
                     } else if ui
                         .add_enabled(
@@ -391,18 +391,18 @@ impl StudioApp {
                                 && source_graph_saved
                                 && workspace_manifest_saved
                                 && self.catalog.source_snapshot_current(),
-                            egui::Button::new("Use as active profile's game setup"),
+                            egui::Button::new("Use as the active composition"),
                         )
                         .on_disabled_hover_text(if !workspace_manifest_saved {
-                            "Save or reload dirty workspace files and structured manifest changes before changing the profile's game setup."
+                            "Save or reload workspace files and manifest changes before changing the composition."
                         } else {
-                            "Save this composition before resolving it into a profile."
+                            "Save this Packagepack before selecting it for a composition."
                         })
                         .clicked()
                     {
-                        use_profile_root = true;
+                        use_composition_root = true;
                     }
-                    ui.weak("Choosing a different game setup refreshes what this profile will install and launch.");
+                    ui.weak("Choosing different content updates what this composition will install and launch.");
                 });
             }
             if ui
@@ -446,7 +446,7 @@ impl StudioApp {
                     }
                     let relationship =
                         super::super::source_content_kind(&content.kind).and_then(|kind| {
-                            vapor_studio_core::source_dependency_relationship(
+                            vapor_client_application::source_dependency_relationship(
                                 vapor_core::ContentKind::Packagepack,
                                 kind,
                             )
@@ -538,11 +538,11 @@ impl StudioApp {
         if let Some(selector) = preview_source_selector {
             self.preview_source_composition(selector);
         }
-        if use_profile_root {
-            self.use_edited_composition_for_profile();
+        if use_composition_root {
+            self.use_edited_composition_for_composition();
         }
-        if review_profile_plan {
-            self.activate_navigation_section(super::super::Section::Library);
+        if review_composition_plan {
+            self.activate_navigation_section(super::super::Section::Compositions);
             self.preview_selected_composition();
         }
         if let Some(selector) = stage_source_selector {
@@ -557,7 +557,7 @@ impl StudioApp {
                 .map(|version| format!("{}@{version}", composition.id))
                 .unwrap_or_else(|| composition.id.clone())
         });
-        let preview = self.profile_composition.preview().cloned();
+        let preview = self.composition_preview.preview().cloned();
         if source_graph_saved
             && let (Some(selector), Some(preview)) = (selector, preview)
             && preview.selector == selector
@@ -589,13 +589,13 @@ impl StudioApp {
         egui::Frame::group(&card_style).show(ui, |ui| {
                 if candidates > 0 {
                     ui.heading(format!("{candidates} project{} to add", if candidates == 1 { "" } else { "s" }));
-                    ui.label("These projects are already in the open folder. Add them to Studio to use them in a game setup; their files will stay where they are.");
+                    ui.label("These projects are already in the open folder. Add them to Studio to use them in a composition; their files will stay where they are.");
                     if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits(), egui::Button::new("Review projects")).clicked() {
                         self.navigate_to_workspace_content();
                     }
                 } else if self.workspace.root.trim().is_empty() {
                     ui.heading("Open a project folder to set up a game");
-                    ui.label("A game setup combines an engine, a game, and optional add-ons from your project folders.");
+                    ui.label("A composition combines an engine, a game, and optional add-ons from your project folders.");
                     ui.horizontal_wrapped(|ui| {
                         if ui.button("Open project folder").clicked() {
                             self.open_workspace_picker();
@@ -751,8 +751,8 @@ impl StudioApp {
 }
 
 fn is_additional_composition_dependency(
-    content: &vapor_studio_core::SourceContent,
-    composition: &vapor_studio_core::SourceComposition,
+    content: &vapor_client_application::SourceContent,
+    composition: &vapor_client_application::SourceComposition,
 ) -> bool {
     if content.id == composition.id {
         return false;
@@ -762,15 +762,15 @@ fn is_additional_composition_dependency(
         super::super::source_content_kind(&content.kind),
     ) {
         (Some(parent), Some(child)) => {
-            vapor_studio_core::source_dependency_relationship(parent, child).is_some()
+            vapor_client_application::source_dependency_relationship(parent, child).is_some()
                 && !(parent == vapor_core::ContentKind::Packagepack
-                    && vapor_studio_core::source_dependency_choice_group(parent, child).is_some())
+                    && vapor_client_application::source_dependency_choice_group(parent, child).is_some())
         }
         _ => false,
     }
 }
 
-fn source_content_matches_query(content: &vapor_studio_core::SourceContent, query: &str) -> bool {
+fn source_content_matches_query(content: &vapor_client_application::SourceContent, query: &str) -> bool {
     query.is_empty()
         || content.id.to_lowercase().contains(query)
         || content.kind.to_lowercase().contains(query)
@@ -799,7 +799,7 @@ struct PackagepackRoleSlotSpec {
 
 struct PackagepackRoleSlotContext<'a> {
     links: &'a mut Vec<SourceCompositionLink>,
-    sources: &'a [vapor_studio_core::SourceContent],
+    sources: &'a [vapor_client_application::SourceContent],
     search: &'a mut String,
     pending_change: &'a mut Option<super::super::source_authoring::PendingCompositionRoleChange>,
 }
@@ -826,11 +826,11 @@ fn draw_packagepack_role_slot(
         .iter()
         .filter_map(|content| {
             let kind = super::super::source_content_kind(&content.kind)?;
-            if vapor_studio_core::source_dependency_choice_group(packagepack, kind) != Some(group) {
+            if vapor_client_application::source_dependency_choice_group(packagepack, kind) != Some(group) {
                 return None;
             }
             let relationship =
-                vapor_studio_core::source_dependency_relationship(packagepack, kind)?;
+                vapor_client_application::source_dependency_relationship(packagepack, kind)?;
             Some((
                 super::super::source_content_selector(content),
                 content.kind.clone(),

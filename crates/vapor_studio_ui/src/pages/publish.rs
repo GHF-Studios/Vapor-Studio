@@ -5,7 +5,7 @@ use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
 enum WorkshopPublishAction {
-    Publish(String, Box<vapor_studio_core::WorkshopPackagePreview>),
+    Publish(String, Box<vapor_client_application::WorkshopPackagePreview>),
     DiscardReview,
 }
 
@@ -96,7 +96,6 @@ impl StudioApp {
                 preview.bytes,
                 preview.root.display(),
             ));
-            ui.small(format!("Fingerprint: {}", preview.fingerprint));
 
             ui.collapsing("Staged files", |ui| {
                 for path in preview.file_paths.iter().take(50) {
@@ -341,21 +340,21 @@ impl StudioApp {
                 ui.strong(if preview.planned { "Reviewed SteamPipe upload" } else { "SteamPipe result" });
                 ui.label(format!(
                     "App {} · depot {} · {} files · {} source roots",
-                    preview.package.app_id,
-                    preview.package.depot_id,
-                    preview.package.copied_files,
-                    preview.package.included_roots.len(),
+                    preview.app_id,
+                    preview.depot_id,
+                    preview.copied_files,
+                    preview.included_roots.len(),
                 ));
                 ui.label(format!("Account: {} · branch: {}", preview.account, preview.set_live.as_deref().unwrap_or("unchanged")));
-                ui.small(format!("SteamCMD: {}", preview.steamcmd.display()));
-                ui.small(format!("Package output: {}", preview.package.package_root.display()));
+                ui.small(format!("SteamCMD: {}", preview.steamcmd));
+                ui.small(format!("Package output: {}", preview.package_root));
                 ui.collapsing("Included depot paths", |ui| {
-                    for path in &preview.package.included_roots {
-                        ui.small(path.display().to_string());
+                    for path in &preview.included_roots {
+                        ui.small(path);
                     }
                 });
                 if preview.planned {
-                    let confirmation = root_publish_confirmation(preview.set_live.as_deref());
+                    let confirmation = root_publish_confirmation(preview.app_id, preview.set_live.as_deref());
                     status_text(ui, "This sends the reviewed build to Steamworks. SteamCMD may prompt for your password or Steam Guard code.", StatusTone::Caution);
                     if preview.set_live.is_some() {
                         status_text(ui, "The selected beta branch will be changed after upload.", StatusTone::Caution);
@@ -372,7 +371,7 @@ impl StudioApp {
                         self.publish_steam_root();
                     }
                 } else if let Some(status) = preview.status.as_ref() {
-                    if status.success() {
+                    if preview.succeeded {
                         status_text(ui, "SteamCMD reported a successful upload.", StatusTone::Positive);
                     } else {
                         status_text(ui, &format!("SteamCMD exited with {status}."), StatusTone::Error);

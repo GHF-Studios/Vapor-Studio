@@ -14,7 +14,7 @@ enum CommandPaletteAction {
     RefreshLocalContent,
     LocalContent(String),
     WorkspaceCandidate(String),
-    Profile(String),
+    Composition(String),
     SearchWorkshop(String),
 }
 
@@ -41,12 +41,17 @@ impl StudioApp {
         let entries = [
             (
                 "Play",
-                "launch game setup current profile",
+                "launch current composition",
                 CommandPaletteAction::Navigate(Section::Home),
             ),
             (
-                "Profiles",
-                "library play install update",
+                "Compositions",
+                "play install update compositions",
+                CommandPaletteAction::Navigate(Section::Compositions),
+            ),
+            (
+                "Library",
+                "downloaded installed content available add composition",
                 CommandPaletteAction::Navigate(Section::Library),
             ),
             (
@@ -66,7 +71,7 @@ impl StudioApp {
             ),
             (
                 "Downloaded content",
-                "cache imported workshop launch",
+                "downloaded workshop imports subscribe",
                 CommandPaletteAction::Workshop(WorkshopTab::Imports),
             ),
             (
@@ -110,8 +115,8 @@ impl StudioApp {
                 CommandPaletteAction::Navigate(Section::Workspace),
             ),
             (
-                "Game setup",
-                "packagepack dependencies profile composition",
+                "Composition",
+                "packagepack dependencies composition",
                 CommandPaletteAction::Navigate(Section::Compose),
             ),
             (
@@ -201,7 +206,7 @@ impl StudioApp {
                     }
                     CommandPaletteAction::RefreshLocalContent => can_refresh,
                     CommandPaletteAction::LocalContent(_) => true,
-                    CommandPaletteAction::WorkspaceCandidate(_) | CommandPaletteAction::Profile(_) => {
+                    CommandPaletteAction::WorkspaceCandidate(_) | CommandPaletteAction::Composition(_) => {
                         can_switch_workspace
                     }
                     CommandPaletteAction::SearchWorkshop(_) => !self.operation.running,
@@ -213,11 +218,11 @@ impl StudioApp {
                     })
                     .collect::<Vec<_>>();
                 if query.chars().count() >= 2 {
-                    let active_profile_id = self
-                        .profile
+                    let active_composition_id = self
+                        .composition
                         .items
-                        .get(self.profile.active_index)
-                        .map(|profile| profile.id.clone());
+                        .get(self.composition.active_index)
+                        .map(|composition| composition.id.clone());
                     let mut local_matches = self
                         .catalog
                         .items
@@ -261,23 +266,23 @@ impl StudioApp {
                         .collect::<Vec<_>>();
                     palette_entries.append(&mut local_matches);
                     palette_entries.extend(
-                        self.profile
+                        self.composition
                             .items
                             .iter()
-                            .filter(|profile| {
-                                let active = active_profile_id.as_deref() == Some(profile.id.as_str());
-                                let root = profile
+                            .filter(|composition| {
+                                let active = active_composition_id.as_deref() == Some(composition.id.as_str());
+                                let root = composition
                                     .root_package
                                     .as_ref()
                                     .map(super::content_selector)
                                     .unwrap_or_default();
                                 let state = super::components::design::installation_status(
-                                    &profile.installation,
+                                    &composition.installation,
                                 )
                                 .0;
                                 let searchable = format!(
                                     "{} {root} {state} {}",
-                                    profile.name,
+                                    composition.name,
                                     if active { "active current selected" } else { "" },
                                 )
                                 .to_lowercase();
@@ -286,31 +291,31 @@ impl StudioApp {
                                     .all(|term| searchable.contains(term))
                             })
                             .take(8)
-                            .map(|profile| {
-                                let root = profile
+                            .map(|composition| {
+                                let root = composition
                                     .root_package
                                     .as_ref()
                                     .map(super::content_selector)
                                     .unwrap_or_else(|| "no composition".to_owned());
                                 let state = super::components::design::installation_status(
-                                    &profile.installation,
+                                    &composition.installation,
                                 )
                                 .0;
-                                let active = active_profile_id.as_deref()
-                                    == Some(profile.id.as_str());
+                                let active = active_composition_id.as_deref()
+                                    == Some(composition.id.as_str());
                                 (
                                     format!(
-                                        "Profile · {} · {}{}",
-                                        profile.name,
+                                        "Composition · {} · {}{}",
+                                        composition.name,
                                         state,
                                         if active { " · active" } else { "" },
                                     ),
                                     format!(
-                                        "launch play profile {root} {state} {}",
+                                        "launch composition {root} {state} {}",
                                         if active { "active current selected" } else { "" },
                                     )
                                     .to_lowercase(),
-                                    CommandPaletteAction::Profile(profile.id.clone()),
+                                    CommandPaletteAction::Composition(composition.id.clone()),
                                 )
                             }),
                     );
@@ -458,15 +463,15 @@ impl StudioApp {
                 self.workspace.content_search = id;
                 self.open_workspace_panel(super::workspace_ops::WorkspacePanel::Content);
             }
-            Some(CommandPaletteAction::Profile(profile_id)) => {
+            Some(CommandPaletteAction::Composition(composition_id)) => {
                 if let Some(index) = self
-                    .profile
+                    .composition
                     .items
                     .iter()
-                    .position(|profile| profile.id == profile_id)
+                    .position(|composition| composition.id == composition_id)
                 {
-                    self.select_profile(index);
-                    self.activate_navigation_section(Section::Library);
+                    self.select_composition(index);
+                    self.activate_navigation_section(Section::Compositions);
                 }
             }
             Some(CommandPaletteAction::SearchWorkshop(query)) => {

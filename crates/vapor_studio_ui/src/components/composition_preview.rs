@@ -1,6 +1,6 @@
 use super::design::{StatusTone, status_text};
 use eframe::egui;
-use vapor_studio_core::{CompositionPreview, CompositionPreviewSource};
+use vapor_client_application::{CompositionPreview, CompositionPreviewSource};
 
 /// Render the common, read-only provenance and blocker view used by Compose and Library.
 pub(crate) fn draw_composition_preview(
@@ -41,7 +41,7 @@ pub(crate) fn draw_composition_preview(
                 (CompositionPreviewSource::Installed, _) => {
                     "Already installed · no source to update"
                 }
-                (CompositionPreviewSource::DownloadRequired, _) => "Download needed",
+                (CompositionPreviewSource::RootSeed, _) => "Download needed",
             };
             ui.horizontal(|ui| {
                 ui.label(format!(
@@ -75,7 +75,7 @@ pub(crate) fn draw_composition_preview(
             if let Some(published_file_id) = node
                 .published_file_id
                 .as_ref()
-                .filter(|_| node.source == CompositionPreviewSource::DownloadRequired)
+                .filter(|_| node.source == CompositionPreviewSource::RootSeed)
                 && !workshop_downloads.contains(published_file_id)
             {
                 workshop_downloads.push(published_file_id.clone());

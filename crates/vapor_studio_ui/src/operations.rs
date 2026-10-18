@@ -10,16 +10,16 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+use vapor_client_protocol::{
+    ClientAction, OperationEvent as ServiceOperationEvent, OperationPhase as ServiceOperationPhase,
+    OperationStatus as ServiceOperationStatus, RequestId,
+};
 use vapor_core::{
     OperationEvent as CoreOperationEvent, OperationRequest as CoreOperationRequest,
     OperationService,
 };
-use vapor_studio_core::{
+use vapor_client_application::{
     OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
-};
-use vapor_studio_protocol::{
-    OperationEvent as ServiceOperationEvent, OperationPhase as ServiceOperationPhase,
-    OperationStatus as ServiceOperationStatus, RequestId, StudioAction,
 };
 
 pub(super) struct OperationState {
@@ -173,11 +173,11 @@ impl StudioApp {
     ) {
         let request = OperationRequest {
             id: OperationId::fresh(),
-            profile_id: self
-                .profile
+            composition_id: self
+                .composition
                 .items
-                .get(self.profile.active_index)
-                .map(|profile| profile.id.clone()),
+                .get(self.composition.active_index)
+                .map(|composition| composition.id.clone()),
             kind,
         };
         let phase = match &request.kind {
@@ -219,7 +219,7 @@ impl StudioApp {
         };
         self.operation.active_operation = Some(OperationEvent {
             id: request.id,
-            profile_id: request.profile_id.clone(),
+            composition_id: request.composition_id.clone(),
             kind: request.kind.clone(),
             phase,
             progress: None,
@@ -263,7 +263,7 @@ impl StudioApp {
 
     pub(super) fn start_service_composition_operation(
         &mut self,
-        action: StudioAction,
+        action: ClientAction,
         kind: OperationKind,
         phase: OperationPhase,
         status: &str,
@@ -272,22 +272,22 @@ impl StudioApp {
             self.status = "Wait for the current operation to finish.".to_owned();
             return;
         }
-        let profile_id = self
-            .profile
+        let composition_id = self
+            .composition
             .items
-            .get(self.profile.active_index)
-            .map(|profile| profile.id.clone());
-        let Some(profile_id) = profile_id else {
-            self.status = "Create or select a profile first.".to_owned();
+            .get(self.composition.active_index)
+            .map(|composition| composition.id.clone());
+        let Some(composition_id) = composition_id else {
+            self.status = "Create or select a composition first.".to_owned();
             return;
         };
-        self.start_service_operation(action, Some(profile_id), kind, phase, status);
+        self.start_service_operation(action, Some(composition_id), kind, phase, status);
     }
 
     pub(super) fn start_service_operation(
         &mut self,
-        action: StudioAction,
-        profile_id: Option<String>,
+        action: ClientAction,
+        composition_id: Option<String>,
         kind: OperationKind,
         phase: OperationPhase,
         status: &str,
@@ -313,7 +313,7 @@ impl StudioApp {
         };
         self.operation.active_operation = Some(OperationEvent {
             id: operation_id,
-            profile_id,
+            composition_id,
             kind,
             phase,
             progress: None,
@@ -343,17 +343,17 @@ impl StudioApp {
                 .active_operation
                 .get_or_insert_with(|| OperationEvent {
                     id,
-                    profile_id: event.profile_id.clone(),
+                    composition_id: event.composition_id.clone(),
                     kind: kind.clone(),
                     phase: OperationPhase::Queued,
                     progress: None,
                     status: OperationStatus::Running,
                 });
             operation.id = id;
-            operation.profile_id = event.profile_id.clone();
+            operation.composition_id = event.composition_id.clone();
             operation.kind = kind;
             operation.phase = service_phase(event.phase);
-            operation.progress = event.progress.map(|progress| vapor_studio_core::Progress {
+            operation.progress = event.progress.map(|progress| vapor_client_application::Progress {
                 completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
                 total: Some(100),
                 unit: "percent".to_owned(),
@@ -390,6 +390,9 @@ impl StudioApp {
             && matches!(&event.status, ServiceOperationStatus::Succeeded);
         if let Some(message) = status_message {
             self.status = message.clone();
+            if event.action.starts_with("publishing.") {
+                self.root_publishing.status = message;
+            }
         }
         if terminal {
             let completed_at_unix = SystemTime::now()
@@ -508,8 +511,8 @@ impl StudioApp {
             .editor
             .save_editor_drafts(&self.workspace.root);
         let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
-        self.submit_service_action(StudioAction::Session(
-            vapor_studio_protocol::SessionAction::CheckpointLocalState {
+        self.submit_service_action(ClientAction::Session(
+            vapor_client_protocol::SessionAction::CheckpointLocalState {
                 editor_drafts,
                 operation_history,
             },
@@ -518,7 +521,7 @@ impl StudioApp {
 
     pub(super) fn apply_service_operation_snapshot(
         &mut self,
-        operation: Option<&vapor_studio_protocol::OperationSummary>,
+        operation: Option<&vapor_client_protocol::OperationSummary>,
     ) {
         if !self.operation.service_owned {
             return;
@@ -541,19 +544,19 @@ impl StudioApp {
             .active_operation
             .get_or_insert_with(|| OperationEvent {
                 id,
-                profile_id: operation.profile_id.clone(),
+                composition_id: operation.composition_id.clone(),
                 kind: operation_kind_for_action(&operation.action),
                 phase: service_phase(operation.phase),
                 progress: None,
                 status: OperationStatus::Running,
             });
         active.id = id;
-        active.profile_id = operation.profile_id.clone();
+        active.composition_id = operation.composition_id.clone();
         active.kind = operation_kind_for_action(&operation.action);
         active.phase = service_phase(operation.phase);
         active.progress = operation
             .progress
-            .map(|progress| vapor_studio_core::Progress {
+            .map(|progress| vapor_client_application::Progress {
                 completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
                 total: Some(100),
                 unit: "percent".to_owned(),
@@ -578,6 +581,8 @@ fn operation_kind_for_action(action: &str) -> OperationKind {
         "workshop.acquire" => OperationKind::Acquire,
         "workshop.stage" => OperationKind::StageWorkshop,
         "workshop.publish" => OperationKind::PublishWorkshop,
+        "publishing.stage-root" => OperationKind::StageRootDistribution,
+        "publishing.publish-root" => OperationKind::PublishRootDistribution,
         "workshop.load-subscriptions" => OperationKind::LoadWorkshopSubscriptions,
         "workshop.subscribe" | "workshop.unsubscribe" => OperationKind::ChangeWorkshopSubscription,
         "composition.preview" => OperationKind::Resolve,

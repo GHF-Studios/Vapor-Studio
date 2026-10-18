@@ -1,4 +1,9 @@
-# Vapor Studio Service Boundary
+# Historical: Vapor Studio Service Boundary
+
+> This short-lived stdio-child design is superseded by the shared
+> [Vapor Client Service architecture](../../../Vapor/docs/vapor-client-service.md).
+> Keep this document as implementation history; do not extend its one-client,
+> GUI-owned process model.
 
 ## Purpose
 

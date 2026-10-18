@@ -1,11 +1,11 @@
 use super::{StudioApp, catalog_content_selector, content_selector};
 use crate::navigation::{CatalogSourceFilter, Section};
 use std::path::{Path, PathBuf};
-use vapor_studio_core::ContentIdentity;
-use vapor_studio_protocol::StudioAction;
+use vapor_client_protocol::ClientAction;
+use vapor_client_application::ContentReference;
 
-pub(super) struct ProfileState {
-    pub(super) items: Vec<vapor_studio_core::CompositionProfile>,
+pub(super) struct CompositionState {
+    pub(super) items: Vec<vapor_client_application::Composition>,
     pub(super) service_revision: Option<u64>,
     pub(super) active_index: usize,
     pub(super) recovery: Option<String>,
@@ -15,9 +15,9 @@ pub(super) struct ProfileState {
     pub(super) new_name: String,
 }
 
-impl ProfileState {
+impl CompositionState {
     pub(super) fn new(
-        items: Vec<vapor_studio_core::CompositionProfile>,
+        items: Vec<vapor_client_application::Composition>,
         active_index: usize,
         name_draft: String,
         recovery: Option<String>,
@@ -37,23 +37,23 @@ impl ProfileState {
 }
 
 impl StudioApp {
-    pub(super) fn is_active_profile_root(&self, id: &str, version: Option<&str>) -> bool {
-        self.profile
+    pub(super) fn is_active_composition_root(&self, id: &str, version: Option<&str>) -> bool {
+        self.composition
             .items
-            .get(self.profile.active_index)
-            .and_then(|profile| profile.root_package.as_ref())
+            .get(self.composition.active_index)
+            .and_then(|composition| composition.root_package.as_ref())
             .is_some_and(|root| root.id == id && root.version.as_deref() == version)
     }
 
-    pub(super) fn use_workshop_as_profile_root(&mut self, content_id: &str) -> bool {
-        self.assign_workshop_acquisition_to_profile(content_id, false)
+    pub(super) fn use_workshop_as_composition_root(&mut self, content_id: &str) -> bool {
+        self.assign_workshop_acquisition_to_composition(content_id, false)
     }
 
     pub(super) fn launch_workshop_acquisition(&mut self, content_id: &str) -> bool {
-        self.assign_workshop_acquisition_to_profile(content_id, true)
+        self.assign_workshop_acquisition_to_composition(content_id, true)
     }
 
-    fn assign_workshop_acquisition_to_profile(
+    fn assign_workshop_acquisition_to_composition(
         &mut self,
         content_id: &str,
         launch_after_assignment: bool,
@@ -74,49 +74,49 @@ impl StudioApp {
             );
             return false;
         }
-        let identity = ContentIdentity {
+        let identity = ContentReference {
             id: acquisition.id.clone(),
             version: acquisition.version.clone(),
         };
         let assigned = if launch_after_assignment {
-            self.assign_profile_root_without_catalog_refresh(identity, None)
+            self.assign_composition_root_without_catalog_refresh(identity, None)
         } else {
-            self.assign_profile_root(identity, None)
+            self.assign_composition_root(identity, None)
         };
         if assigned {
             if launch_after_assignment {
                 self.run_installed_selected();
             } else {
-                self.activate_navigation_section(Section::Library);
+                self.activate_navigation_section(Section::Compositions);
             }
         }
         assigned
     }
 
-    pub(super) fn use_available_workshop_package_as_profile_root(
+    pub(super) fn use_available_workshop_package_as_composition_root(
         &mut self,
         published_file_id: &str,
     ) -> bool {
-        self.assign_available_workshop_package_to_profile(published_file_id, false)
+        self.assign_available_workshop_package_to_composition(published_file_id, false)
     }
 
-    pub(super) fn launch_workshop_package_as_profile_root(
+    pub(super) fn launch_workshop_package_as_composition_root(
         &mut self,
         published_file_id: &str,
     ) -> bool {
-        self.assign_available_workshop_package_to_profile(published_file_id, true)
+        self.assign_available_workshop_package_to_composition(published_file_id, true)
     }
 
-    fn assign_available_workshop_package_to_profile(
+    fn assign_available_workshop_package_to_composition(
         &mut self,
         published_file_id: &str,
         launch_after_assignment: bool,
     ) -> bool {
         if !self.catalog.local_catalog_current() {
             self.status = if launch_after_assignment {
-                "Refresh the on-device content list before launching this Workshop game setup."
+                "Refresh the on-device content list before launching this Workshop composition."
             } else {
-                "Refresh the on-device content list before selecting this Workshop game setup."
+                "Refresh the on-device content list before selecting this Workshop composition."
             }
             .to_owned();
             return false;
@@ -134,7 +134,7 @@ impl StudioApp {
             .collect::<Vec<_>>();
         let Some(content) = matches.first().cloned() else {
             self.status = format!(
-                "Workshop item {published_file_id} is available here, but it is not a playable game setup."
+                "Workshop item {published_file_id} is available here, but it is not a playable composition."
             );
             return false;
         };
@@ -151,7 +151,7 @@ impl StudioApp {
                 )
             } else {
                 format!(
-                    "Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before adding it to a profile."
+                    "Workshop item {published_file_id} has multiple game-setup versions here. Choose the exact version from Browse before adding it to a composition."
                 )
             };
             return false;
@@ -159,110 +159,95 @@ impl StudioApp {
         let workspace = content
             .locations
             .iter()
-            .find(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
+            .find(|location| location.kind == vapor_client_application::CatalogLocationKind::Workspace)
             .map(|location| location.root.clone());
-        let identity = ContentIdentity {
+        let identity = ContentReference {
             id: content.id,
             version: content.version,
         };
         let assigned = if launch_after_assignment {
-            self.assign_profile_root_without_catalog_refresh(identity, workspace)
+            self.assign_composition_root_without_catalog_refresh(identity, workspace)
         } else {
-            self.assign_profile_root(identity, workspace)
+            self.assign_composition_root(identity, workspace)
         };
         if assigned {
             if launch_after_assignment {
                 self.run_installed_selected();
             } else {
-                self.activate_navigation_section(Section::Library);
+                self.activate_navigation_section(Section::Compositions);
             }
         }
         assigned
     }
 
-    pub(super) fn select_profile(&mut self, index: usize) {
-        if index >= self.profile.items.len() || index == self.profile.active_index {
+    pub(super) fn select_composition(&mut self, index: usize) {
+        if index >= self.composition.items.len() || index == self.composition.active_index {
             return;
         }
         if self.operation.running {
-            self.status = "Finish the current operation before switching profiles.".to_owned();
+            self.status = "Finish the current operation before switching compositions.".to_owned();
             return;
         }
         if self.has_unsaved_context_switch_edits() {
             self.status =
-                "Discard the Create draft or save or discard workspace, composition, or manifest edits before switching profiles.".to_owned();
+                "Discard the Create draft or save or discard workspace, composition, or manifest edits before switching compositions.".to_owned();
             return;
         }
-        self.submit_service_action(vapor_studio_protocol::StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::Select {
-                profile_id: self.profile.items[index].id.clone(),
+        self.submit_service_action(vapor_client_protocol::ClientAction::Composition(
+            vapor_client_protocol::CompositionAction::Select {
+                composition_id: self.composition.items[index].id.clone(),
             },
         ));
-        self.activate_profile_context(index);
+        self.activate_composition_context(index);
     }
 
-    fn activate_profile_context(&mut self, index: usize) {
-        self.profile.active_index = index;
-        self.profile.name_draft = self.profile.items[index].name.clone();
-        self.profile.confirm_removal = false;
-        self.workspace.root = self.profile.items[index]
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.root.display().to_string())
-            .unwrap_or_default();
-        self.workspace.root_draft = if self.workspace.root.is_empty() {
-            self.workspace.fallback_root.display().to_string()
-        } else {
-            self.workspace.root.clone()
-        };
-        self.workspace.workspace_validation_error = None;
+    fn activate_composition_context(&mut self, index: usize) {
+        self.composition.active_index = index;
+        self.composition.name_draft = self.composition.items[index].name.clone();
+        self.composition.confirm_removal = false;
         self.authoring.clear_workspace_context();
-        self.catalog.clear_workspace_content();
-        self.profile_composition.clear_context();
+        self.composition_preview.clear_context();
         self.invalidate_workshop_review();
         self.workspace.pending_unregistration = None;
-        self.workspace.clear_file_context();
-        self.workspace.unregistered_projects =
-            vapor_studio_core::UnregisteredProjectScan::default();
-        self.workspace.unregistered_scan_completed = false;
-        self.workspace.unregistered_scan_error = None;
         self.discover();
     }
 
-    pub(super) fn assign_profile_root(
+    pub(super) fn assign_composition_root(
         &mut self,
-        identity: ContentIdentity,
+        identity: ContentReference,
         workspace: Option<PathBuf>,
     ) -> bool {
-        self.assign_profile_root_inner(identity, workspace)
+        self.assign_composition_root_inner(identity, workspace)
     }
 
-    fn assign_profile_root_without_catalog_refresh(
+    fn assign_composition_root_without_catalog_refresh(
         &mut self,
-        identity: ContentIdentity,
+        identity: ContentReference,
         workspace: Option<PathBuf>,
     ) -> bool {
-        self.assign_profile_root_inner(identity, workspace)
+        self.assign_composition_root_inner(identity, workspace)
     }
 
-    fn assign_profile_root_inner(
+    fn assign_composition_root_inner(
         &mut self,
-        identity: ContentIdentity,
+        identity: ContentReference,
         workspace: Option<PathBuf>,
     ) -> bool {
         if self.authoring.manifest_metadata_dirty
             || self.authoring.composition_has_unsaved_changes()
         {
-            self.status = "Save or discard dependency or structured manifest edits before changing the profile composition.".to_owned();
+            self.status =
+                "Save or discard dependency or manifest edits before changing the composition."
+                    .to_owned();
             return false;
         }
-        let current_workspace = self.profile.items[self.profile.active_index]
+        let current_workspace = self.composition.items[self.composition.active_index]
             .workspace
             .as_ref()
             .map(|association| association.root.clone());
         let workspace_changed = current_workspace != workspace;
-        if self.profile_root_change_blocked_by_create_draft(workspace.as_deref()) {
-            self.status = "Finish creating this content or discard its Create draft before changing the profile workspace.".to_owned();
+        if self.composition_root_change_blocked_by_create_draft(workspace.as_deref()) {
+            self.status = "Finish creating this content or discard its Create draft before changing the composition workspace.".to_owned();
             return false;
         }
         if self
@@ -272,7 +257,7 @@ impl StudioApp {
             .any(|content| content.identity() == identity && !content.is_unambiguous())
         {
             self.status = format!(
-                "Cannot select {}: its local workspace, cache, or installed records disagree. Review the catalog conflicts first.",
+                "Cannot select {} because copies on this device disagree. Review the conflicting copies first.",
                 content_selector(&identity)
             );
             return false;
@@ -286,20 +271,22 @@ impl StudioApp {
             return false;
         }
         let already_selected =
-            self.is_active_profile_root(&identity.id, identity.version.as_deref());
+            self.is_active_composition_root(&identity.id, identity.version.as_deref());
         if already_selected && !workspace_changed {
             self.status = format!(
-                "{} is already selected for profile {}.",
+                "{} is already selected for composition {}.",
                 content_selector(&identity),
-                self.profile.items[self.profile.active_index].name,
+                self.composition.items[self.composition.active_index].name,
             );
-            self.activate_navigation_section(Section::Library);
+            self.activate_navigation_section(Section::Compositions);
             return true;
         }
-        let profile_id = self.profile.items[self.profile.active_index].id.clone();
-        if let Err(error) = self.apply_service_action(StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::SetRoot {
-                profile_id,
+        let composition_id = self.composition.items[self.composition.active_index]
+            .id
+            .clone();
+        if let Err(error) = self.apply_service_action(ClientAction::Composition(
+            vapor_client_protocol::CompositionAction::SetRoot {
+                composition_id,
                 content_id: Some(identity.id.clone()),
                 content_version: identity.version.clone(),
                 workspace_root: workspace.as_ref().map(|root| root.display().to_string()),
@@ -310,26 +297,26 @@ impl StudioApp {
         }
         if workspace_changed {
             self.authoring.clear_selected_source();
-            self.profile_composition.clear_context();
+            self.composition_preview.clear_context();
             self.workspace.workspace_validation_error = None;
             self.workspace.clear_file_context();
         } else {
-            self.profile_composition.invalidate_preview();
+            self.composition_preview.invalidate_preview();
         }
         self.status = format!(
-            "Selected {} for profile {}. Preview its dependency plan before installing.",
+            "Selected {} for composition {}. Preview its dependency plan before installing.",
             content_selector(&identity),
-            self.profile.items[self.profile.active_index].name,
+            self.composition.items[self.composition.active_index].name,
         );
-        self.activate_navigation_section(Section::Library);
+        self.activate_navigation_section(Section::Compositions);
         true
     }
 
-    pub(super) fn profile_root_change_blocked_by_create_draft(
+    pub(super) fn composition_root_change_blocked_by_create_draft(
         &self,
         candidate_workspace: Option<&Path>,
     ) -> bool {
-        let current_workspace = self.profile.items[self.profile.active_index]
+        let current_workspace = self.composition.items[self.composition.active_index]
             .workspace
             .as_ref()
             .map(|association| association.root.as_path());
@@ -357,88 +344,111 @@ impl StudioApp {
         let workspace = content
             .locations
             .iter()
-            .find(|location| location.kind == vapor_studio_core::CatalogLocationKind::Workspace)
+            .find(|location| location.kind == vapor_client_application::CatalogLocationKind::Workspace)
             .map(|location| location.root.as_path());
-        self.profile_root_change_blocked_by_create_draft(workspace)
+        self.composition_root_change_blocked_by_create_draft(workspace)
     }
 
-    pub(super) fn add_profile(&mut self) {
+    pub(super) fn add_composition(&mut self) {
         if self.has_unsaved_context_switch_edits() {
-            self.status = "Discard the Create draft or save or discard workspace, composition, or manifest edits before creating a profile.".to_owned();
+            self.status = "Discard the Create draft or save or discard workspace, composition, or manifest edits before creating a composition.".to_owned();
             return;
         }
-        let name = self.profile.new_name.trim().to_owned();
-        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::Create { name },
-        )) {
+        let name = self.composition.new_name.trim().to_owned();
+        if let Err(error) =
+            self.apply_service_action(vapor_client_protocol::ClientAction::Composition(
+                vapor_client_protocol::CompositionAction::Create { name },
+            ))
+        {
             self.status = error;
             return;
         }
-        self.profile.confirm_removal = false;
-        self.profile.new_name.clear();
-        self.profile_composition.clear_context();
+        self.composition.confirm_removal = false;
+        self.composition.new_name.clear();
+        self.composition_preview.clear_context();
         self.invalidate_workshop_review();
         self.status = format!(
-            "Created profile {}.",
-            self.profile.items[self.profile.active_index].name
+            "Created composition {}.",
+            self.composition.items[self.composition.active_index].name
         );
     }
 
-    pub(super) fn rename_active_profile(&mut self) {
-        let profile_id = self.profile.items[self.profile.active_index].id.clone();
-        let name = self.profile.name_draft.clone();
-        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::Rename { profile_id, name },
-        )) {
-            self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
+    pub(super) fn rename_active_composition(&mut self) {
+        let composition_id = self.composition.items[self.composition.active_index]
+            .id
+            .clone();
+        let name = self.composition.name_draft.clone();
+        if let Err(error) =
+            self.apply_service_action(vapor_client_protocol::ClientAction::Composition(
+                vapor_client_protocol::CompositionAction::Rename {
+                    composition_id,
+                    name,
+                },
+            ))
+        {
+            self.composition.name_draft = self.composition.items[self.composition.active_index]
+                .name
+                .clone();
             self.status = error;
             return;
         }
-        self.status = format!("Renamed profile to {}.", self.profile.name_draft);
+        self.status = format!("Renamed composition to {}.", self.composition.name_draft);
     }
 
-    pub(super) fn remove_active_profile(&mut self) {
+    pub(super) fn remove_active_composition(&mut self) {
         if self.operation.running || self.has_unsaved_context_switch_edits() {
             self.status =
-                "Finish or discard the current operation and edits before removing a profile."
+                "Finish or discard the current operation and edits before removing a composition."
                     .to_owned();
             return;
         }
-        let removed = self.profile.items[self.profile.active_index].name.clone();
-        let profile_id = self.profile.items[self.profile.active_index].id.clone();
-        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::Remove { profile_id },
-        )) {
+        let removed = self.composition.items[self.composition.active_index]
+            .name
+            .clone();
+        let composition_id = self.composition.items[self.composition.active_index]
+            .id
+            .clone();
+        if let Err(error) =
+            self.apply_service_action(vapor_client_protocol::ClientAction::Composition(
+                vapor_client_protocol::CompositionAction::Remove { composition_id },
+            ))
+        {
             self.status = error;
             return;
         }
-        self.profile.confirm_removal = false;
-        self.profile.name_draft.clear();
-        self.activate_profile_context(self.profile.active_index);
-        self.status = format!("Removed profile {}.", removed);
+        self.composition.confirm_removal = false;
+        self.composition.name_draft.clear();
+        self.activate_composition_context(self.composition.active_index);
+        self.status = format!("Removed composition {}.", removed);
     }
 
-    pub(super) fn duplicate_active_profile(&mut self) {
+    pub(super) fn duplicate_active_composition(&mut self) {
         if self.operation.running || self.has_unsaved_context_switch_edits() {
-            self.status = "Discard the Create draft or save or discard workspace, composition, or manifest edits before duplicating a profile.".to_owned();
+            self.status = "Discard the Create draft or save or discard workspace, composition, or manifest edits before duplicating a composition.".to_owned();
             return;
         }
-        let source_name = self.profile.items[self.profile.active_index].name.clone();
-        let profile_id = self.profile.items[self.profile.active_index].id.clone();
-        if let Err(error) = self.apply_service_action(vapor_studio_protocol::StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::Duplicate {
-                profile_id,
-                name: String::new(),
-            },
-        )) {
+        let source_name = self.composition.items[self.composition.active_index]
+            .name
+            .clone();
+        let composition_id = self.composition.items[self.composition.active_index]
+            .id
+            .clone();
+        if let Err(error) =
+            self.apply_service_action(vapor_client_protocol::ClientAction::Composition(
+                vapor_client_protocol::CompositionAction::Duplicate {
+                    composition_id,
+                    name: String::new(),
+                },
+            ))
+        {
             self.status = error;
             return;
         }
-        self.profile_composition.clear_context();
+        self.composition_preview.clear_context();
         self.invalidate_workshop_review();
         self.status = format!(
             "Duplicated {source_name} as {}.",
-            self.profile.items[self.profile.active_index].name
+            self.composition.items[self.composition.active_index].name
         );
     }
 }

@@ -1,10 +1,10 @@
 use super::StudioApp;
 use std::path::PathBuf;
-use vapor_studio_core::OperationKind;
-use vapor_studio_protocol::StudioAction;
+use vapor_client_protocol::ClientAction;
+use vapor_client_application::OperationKind;
 
 pub(super) enum RepreviewAfterCatalogRefresh {
-    ActiveProfile,
+    ActiveComposition,
     Source {
         selector: String,
         workspace_root: PathBuf,
@@ -12,17 +12,17 @@ pub(super) enum RepreviewAfterCatalogRefresh {
 }
 
 #[derive(Default)]
-pub(super) struct ProfileCompositionState {
-    preview: Option<vapor_studio_core::CompositionPreview>,
+pub(super) struct CompositionPreviewState {
+    preview: Option<vapor_client_application::CompositionPreview>,
     repreview_after_catalog_refresh: Option<RepreviewAfterCatalogRefresh>,
 }
 
-impl ProfileCompositionState {
-    pub(super) fn preview(&self) -> Option<&vapor_studio_core::CompositionPreview> {
+impl CompositionPreviewState {
+    pub(super) fn preview(&self) -> Option<&vapor_client_application::CompositionPreview> {
         self.preview.as_ref()
     }
 
-    pub(super) fn set_preview(&mut self, preview: vapor_studio_core::CompositionPreview) {
+    pub(super) fn set_preview(&mut self, preview: vapor_client_application::CompositionPreview) {
         self.preview = Some(preview);
     }
 
@@ -36,7 +36,8 @@ impl ProfileCompositionState {
     }
 
     pub(super) fn request_repreview_after_catalog_refresh(&mut self) {
-        self.repreview_after_catalog_refresh = Some(RepreviewAfterCatalogRefresh::ActiveProfile);
+        self.repreview_after_catalog_refresh =
+            Some(RepreviewAfterCatalogRefresh::ActiveComposition);
     }
 
     pub(super) fn request_source_repreview_after_catalog_refresh(
@@ -58,7 +59,7 @@ impl ProfileCompositionState {
 impl StudioApp {
     pub(super) fn apply_composition_preview(
         &mut self,
-        preview: vapor_studio_core::CompositionPreview,
+        preview: vapor_client_application::CompositionPreview,
     ) {
         self.status = if preview.ready() {
             format!(
@@ -72,24 +73,26 @@ impl StudioApp {
                 preview.blockers.len()
             )
         };
-        self.profile_composition.set_preview(preview);
+        self.composition_preview.set_preview(preview);
     }
 
-    pub(super) fn adopt_installed_profile_graph(&mut self) {
-        let Some(profile) = self.profile.items.get(self.profile.active_index) else {
+    pub(super) fn adopt_installed_composition_graph(&mut self) {
+        let Some(composition) = self.composition.items.get(self.composition.active_index) else {
             return;
         };
         if !matches!(
-            &profile.installation,
-            vapor_studio_core::InstallationState::OutOfDate { verified: true, .. }
+            &composition.installation,
+            vapor_client_application::InstallationState::OutOfDate { verified: true, .. }
         ) {
             return;
         }
-        let profile_id = profile.id.clone();
-        match self.apply_service_action(StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::AdoptVerifiedGraph { profile_id },
+        let composition_id = composition.id.clone();
+        match self.apply_service_action(ClientAction::Composition(
+            vapor_client_protocol::CompositionAction::AdoptVerifiedGraph { composition_id },
         )) {
-            Ok(()) => self.status = "Saved the verified installed setup to this profile.".into(),
+            Ok(()) => {
+                self.status = "Saved the verified installed content to this composition.".into()
+            }
             Err(error) => self.status = error,
         }
     }
@@ -98,20 +101,20 @@ impl StudioApp {
         if !self.require_saved_workspace("install this workspace composition") {
             return;
         }
-        let Some(profile_id) = self
-            .profile
+        let Some(composition_id) = self
+            .composition
             .items
-            .get(self.profile.active_index)
+            .get(self.composition.active_index)
             .map(|p| p.id.clone())
         else {
             return;
         };
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Install {
-                profile_id,
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::Install {
+                composition_id,
             }),
             OperationKind::Install,
-            vapor_studio_core::OperationPhase::Acquiring,
+            vapor_client_application::OperationPhase::Acquiring,
             "Installing the selected composition and dependencies…",
         );
     }
@@ -120,20 +123,20 @@ impl StudioApp {
         if !self.require_saved_workspace("update this workspace composition") {
             return;
         }
-        let Some(profile_id) = self
-            .profile
+        let Some(composition_id) = self
+            .composition
             .items
-            .get(self.profile.active_index)
+            .get(self.composition.active_index)
             .map(|p| p.id.clone())
         else {
             return;
         };
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Update {
-                profile_id,
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::Update {
+                composition_id,
             }),
             OperationKind::Update,
-            vapor_studio_core::OperationPhase::Acquiring,
+            vapor_client_application::OperationPhase::Acquiring,
             "Updating the selected composition through Vapor Shell…",
         );
     }
@@ -142,22 +145,22 @@ impl StudioApp {
         if !self.require_saved_workspace("resolve this workspace composition") {
             return;
         }
-        let Some(profile_id) = self
-            .profile
+        let Some(composition_id) = self
+            .composition
             .items
-            .get(self.profile.active_index)
+            .get(self.composition.active_index)
             .map(|p| p.id.clone())
         else {
             return;
         };
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Preview {
-                profile_id,
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::Preview {
+                composition_id,
                 selector: None,
             }),
             OperationKind::Resolve,
-            vapor_studio_core::OperationPhase::Resolving,
-            "Resolving this profile against workspace, cache, and installed content…",
+            vapor_client_application::OperationPhase::Resolving,
+            "Checking this composition against available and installed content…",
         );
     }
 
@@ -169,7 +172,7 @@ impl StudioApp {
         self.preview_composition(
             selector,
             workspace,
-            "Resolving this source composition against workspace, cache, and installed content…",
+            "Checking the source composition against available and installed content…",
         );
     }
 
@@ -179,41 +182,41 @@ impl StudioApp {
         _workspace: Option<PathBuf>,
         status: &str,
     ) {
-        let Some(profile_id) = self
-            .profile
+        let Some(composition_id) = self
+            .composition
             .items
-            .get(self.profile.active_index)
+            .get(self.composition.active_index)
             .map(|p| p.id.clone())
         else {
             return;
         };
-        self.profile_composition.invalidate_preview();
+        self.composition_preview.invalidate_preview();
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Preview {
-                profile_id,
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::Preview {
+                composition_id,
                 selector: Some(selector),
             }),
             OperationKind::Resolve,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             status,
         );
     }
 
     pub(super) fn verify_selected_installation(&mut self) {
-        let Some(profile_id) = self
-            .profile
+        let Some(composition_id) = self
+            .composition
             .items
-            .get(self.profile.active_index)
-            .map(|profile| profile.id.clone())
+            .get(self.composition.active_index)
+            .map(|composition| composition.id.clone())
         else {
             return;
         };
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Verify {
-                profile_id,
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::Verify {
+                composition_id,
             }),
             OperationKind::Verify,
-            vapor_studio_core::OperationPhase::Verifying,
+            vapor_client_application::OperationPhase::Verifying,
             "Verifying installed composition…",
         );
     }
@@ -222,56 +225,63 @@ impl StudioApp {
         if !self.require_saved_workspace("repair this workspace composition") {
             return;
         }
-        let Some(profile_id) = self
-            .profile
+        let Some(composition_id) = self
+            .composition
             .items
-            .get(self.profile.active_index)
-            .map(|profile| profile.id.clone())
+            .get(self.composition.active_index)
+            .map(|composition| composition.id.clone())
         else {
             return;
         };
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Repair {
-                profile_id,
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::Repair {
+                composition_id,
             }),
             OperationKind::Repair,
-            vapor_studio_core::OperationPhase::Acquiring,
+            vapor_client_application::OperationPhase::Acquiring,
             "Repairing installed composition…",
         );
     }
 
     pub(super) fn run_installed_selected(&mut self) {
-        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
+        let Some(composition) = self
+            .composition
+            .items
+            .get(self.composition.active_index)
+            .cloned()
+        else {
             return;
         };
         if matches!(
-            &profile.installation,
-            vapor_studio_core::InstallationState::OutOfDate { .. }
+            &composition.installation,
+            vapor_client_application::InstallationState::OutOfDate { .. }
         ) {
-            self.status = "Review or update this profile's game setup before launching.".to_owned();
+            self.status = "Review or update this composition before launching.".to_owned();
             return;
         }
-        if profile.root_package.is_none() {
+        if composition.root_package.is_none() {
             return;
         }
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Launch { profile_id: profile.id }),
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::Launch { composition_id: composition.id }),
             OperationKind::RunInstalled,
-            vapor_studio_core::OperationPhase::Running,
-            "Preparing game setup. Steam must be open and signed in if Workshop items need downloading…",
+            vapor_client_application::OperationPhase::Running,
+            "Preparing composition. Steam must be open and signed in if Workshop items need downloading…",
         );
     }
 
-    pub(super) fn ensure_default_profile_root(&mut self) -> bool {
-        if self.profile.items[self.profile.active_index]
+    pub(super) fn ensure_default_composition_root(&mut self) -> bool {
+        if self.composition.items[self.composition.active_index]
             .root_package
             .is_some()
         {
             return true;
         }
-        let profile_id = self.profile.items[self.profile.active_index].id.clone();
-        match self.apply_service_action(StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::ResolveDefaultRoot { profile_id },
+        let composition_id = self.composition.items[self.composition.active_index]
+            .id
+            .clone();
+        match self.apply_service_action(ClientAction::Composition(
+            vapor_client_protocol::CompositionAction::ResolveDefaultRoot { composition_id },
         )) {
             Ok(()) => true,
             Err(error) => {
@@ -281,8 +291,8 @@ impl StudioApp {
         }
     }
 
-    pub(super) fn launch_default_profile(&mut self) {
-        if self.ensure_default_profile_root() {
+    pub(super) fn launch_default_composition(&mut self) {
+        if self.ensure_default_composition_root() {
             self.run_installed_selected();
         }
     }
@@ -291,18 +301,23 @@ impl StudioApp {
         if !self.require_open_workspace("build and play this workspace composition") {
             return;
         }
-        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
+        let Some(composition) = self
+            .composition
+            .items
+            .get(self.composition.active_index)
+            .cloned()
+        else {
             return;
         };
-        if profile.root_package.is_none() || profile.workspace.is_none() {
+        if composition.root_package.is_none() || composition.workspace.is_none() {
             return;
         }
         self.start_service_composition_operation(
-            StudioAction::Composition(vapor_studio_protocol::CompositionAction::RunSource {
-                profile_id: profile.id,
+            ClientAction::Composition(vapor_client_protocol::CompositionAction::RunSource {
+                composition_id: composition.id,
             }),
             OperationKind::Run,
-            vapor_studio_core::OperationPhase::Running,
+            vapor_client_application::OperationPhase::Running,
             concat!(
                 "Building this project and starting the game. ",
                 "Open and sign in to Steam if missing Workshop items are needed…",

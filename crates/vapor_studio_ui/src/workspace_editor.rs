@@ -6,8 +6,8 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use vapor_studio_core::{OperationKind, OperationPhase, workspace_file_fingerprint};
-use vapor_studio_protocol::{StudioAction, WorkspaceAction, WorkspaceFileResult};
+use vapor_client_protocol::{ClientAction, WorkspaceAction, WorkspaceFileResult};
+use vapor_client_application::{OperationKind, OperationPhase, workspace_file_fingerprint};
 
 const DOCUMENT_INSPECTION_DELAY: Duration = Duration::from_millis(350);
 
@@ -466,7 +466,7 @@ impl StudioApp {
             return;
         }
         self.start_service_operation(
-            StudioAction::Workspace(WorkspaceAction::ListFiles { path: ".".into() }),
+            ClientAction::Workspace(WorkspaceAction::ListFiles { path: ".".into() }),
             None,
             OperationKind::DiscoverWorkspace,
             OperationPhase::Resolving,
@@ -500,7 +500,7 @@ impl StudioApp {
             return;
         }
         self.start_service_operation(
-            StudioAction::Workspace(WorkspaceAction::OpenFile {
+            ClientAction::Workspace(WorkspaceAction::OpenFile {
                 path: path.to_string_lossy().into_owned(),
             }),
             None,
@@ -584,7 +584,7 @@ impl StudioApp {
             return;
         };
         self.start_service_operation(
-            StudioAction::Workspace(WorkspaceAction::OpenFile {
+            ClientAction::Workspace(WorkspaceAction::OpenFile {
                 path: path.to_string_lossy().into_owned(),
             }),
             None,
@@ -629,7 +629,7 @@ impl StudioApp {
             return;
         }
         self.start_service_operation(
-            StudioAction::Workspace(WorkspaceAction::CreateFile {
+            ClientAction::Workspace(WorkspaceAction::CreateFile {
                 path: relative.to_string_lossy().into_owned(),
                 contents: String::new(),
             }),
@@ -673,12 +673,12 @@ impl StudioApp {
                     return;
                 }
                 let path = PathBuf::from(path);
-                if let Some(saved) = self.workspace.editor.save_in_flight.take() {
-                    if saved.path == path {
-                        self.apply_workspace_file_saved(path, saved.contents, fingerprint);
-                        if let Some(batch) = self.workspace.editor.save_batch.as_mut() {
-                            batch.saved += 1;
-                        }
+                if let Some(saved) = self.workspace.editor.save_in_flight.take()
+                    && saved.path == path
+                {
+                    self.apply_workspace_file_saved(path, saved.contents, fingerprint);
+                    if let Some(batch) = self.workspace.editor.save_batch.as_mut() {
+                        batch.saved += 1;
                     }
                 }
                 self.finish_service_result_operation(&operation_id);
@@ -716,10 +716,12 @@ impl StudioApp {
                     return;
                 }
                 self.workspace.pending_unregistration = None;
-                self.invalidate_profiles_for_source_content(&vapor_studio_core::ContentIdentity {
-                    id: content_id,
-                    version,
-                });
+                self.invalidate_compositions_for_source_content(
+                    &vapor_client_application::ContentReference {
+                        id: content_id,
+                        version,
+                    },
+                );
                 self.finish_service_result_operation(&operation_id);
             }
         }
@@ -750,7 +752,7 @@ impl StudioApp {
             return;
         };
         self.start_service_operation(
-            StudioAction::Workspace(WorkspaceAction::SaveFile {
+            ClientAction::Workspace(WorkspaceAction::SaveFile {
                 path: save.path.to_string_lossy().into_owned(),
                 expected_fingerprint: save.expected_fingerprint.clone(),
                 contents: save.contents.clone(),
@@ -760,17 +762,17 @@ impl StudioApp {
             OperationPhase::Building,
             "Saving workspace file…",
         );
-        if !self.operation.service_owned {
-            if let Some(save) = self.workspace.editor.save_in_flight.take() {
-                if let Some(batch) = self.workspace.editor.save_batch.as_mut() {
-                    batch.failures.push(format!(
-                        "{}: the Studio service could not start the save",
-                        save.path.display()
-                    ));
-                    self.start_next_workspace_file_save();
-                } else {
-                    self.status = "The Studio service could not start the save.".to_owned();
-                }
+        if !self.operation.service_owned
+            && let Some(save) = self.workspace.editor.save_in_flight.take()
+        {
+            if let Some(batch) = self.workspace.editor.save_batch.as_mut() {
+                batch.failures.push(format!(
+                    "{}: the Studio service could not start the save",
+                    save.path.display()
+                ));
+                self.start_next_workspace_file_save();
+            } else {
+                self.status = "The Studio service could not start the save.".to_owned();
             }
         }
     }

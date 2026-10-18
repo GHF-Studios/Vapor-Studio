@@ -1,11 +1,11 @@
 use super::super::StudioApp;
 use eframe::egui;
-use vapor_studio_protocol::{ProfileAction, StudioAction};
+use vapor_client_protocol::{ClientAction, CompositionAction};
 
 impl StudioApp {
-    pub(super) fn draw_profile_launch_panel(&mut self, ui: &mut eframe::egui::Ui) {
+    pub(super) fn draw_composition_launch_panel(&mut self, ui: &mut eframe::egui::Ui) {
         let mut persist_arguments = false;
-        let argument_count = self.profile.items[self.profile.active_index]
+        let argument_count = self.composition.items[self.composition.active_index]
             .launch
             .arguments
             .len();
@@ -17,10 +17,13 @@ impl StudioApp {
         egui::CollapsingHeader::new(title)
             .default_open(false)
             .show(ui, |ui| {
-                ui.weak("Additional arguments passed individually to this profile's Engine.");
-                let active_profile = self.profile.active_index;
+                ui.weak("Additional arguments passed individually to this composition's Engine.");
+                let active_composition = self.composition.active_index;
                 let can_edit = !self.operation.running;
-                let argument_count = self.profile.items[active_profile].launch.arguments.len();
+                let argument_count = self.composition.items[active_composition]
+                    .launch
+                    .arguments
+                    .len();
                 if argument_count == 0 {
                     ui.weak("No additional Engine arguments.");
                 }
@@ -32,7 +35,8 @@ impl StudioApp {
                         let response = ui.add_enabled(
                             can_edit,
                             egui::TextEdit::singleline(
-                                &mut self.profile.items[active_profile].launch.arguments[index],
+                                &mut self.composition.items[active_composition].launch.arguments
+                                    [index],
                             )
                             .char_limit(4096)
                             .desired_width(input_width),
@@ -47,7 +51,7 @@ impl StudioApp {
                     });
                 }
                 if let Some(index) = remove_argument {
-                    self.profile.items[active_profile]
+                    self.composition.items[active_composition]
                         .launch
                         .arguments
                         .remove(index);
@@ -60,7 +64,7 @@ impl StudioApp {
                     )
                     .clicked()
                 {
-                    self.profile.items[active_profile]
+                    self.composition.items[active_composition]
                         .launch
                         .arguments
                         .push(String::new());
@@ -68,10 +72,10 @@ impl StudioApp {
                 }
             });
         if persist_arguments {
-            let profile = &self.profile.items[self.profile.active_index];
-            let action = StudioAction::Profile(ProfileAction::SetLaunchArguments {
-                profile_id: profile.id.clone(),
-                arguments: profile.launch.arguments.clone(),
+            let composition = &self.composition.items[self.composition.active_index];
+            let action = ClientAction::Composition(CompositionAction::SetLaunchArguments {
+                composition_id: composition.id.clone(),
+                arguments: composition.launch.arguments.clone(),
             });
             if let Err(error) = self.apply_service_action(action) {
                 self.status = error;

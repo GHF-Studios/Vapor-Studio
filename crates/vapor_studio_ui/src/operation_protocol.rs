@@ -8,30 +8,14 @@ pub(super) struct WorkspaceOpenSnapshot {
     pub(super) workspace_files: Result<Vec<PathBuf>, String>,
 }
 pub(super) enum OperationResult {
-    Workspace(Result<VaporWorkspace, String>),
+    Workspace(Box<Result<VaporWorkspace, String>>),
     Message(Result<String, String>),
-    RootPublish(Result<vapor_sdk_core::root::types::RootPublishReport, String>),
 }
 impl OperationResult {
     pub(super) fn failure(&self) -> Option<String> {
         match self {
-            Self::Workspace(Err(error))
-            | Self::Message(Err(error))
-            | Self::RootPublish(Err(error)) => Some(error.clone()),
-            Self::RootPublish(Ok(report))
-                if report
-                    .status
-                    .as_ref()
-                    .is_some_and(|status| !status.success()) =>
-            {
-                Some(format!(
-                    "Steam root upload failed with {}",
-                    report
-                        .status
-                        .as_ref()
-                        .map_or_else(|| "unknown status".to_owned(), ToString::to_string)
-                ))
-            }
+            Self::Workspace(result) => result.as_ref().as_ref().err().cloned(),
+            Self::Message(Err(error)) => Some(error.clone()),
             _ => None,
         }
     }

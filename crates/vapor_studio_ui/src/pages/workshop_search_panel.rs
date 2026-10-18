@@ -7,9 +7,9 @@ use eframe::egui;
 enum WorkshopSearchAction {
     ReviewLocal(String),
     Import(String),
-    UseAsProfileRoot(String),
-    LaunchAsProfileRoot(String),
-    ReviewProfile,
+    UseAsCompositionRoot(String),
+    LaunchAsCompositionRoot(String),
+    ReviewComposition,
     ChangeSubscription(String, bool),
     RefreshCache(String),
 }
@@ -34,7 +34,7 @@ impl StudioApp {
                 )
                 .clicked();
         });
-        ui.weak("Download a copy to this device. Studio can add playable game setups to your profile and launch them; subscribe to let Steam track updates.");
+        ui.weak("Subscribe to add content to your Library and receive Steam updates. Add-ons can be added to a compatible composition later.");
         if run_search && !self.operation.running {
             self.search_workshop();
         }
@@ -113,7 +113,7 @@ impl StudioApp {
         if !self.workshop.selected_items.is_empty() {
             let count = self.workshop.selected_items.len();
             let subscription_batch_supported =
-                count <= vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH;
+                count <= vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH;
             let mut subscription_action = None;
             ui.horizontal_wrapped(|ui| {
                 ui.small(format!(
@@ -132,7 +132,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running,
-                        egui::Button::new(format!("Download {count} items")),
+                        egui::Button::new(format!("Add {count} to Library")),
                     )
                     .clicked()
                 {
@@ -141,7 +141,7 @@ impl StudioApp {
                 if ui
                     .add_enabled(
                         !self.operation.running && subscription_batch_supported,
-                        egui::Button::new("Subscribe selected"),
+                        egui::Button::new("Subscribe and add to Library"),
                     )
                     .clicked()
                 {
@@ -164,7 +164,7 @@ impl StudioApp {
             if !subscription_batch_supported {
                 ui.small(format!(
                     "Steam subscription changes handle up to {} items at once. Import selection remains available.",
-                    vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH
+                    vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH
                 ));
             }
         }
@@ -189,7 +189,7 @@ impl StudioApp {
                 empty_state(
                     ui,
                     "Find content in Steam Workshop",
-                    "Search Steam Workshop for community content. Download a copy to use in a game setup, or subscribe to let Steam keep it updated. Neither action changes your current game setup.",
+                    "Search Steam Workshop for community content. Subscribe to add an item to your Library and receive updates. This does not change a composition.",
                     |ui| {
                         if ui.button("Search Workshop").clicked() {
                             run_search = true;
@@ -285,10 +285,10 @@ impl StudioApp {
                 let mut locally_available = false;
                 let mut local_conflict = false;
                 let mut available_packagepack = false;
-                let mut included_in_active_profile = false;
-                let mut selected_as_profile_root = false;
-                let active_profile = &self.profile.items[self.profile.active_index];
-                let active_graph = active_profile.resolved_graph.as_ref();
+                let mut included_in_active_composition = false;
+                let mut selected_as_composition_root = false;
+                let active_composition = &self.composition.items[self.composition.active_index];
+                let active_graph = active_composition.resolved_graph.as_ref();
                 for content in &self.catalog.items {
                     if content.published_file_id.as_deref()
                         != Some(item.published_file_id.as_str())
@@ -300,11 +300,11 @@ impl StudioApp {
                     available_packagepack |= content.kind
                         == vapor_core::ContentKind::Packagepack.as_str()
                         && content.is_unambiguous();
-                    selected_as_profile_root |= self.is_active_profile_root(
+                    selected_as_composition_root |= self.is_active_composition_root(
                         &content.id,
                         content.version.as_deref(),
                     );
-                    included_in_active_profile |= active_graph.is_some_and(|graph| {
+                    included_in_active_composition |= active_graph.is_some_and(|graph| {
                         graph.nodes.iter().any(|node| {
                             node.content.id == content.id
                                 && node.content.version == content.version
@@ -317,10 +317,10 @@ impl StudioApp {
                 if local_conflict {
                     status_text(
                         details,
-                        "Local records disagree about this Workshop item. Review them in Discover before assigning it to a profile.",
+                        "This item has conflicting copies on this device. Review them in App Status before using it.",
                         StatusTone::Caution,
                     );
-                    if details.button("Review local records").clicked() {
+                    if details.button("Open App Status").clicked() {
                         action = Some(WorkshopSearchAction::ReviewLocal(
                             item.published_file_id.clone(),
                         ));
@@ -330,7 +330,7 @@ impl StudioApp {
                     details.add_enabled_ui(!self.operation.running, |ui| {
                         clicked = super::super::components::design::primary_button(
                             ui,
-                            "Download to this app",
+                            "Add to Library",
                         )
                         .clicked();
                     });
@@ -339,24 +339,24 @@ impl StudioApp {
                             item.published_file_id.clone(),
                         ));
                     }
-                } else if selected_as_profile_root {
-                    details.strong("Used as this profile's game setup");
+                } else if selected_as_composition_root {
+                    details.strong("Used by this composition");
                     let mut clicked = false;
                     details.add_enabled_ui(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                         |ui| {
                             clicked = super::super::components::design::primary_button(
                                 ui,
-                                "Review game setup",
+                                "Review composition",
                             )
                             .clicked();
                         },
                     );
                     if clicked {
-                        action = Some(WorkshopSearchAction::ReviewProfile);
+                        action = Some(WorkshopSearchAction::ReviewComposition);
                     }
                 } else if available_packagepack {
-                    details.label("Available in local content");
+                    details.label("Available in Library");
                     let mut clicked = false;
                     details.add_enabled_ui(
                         !self.operation.running
@@ -366,23 +366,23 @@ impl StudioApp {
                         |ui| {
                             clicked = super::super::components::design::primary_button(
                                 ui,
-                                &format!("Use in {}", self.profile.items[self.profile.active_index].name),
+                                &format!("Use in {}", self.composition.items[self.composition.active_index].name),
                             )
                             .clicked();
                         },
                     )
                     .response
                     .on_disabled_hover_text(if !local_catalog_current {
-                        "Refresh the on-device content list before choosing this as your profile's game setup."
+                        "Refresh the content list before choosing this for your composition."
                     } else if create_draft_blocks_assignment {
-                        "Discard the Create draft before changing the profile to this item's workspace."
+                        "Discard the Create draft before changing the composition to this item's workspace."
                     } else if self.has_unsaved_workspace_edits() {
-                        "Save or discard workspace edits before changing the active profile."
+                        "Save or discard workspace edits before changing the active composition."
                     } else {
-                        "Finish the current operation before changing the active profile."
+                        "Finish the current operation before changing the active composition."
                     });
                     if clicked {
-                        action = Some(WorkshopSearchAction::UseAsProfileRoot(
+                        action = Some(WorkshopSearchAction::UseAsCompositionRoot(
                             item.published_file_id.clone(),
                         ));
                     }
@@ -396,49 +396,49 @@ impl StudioApp {
                         |ui| {
                             launch_clicked = super::super::components::design::primary_button(
                                 ui,
-                                "Launch this game setup",
+                                "Launch this composition",
                             )
                             .clicked();
                         },
                     )
                     .response
                     .on_disabled_hover_text(if !local_catalog_current {
-                        "Refresh the on-device content list before launching this game setup."
+                        "Refresh the on-device content list before launching this composition."
                     } else if local_conflict {
-                        "Review local content records before launching this game setup."
+                        "Resolve the conflicting content copies before launching this composition."
                     } else if create_draft_blocks_assignment {
-                        "Discard the Create draft before switching this profile."
+                        "Discard the Create draft before switching this composition."
                     } else if self.has_unsaved_workspace_edits() {
-                        "Save or discard project edits before switching this profile."
+                        "Save or discard project edits before switching this composition."
                     } else if self.operation.running {
                         "Wait for the current operation to finish."
                     } else {
-                        "Launch this game setup."
+                        "Launch this composition."
                     });
                     if launch_clicked {
-                        action = Some(WorkshopSearchAction::LaunchAsProfileRoot(
+                        action = Some(WorkshopSearchAction::LaunchAsCompositionRoot(
                             item.published_file_id.clone(),
                         ));
                     }
-                } else if included_in_active_profile {
-                    details.label("Available in local content");
+                } else if included_in_active_composition {
+                    details.label("Available in Library");
                     let mut clicked = false;
                     details.add_enabled_ui(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                         |ui| {
                             clicked = super::super::components::design::primary_button(
                                 ui,
-                                "Review game setup",
+                                "Review composition",
                             )
                             .clicked();
                         },
                     );
                     if clicked {
-                        action = Some(WorkshopSearchAction::ReviewProfile);
+                        action = Some(WorkshopSearchAction::ReviewComposition);
                     }
                 } else {
-                    details.label("Available in local content");
-                    details.weak("This item is not included in the active play profile.");
+                    details.label("Available in Library");
+                    details.weak("This item is not included in the active composition.");
                 }
                 details.horizontal_wrapped(|ui| {
                     if ui
@@ -462,7 +462,7 @@ impl StudioApp {
                         && ui
                             .add_enabled(
                                 !self.operation.running,
-                                egui::Button::new("Refresh cached copy"),
+                                egui::Button::new("Update from Workshop"),
                             )
                             .clicked()
                     {
@@ -484,14 +484,14 @@ impl StudioApp {
                 self.workshop.published_file_id = id;
                 self.download_workshop_item();
             }
-            Some(WorkshopSearchAction::UseAsProfileRoot(id)) => {
-                self.use_available_workshop_package_as_profile_root(&id);
+            Some(WorkshopSearchAction::UseAsCompositionRoot(id)) => {
+                self.use_available_workshop_package_as_composition_root(&id);
             }
-            Some(WorkshopSearchAction::LaunchAsProfileRoot(id)) => {
-                self.launch_workshop_package_as_profile_root(&id);
+            Some(WorkshopSearchAction::LaunchAsCompositionRoot(id)) => {
+                self.launch_workshop_package_as_composition_root(&id);
             }
-            Some(WorkshopSearchAction::ReviewProfile) => {
-                self.activate_navigation_section(super::super::Section::Library);
+            Some(WorkshopSearchAction::ReviewComposition) => {
+                self.activate_navigation_section(super::super::Section::Compositions);
                 self.preview_selected_composition();
             }
             Some(WorkshopSearchAction::ChangeSubscription(id, subscribe)) => {

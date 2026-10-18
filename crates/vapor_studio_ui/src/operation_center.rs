@@ -29,17 +29,17 @@ impl StudioApp {
                 }
             } else if let Some(last) = self.operation.operation_history.front() {
                 let tone = match &last.event.status {
-                    vapor_studio_core::OperationStatus::Succeeded { summary }
+                    vapor_client_application::OperationStatus::Succeeded { summary }
                         if summary == &self.status =>
                     {
                         StatusTone::Positive
                     }
-                    vapor_studio_core::OperationStatus::Failed { message }
+                    vapor_client_application::OperationStatus::Failed { message }
                         if message == &self.status =>
                     {
                         StatusTone::Error
                     }
-                    vapor_studio_core::OperationStatus::Cancelled if self.status == "Cancelled" => {
+                    vapor_client_application::OperationStatus::Cancelled if self.status == "Cancelled" => {
                         StatusTone::Caution
                     }
                     _ => StatusTone::Neutral,
@@ -68,19 +68,19 @@ pub(super) fn compact_status(status: &str) -> String {
     summary
 }
 
-pub(super) fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &'static str {
-    use vapor_studio_core::OperationKind::*;
+pub(super) fn operation_kind_label(kind: &vapor_client_application::OperationKind) -> &'static str {
+    use vapor_client_application::OperationKind::*;
     match kind {
         Discover => "Refresh available content",
         SearchWorkshop => "Search Steam Workshop",
         LoadWorkshopSubscriptions => "Check your Workshop subscriptions",
         ChangeWorkshopSubscription => "Update Workshop subscriptions",
-        Resolve => "Check game setup",
+        Resolve => "Check composition",
         Acquire => "Download content",
-        Install => "Install game setup",
+        Install => "Install composition",
         Verify => "Check installed files",
-        Update => "Update game setup",
-        Repair => "Repair game setup",
+        Update => "Update composition",
+        Repair => "Repair composition",
         CreateWorkspace => "Create project folder",
         CreateContent => "Create content project",
         LoadComposition => "Load included content",
@@ -104,7 +104,7 @@ pub(super) fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &
         Clean => "Clean project files",
         Validate => "Check content setup",
         Run => "Build and launch project",
-        RunInstalled => "Launch game setup",
+        RunInstalled => "Launch composition",
         StageWorkshop => "Review Workshop upload",
         PublishWorkshop => "Publish to Steam Workshop",
         StageRootDistribution => "Review Steam release",
@@ -112,8 +112,8 @@ pub(super) fn operation_kind_label(kind: &vapor_studio_core::OperationKind) -> &
     }
 }
 
-fn operation_phase_label(phase: &vapor_studio_core::OperationPhase) -> &'static str {
-    use vapor_studio_core::OperationPhase::*;
+fn operation_phase_label(phase: &vapor_client_application::OperationPhase) -> &'static str {
+    use vapor_client_application::OperationPhase::*;
     match phase {
         Queued => "Queued",
         Resolving => "Checking requirements",

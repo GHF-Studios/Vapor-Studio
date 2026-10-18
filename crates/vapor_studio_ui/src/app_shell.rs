@@ -3,41 +3,42 @@ use super::directory_picker::{DirectoryPickerPurpose, DirectoryPickerResult};
 use super::workshop::WorkshopTab;
 use super::workspace_ops::WorkspacePanel;
 use super::{Section, StudioApp};
+use crate::navigation::{NAVIGATION_GROUPS, NavigationArea, NavigationGroup};
 use eframe::egui;
-use vapor_studio_core::{CURRENT_SCHEMA_VERSION, ProfileDocument};
+use vapor_client_application::{CURRENT_SCHEMA_VERSION, CompositionDocument};
 
 impl StudioApp {
-    pub(super) fn draw_profile_target_selector(&mut self, ui: &mut egui::Ui) {
-        let active_profile = self.profile.active_index;
+    pub(super) fn draw_composition_target_selector(&mut self, ui: &mut egui::Ui) {
+        let active_composition = self.composition.active_index;
         let can_switch = !self.operation.running && !self.has_unsaved_context_switch_edits();
-        let mut requested_profile = None;
+        let mut requested_composition = None;
         let selector = ui.add_enabled_ui(can_switch, |ui| {
-            egui::ComboBox::from_id_salt("active-profile")
+            egui::ComboBox::from_id_salt("active-composition")
                 .width(190.0)
-                .selected_text(&self.profile.items[active_profile].name)
+                .selected_text(&self.composition.items[active_composition].name)
                 .show_ui(ui, |ui| {
-                    for (index, profile) in self.profile.items.iter().enumerate() {
-                        let selected = index == active_profile;
-                        if ui.selectable_label(selected, &profile.name).clicked() && !selected {
-                            requested_profile = Some(index);
+                    for (index, composition) in self.composition.items.iter().enumerate() {
+                        let selected = index == active_composition;
+                        if ui.selectable_label(selected, &composition.name).clicked() && !selected {
+                            requested_composition = Some(index);
                         }
                     }
                 })
         });
         let hover_text = if !can_switch {
             if self.operation.running {
-                "Wait for the current operation to finish before switching profiles."
+                "Wait for the current operation to finish before switching compositions."
             } else if self.authoring.pending_composition_role_change.is_some() {
-                "Resolve the pending composition role choice before switching profiles."
+                "Resolve the pending composition role choice before switching compositions."
             } else {
-                "Save or discard the Create draft and workspace edits before switching profiles."
+                "Save or discard the Create draft and workspace edits before switching compositions."
             }
         } else {
-            "A play profile remembers the game setup and launch settings you want to use."
+            "Your composition includes its playable content and launch settings."
         };
         let _ = selector.response.on_hover_text(hover_text);
-        if let Some(requested_profile) = requested_profile {
-            self.select_profile(requested_profile);
+        if let Some(requested_composition) = requested_composition {
+            self.select_composition(requested_composition);
         }
     }
 
@@ -101,22 +102,24 @@ impl StudioApp {
 
     fn select_navigation_section(&mut self, ui: &mut egui::Ui, section: Section) {
         let explanation = match section {
-            Section::Home => "Launch your selected game setup.",
-            Section::Library => "Manage game profiles and the setups they use.",
+            Section::Home => "Launch your selected composition.",
+            Section::Compositions => "Launch or customize your playable compositions.",
+            Section::Library => "Browse downloaded and installed content on this device.",
             Section::Discover => "Browse content on this device or in Steam Workshop.",
             Section::Create => "Start a new content project from a template.",
             Section::Workspace => "Open and edit your project files and content.",
-            Section::Compose => "Choose the game engine, game, and add-ons for a play profile.",
+            Section::Compose => "Choose the content included in a composition.",
             Section::Publish => "Review your content before sharing it.",
             Section::Diagnostics => "Check the app and its available tools.",
         };
         let response = ui
             .add_sized(
-                [ui.available_width(), 32.0],
+                [ui.available_width(), 28.0],
                 egui::Button::selectable(
                     self.section == section,
                     self.navigation_section_label(section),
-                ),
+                )
+                .wrap_mode(egui::TextWrapMode::Truncate),
             )
             .on_hover_text(explanation);
         if response.clicked() {
@@ -125,116 +128,97 @@ impl StudioApp {
     }
 
     fn draw_navigation(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("VAPOR")
-                    .size(21.0)
-                    .strong()
-                    .color(ACCENT),
-            );
-            ui.label(egui::RichText::new("STUDIO").small().strong());
-        });
+        ui.set_min_height(ui.available_height());
+        ui.spacing_mut().item_spacing.y = 2.0;
+        ui.spacing_mut().button_padding = egui::vec2(4.0, 2.0);
+        ui.label(
+            egui::RichText::new("VAPOR STUDIO")
+                .small()
+                .strong()
+                .color(ACCENT),
+        );
         if ui
-            .button("Search Studio · Ctrl/Cmd+K")
+            .add_sized(
+                [ui.available_width(), 25.0],
+                egui::Button::new("Search · Ctrl/Cmd+K"),
+            )
             .on_hover_text("Find a page or common workspace action")
             .clicked()
         {
             self.open_command_palette();
         }
-        ui.add_space(8.0);
+        ui.add_space(2.0);
         egui::ScrollArea::vertical()
             .id_salt("studio-navigation-items")
             .auto_shrink([false, false])
-            .max_height((ui.available_height() - 150.0).max(100.0))
+            .max_height((ui.available_height() - 95.0).max(80.0))
             .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("PLAY")
-                        .small()
-                        .strong()
-                        .color(MUTED_TEXT),
-                );
-                self.select_navigation_section(ui, Section::Home);
-                self.select_navigation_section(ui, Section::Library);
-                self.select_navigation_section(ui, Section::Compose);
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("DISCOVER")
-                        .small()
-                        .strong()
-                        .color(MUTED_TEXT),
-                );
-                self.select_navigation_section(ui, Section::Discover);
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("CREATE")
-                        .small()
-                        .strong()
-                        .color(MUTED_TEXT),
-                );
-                self.select_navigation_section(ui, Section::Create);
-                self.select_navigation_section(ui, Section::Workspace);
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("SHARE")
-                        .small()
-                        .strong()
-                        .color(MUTED_TEXT),
-                );
-                self.select_navigation_section(ui, Section::Publish);
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("APP")
-                        .small()
-                        .strong()
-                        .color(MUTED_TEXT),
-                );
-                self.select_navigation_section(ui, Section::Diagnostics);
+                for group in NAVIGATION_GROUPS {
+                    self.draw_navigation_group(ui, group);
+                    ui.add_space(3.0);
+                }
             });
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            ui.small("Vapor Studio");
-            ui.separator();
-            let workspace_name = if self.workspace.root.trim().is_empty() {
-                "No workspace open".to_owned()
+        ui.separator();
+        let workspace_name = if self.workspace.root.trim().is_empty() {
+            "No project open".to_owned()
+        } else {
+            std::path::Path::new(&self.workspace.root)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&self.workspace.root)
+                .to_owned()
+        };
+        ui.label(
+            egui::RichText::new(workspace_name)
+                .strong()
+                .small()
+                .color(MUTED_TEXT),
+        )
+        .on_hover_text(&self.workspace.root);
+        if self.has_unsaved_context_switch_edits() {
+            status_text(ui, "Unsaved edits", StatusTone::Caution);
+        }
+        let action = if self.workspace.root.trim().is_empty() {
+            "Open project folder"
+        } else {
+            "Manage project folder"
+        };
+        if ui
+            .add_sized([ui.available_width(), 25.0], egui::Button::new(action))
+            .clicked()
+        {
+            if self.workspace.root.trim().is_empty() {
+                self.open_workspace_picker();
             } else {
-                std::path::Path::new(&self.workspace.root)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(&self.workspace.root)
-                    .to_owned()
+                self.activate_navigation_section(Section::Workspace);
+            }
+        }
+    }
+
+    fn draw_navigation_group(&mut self, ui: &mut egui::Ui, group: &NavigationGroup) {
+        let draw_items = |ui: &mut egui::Ui, this: &mut Self| {
+            let color = match group.area {
+                NavigationArea::Creator => egui::Color32::from_rgb(235, 190, 98),
+                NavigationArea::Player | NavigationArea::Application => MUTED_TEXT,
             };
-            let style = ui.style().clone();
-            egui::Frame::group(&style).show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("CURRENT PROJECT FOLDER")
-                        .small()
-                        .strong()
-                        .color(MUTED_TEXT),
-                );
-                ui.label(egui::RichText::new(workspace_name).strong());
-                if !self.workspace.root.trim().is_empty() {
-                    ui.small(&self.workspace.root);
-                }
-                if self.has_unsaved_context_switch_edits() {
-                    status_text(ui, "Unsaved edits", StatusTone::Caution);
-                } else if !self.workspace.root.trim().is_empty() {
-                    ui.weak("Project folder open");
-                }
-                if ui
-                    .button(if self.workspace.root.trim().is_empty() {
-                        "Open project folder"
-                    } else {
-                        "Manage project folder"
-                    })
-                    .clicked()
-                {
-                    if self.workspace.root.trim().is_empty() {
-                        self.open_workspace_picker();
-                    } else {
-                        self.activate_navigation_section(Section::Workspace);
-                    }
-                }
-            });
-        });
+            ui.label(
+                egui::RichText::new(group.label)
+                    .small()
+                    .strong()
+                    .color(color),
+            );
+            for section in group.sections {
+                this.select_navigation_section(ui, *section);
+            }
+        };
+        if group.area == NavigationArea::Creator {
+            let mut frame = egui::Frame::group(ui.style());
+            frame.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(186, 132, 48));
+            frame.inner_margin = egui::Margin::same(5);
+            frame.show(ui, |ui| draw_items(ui, self));
+        } else {
+            draw_items(ui, self);
+        }
     }
 
     fn draw_compact_navigation(&mut self, ui: &mut egui::Ui) {
@@ -251,24 +235,29 @@ impl StudioApp {
             egui::ComboBox::from_id_salt("studio-compact-navigation")
                 .selected_text(self.navigation_section_label(self.section))
                 .show_ui(ui, |ui| {
-                    for section in [
-                        Section::Home,
-                        Section::Library,
-                        Section::Compose,
-                        Section::Discover,
-                        Section::Create,
-                        Section::Workspace,
-                        Section::Publish,
-                        Section::Diagnostics,
-                    ] {
-                        if ui
-                            .selectable_label(
-                                self.section == section,
-                                self.navigation_section_label(section),
-                            )
-                            .clicked()
-                        {
-                            requested_section = Some(section);
+                    for group in NAVIGATION_GROUPS {
+                        ui.separator();
+                        let color = if group.area == NavigationArea::Creator {
+                            egui::Color32::from_rgb(235, 190, 98)
+                        } else {
+                            MUTED_TEXT
+                        };
+                        ui.label(
+                            egui::RichText::new(group.label)
+                                .small()
+                                .strong()
+                                .color(color),
+                        );
+                        for section in group.sections {
+                            if ui
+                                .selectable_label(
+                                    self.section == *section,
+                                    self.navigation_section_label(*section),
+                                )
+                                .clicked()
+                            {
+                                requested_section = Some(*section);
+                            }
                         }
                     }
                 });
@@ -298,24 +287,19 @@ impl StudioApp {
         }
     }
 
-    fn draw_header(&mut self, ui: &mut egui::Ui, compact_navigation: bool) {
-        let show_workspace = !compact_navigation
-            && matches!(
-                self.section,
-                Section::Discover | Section::Create | Section::Workspace | Section::Compose
-            );
-        let show_profile_picker = true;
-        let show_profile_create = matches!(self.section, Section::Home | Section::Library);
-        let active_profile_launch_state = self
-            .profile
+    fn draw_header(&mut self, ui: &mut egui::Ui) {
+        let show_composition_picker = true;
+        let show_composition_create = matches!(self.section, Section::Home | Section::Compositions);
+        let active_composition_launch_state = self
+            .composition
             .items
-            .get(self.profile.active_index)
-            .map(|profile| {
+            .get(self.composition.active_index)
+            .map(|composition| {
                 (
-                    profile.root_package.is_some(),
+                    composition.root_package.is_some(),
                     matches!(
-                        &profile.installation,
-                        vapor_studio_core::InstallationState::OutOfDate { .. }
+                        &composition.installation,
+                        vapor_client_application::InstallationState::OutOfDate { .. }
                     ),
                 )
             })
@@ -323,36 +307,20 @@ impl StudioApp {
         let show_launch_button = self.section != Section::Home;
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("VAPOR STUDIO").small().strong().color(MUTED_TEXT));
-            if show_workspace {
-                ui.separator();
-                ui.label(egui::RichText::new("PROJECT FOLDER").small().strong().color(MUTED_TEXT));
-                let workspace_label = if self.workspace.root.trim().is_empty() {
-                    "Choose folder"
-                } else {
-                    std::path::Path::new(&self.workspace.root)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or(&self.workspace.root)
-                };
-                if ui.button(workspace_label).on_hover_text(&self.workspace.root).clicked() {
-                    if self.workspace.root.trim().is_empty() {
-                        self.open_workspace_picker();
-                    } else {
-                        self.activate_navigation_section(Section::Workspace);
-                    }
-                }
-            }
-            if show_profile_picker {
-                if self.profile.recovery.is_some() {
-                    status_text(ui, "Profile recovery needed", StatusTone::Caution);
+            if show_composition_picker {
+                if self.composition.recovery.is_some() {
+                    status_text(ui, "Composition recovery needed", StatusTone::Caution);
                 }
                 ui.separator();
-                ui.label(egui::RichText::new("PLAY PROFILE").small().strong().color(MUTED_TEXT));
-                self.draw_profile_target_selector(ui);
+                ui.label(egui::RichText::new("ACTIVE COMPOSITION").small().strong().color(MUTED_TEXT));
+                self.draw_composition_target_selector(ui);
             }
             if show_launch_button {
-                if active_profile_launch_state.0 {
-                    let launch_enabled = !self.operation.running && !active_profile_launch_state.1;
+                if active_composition_launch_state.0 {
+                    let launch_enabled = !self.operation.running
+                        && self
+                            .service_action_enabled("composition.launch")
+                            .unwrap_or(!active_composition_launch_state.1);
                     if ui
                         .add_enabled(
                             launch_enabled,
@@ -361,42 +329,42 @@ impl StudioApp {
                         .on_disabled_hover_text(if self.operation.running {
                             "Wait for the current operation to finish."
                         } else {
-                            "Review or update this profile's game setup before launching."
+                            "Review or update this composition before launching."
                         })
                         .clicked()
                     {
                         self.run_installed_selected();
                     }
-                } else if ui.button("Choose game setup").clicked() {
-                    self.activate_navigation_section(Section::Library);
+                } else if ui.button("Choose a composition").clicked() {
+                    self.activate_navigation_section(Section::Compositions);
                 }
             }
-            if show_profile_create
+            if show_composition_create
                 && ui
                     .add_enabled(
                         !self.operation.running && !self.has_unsaved_context_switch_edits(),
-                        egui::Button::new("+ Play profile"),
+                        egui::Button::new("+ Composition"),
                     )
                     .on_disabled_hover_text(
-                        "Discard the Create draft or save/discard workspace edits before creating a profile.",
+                        "Discard the Create draft or save/discard workspace edits before creating a composition.",
                     )
                     .clicked()
             {
-                    let mut number = self.profile.items.len() + 1;
+                    let mut number = self.composition.items.len() + 1;
                     loop {
-                        let candidate = format!("Profile {number}");
+                        let candidate = format!("Composition {number}");
                         if !self
-                            .profile
+                            .composition
                             .items
                             .iter()
-                            .any(|profile| profile.name.eq_ignore_ascii_case(&candidate))
+                            .any(|composition| composition.name.eq_ignore_ascii_case(&candidate))
                         {
-                            self.profile.new_name = candidate;
+                            self.composition.new_name = candidate;
                             break;
                         }
                         number += 1;
                     }
-                    self.add_profile();
+                    self.add_composition();
             }
             if self.operation.running {
                 ui.separator();
@@ -427,17 +395,17 @@ impl eframe::App for StudioApp {
             }
         }
         let viewport = ui.ctx().content_rect().size();
-        let compact_navigation = viewport.x < 1040.0 || viewport.y < 520.0;
+        let compact_navigation = viewport.x < 960.0 || viewport.y < 520.0;
         if compact_navigation {
             egui::Panel::top("studio-compact-navigation")
                 .show(ui, |ui| self.draw_compact_navigation(ui));
         } else {
             egui::Panel::left("studio-navigation")
                 .resizable(false)
-                .default_size(220.0)
+                .default_size(178.0)
                 .show(ui, |ui| self.draw_navigation(ui));
         }
-        egui::Panel::top("studio-header").show(ui, |ui| self.draw_header(ui, compact_navigation));
+        egui::Panel::top("studio-header").show(ui, |ui| self.draw_header(ui));
         egui::Panel::bottom("studio-operation-center")
             .show(ui, |ui| self.draw_operation_center(ui));
         egui::CentralPanel::default().show(ui, |ui| {
@@ -452,6 +420,7 @@ impl eframe::App for StudioApp {
                     .show(ui, |ui| match self.section {
                         Section::Home => self.draw_home(ui),
                         Section::Discover => self.draw_discover(ui),
+                        Section::Compositions => self.draw_compositions(ui),
                         Section::Library => self.draw_library(ui),
                         Section::Compose => self.draw_composition(ui),
                         Section::Create => self.draw_create(ui),
@@ -475,6 +444,17 @@ impl eframe::App for StudioApp {
                     }
                     DirectoryPickerPurpose::WorkspaceParent => {
                         self.workspace.starter_path = path.display().to_string();
+                    }
+                    DirectoryPickerPurpose::Superworkspace => {
+                        let action = vapor_client_protocol::ClientAction::Workspace(
+                            vapor_client_protocol::WorkspaceAction::SetSuperworkspaceLocation {
+                                root: path.display().to_string(),
+                            },
+                        );
+                        self.status = match self.apply_service_action(action) {
+                            Ok(()) => "Vapor's shared source folder was updated.".to_owned(),
+                            Err(error) => format!("Could not change the shared source folder: {error}"),
+                        };
                     }
                 }
             }
@@ -502,7 +482,7 @@ impl eframe::App for StudioApp {
         let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
         if self.service.is_some() {
             if let Err(error) = self.persist_session_state() {
-                self.status = format!("Could not save Studio state: {error}");
+                self.status = format!("Could not save Vapor Client state: {error}");
                 save_legacy_egui_state(self, storage, editor_drafts, operation_history);
             }
         } else {
@@ -519,19 +499,22 @@ fn save_legacy_egui_state(
 ) {
     storage.set_string("workspace_root", app.workspace.root.clone());
     storage.set_string("workspace_editor_drafts", editor_drafts.unwrap_or_default());
-    let document = ProfileDocument {
+    let document = CompositionDocument {
         schema_version: CURRENT_SCHEMA_VERSION,
-        profiles: app.profile.items.clone(),
+        compositions: app.composition.items.clone(),
     };
     if let Ok(encoded) = serde_json::to_string(&document) {
-        storage.set_string("profiles", encoded);
+        storage.set_string("compositions", encoded);
     }
-    if let Some(original) = &app.profile.recovery_backup {
-        storage.set_string("profiles.recovery_backup", original.clone());
+    if let Some(original) = &app.composition.recovery_backup {
+        storage.set_string("compositions.recovery_backup", original.clone());
     }
-    storage.set_string("active_profile", app.profile.active_index.to_string());
-    if let Some(profile) = app.profile.items.get(app.profile.active_index) {
-        storage.set_string("active_profile_id", profile.id.clone());
+    storage.set_string(
+        "active_composition",
+        app.composition.active_index.to_string(),
+    );
+    if let Some(composition) = app.composition.items.get(app.composition.active_index) {
+        storage.set_string("active_composition_id", composition.id.clone());
     }
     if let Some(history) = operation_history {
         storage.set_string("operation_history", history);

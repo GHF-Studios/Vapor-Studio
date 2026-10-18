@@ -6,14 +6,14 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 
 enum SourceContentAction {
-    Validate(vapor_studio_core::SourceContent),
+    Validate(vapor_client_application::SourceContent),
     OpenManifest(PathBuf),
     EditDependencies(String),
-    UseAsProfileRoot(vapor_studio_core::ContentIdentity, PathBuf),
-    ReviewProfile,
-    EditWorkshopMetadata(vapor_studio_core::SourceContent),
-    EditRuntimeOutputs(vapor_studio_core::SourceContent),
-    Unregister(vapor_studio_core::SourceContent),
+    UseAsCompositionRoot(vapor_client_application::ContentReference, PathBuf),
+    ReviewComposition,
+    EditWorkshopMetadata(vapor_client_application::SourceContent),
+    EditRuntimeOutputs(vapor_client_application::SourceContent),
+    Unregister(vapor_client_application::SourceContent),
 }
 
 impl StudioApp {
@@ -246,33 +246,33 @@ impl StudioApp {
                                 ));
                             }
                             if content.kind == vapor_core::ContentKind::Packagepack.as_str() {
-                                let selected_as_profile_root = self.is_active_profile_root(
+                                let selected_as_composition_root = self.is_active_composition_root(
                                     &content.id,
                                     content.version.as_deref(),
                                 );
-                                if selected_as_profile_root {
-                                    ui.strong("Used as this profile's game setup");
+                                if selected_as_composition_root {
+                                    ui.strong("Used by this composition");
                                     if ui
                                         .add_enabled(
                                             !self.operation.running
                                                 && !self.has_unsaved_workspace_edits(),
-                                            egui::Button::new("Review game setup"),
+                                            egui::Button::new("Review composition"),
                                         )
                                         .clicked()
                                     {
-                                        action = Some(SourceContentAction::ReviewProfile);
+                                        action = Some(SourceContentAction::ReviewComposition);
                                     }
                                 } else if ui
                                     .add_enabled(
                                         !self.operation.running
                                             && self.catalog.source_snapshot_current()
                                             && !self.has_unsaved_workspace_edits(),
-                                        egui::Button::new("Use in this profile"),
+                                        egui::Button::new("Use in this composition"),
                                     )
                                     .clicked()
                                 {
-                                    action = Some(SourceContentAction::UseAsProfileRoot(
-                                        vapor_studio_core::ContentIdentity {
+                                    action = Some(SourceContentAction::UseAsCompositionRoot(
+                                        vapor_client_application::ContentReference {
                                             id: content.id.clone(),
                                             version: content.version.clone(),
                                         },
@@ -339,7 +339,7 @@ impl StudioApp {
                 }
                 Some(SourceContentAction::EditDependencies(selector)) => {
                     if self.authoring.pending_composition_role_change.is_some() {
-                        self.status = "Confirm or cancel the pending game setup change before opening another one.".to_owned();
+                        self.status = "Confirm or cancel the pending composition change before opening another one.".to_owned();
                     } else {
                         self.authoring.composition_edit_selector = selector;
                         self.authoring.composition_edit = None;
@@ -348,11 +348,11 @@ impl StudioApp {
                         self.load_source_composition();
                     }
                 }
-                Some(SourceContentAction::UseAsProfileRoot(identity, workspace)) => {
-                    self.assign_profile_root(identity, Some(workspace));
+                Some(SourceContentAction::UseAsCompositionRoot(identity, workspace)) => {
+                    self.assign_composition_root(identity, Some(workspace));
                 }
-                Some(SourceContentAction::ReviewProfile) => {
-                    self.activate_navigation_section(super::super::Section::Library);
+                Some(SourceContentAction::ReviewComposition) => {
+                    self.activate_navigation_section(super::super::Section::Compositions);
                     self.preview_selected_composition();
                 }
                 Some(SourceContentAction::EditWorkshopMetadata(content)) => {

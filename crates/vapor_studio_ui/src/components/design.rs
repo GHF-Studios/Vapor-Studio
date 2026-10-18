@@ -1,5 +1,5 @@
 use eframe::egui;
-use vapor_studio_core::InstallationState;
+use vapor_client_application::InstallationState;
 
 pub(crate) const ACCENT: egui::Color32 = egui::Color32::from_rgb(112, 190, 213);
 pub(crate) const ACCENT_FILL: egui::Color32 = egui::Color32::from_rgb(34, 92, 116);
@@ -8,6 +8,7 @@ pub(crate) const TWO_PANE_MIN_WIDTH: f32 = 860.0;
 pub(crate) const FORM_GRID_MIN_WIDTH: f32 = 640.0;
 pub(crate) const LIST_ROW_HEIGHT: f32 = 34.0;
 pub(crate) const SEARCH_FIELD_MAX_WIDTH: f32 = 360.0;
+pub(crate) const CONTEXT_PANEL_WIDTH: f32 = 440.0;
 
 pub(crate) fn use_stacked_panels(ui: &egui::Ui) -> bool {
     ui.available_width() < TWO_PANE_MIN_WIDTH
@@ -15,6 +16,46 @@ pub(crate) fn use_stacked_panels(ui: &egui::Ui) -> bool {
 
 pub(crate) fn use_stacked_form(ui: &egui::Ui) -> bool {
     ui.available_width() < FORM_GRID_MIN_WIDTH
+}
+
+pub(crate) fn contextual_split(
+    ui: &mut egui::Ui,
+    main_fraction: f32,
+    contents: impl FnOnce(&mut egui::Ui, &mut egui::Ui),
+) {
+    let available = ui.available_width();
+    let gap = ui.spacing().item_spacing.x;
+    let context_width = (available * (1.0 - main_fraction))
+        .clamp(320.0, CONTEXT_PANEL_WIDTH)
+        .min((available - gap - 1.0).max(1.0));
+    let main_width = (available - context_width - gap).max(1.0);
+    let start = ui.next_widget_position();
+    let available_rect = ui.available_rect_before_wrap();
+    let main_rect =
+        egui::Rect::from_min_size(start, egui::vec2(main_width, available_rect.height()));
+    let context_rect = egui::Rect::from_min_size(
+        egui::pos2(start.x + main_width + gap, start.y),
+        egui::vec2(context_width, available_rect.height()),
+    );
+    let layout = egui::Layout::top_down_justified(egui::Align::Min);
+    let mut main_ui = ui.new_child(egui::UiBuilder::new().max_rect(main_rect).layout(layout));
+    let mut context_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(context_rect)
+            .layout(egui::Layout::top_down_justified(egui::Align::Min)),
+    );
+    let style = context_ui.style().clone();
+    egui::Frame::group(&style).show(&mut context_ui, |panel| {
+        contents(&mut main_ui, panel);
+    });
+    let bottom = main_ui
+        .min_rect()
+        .bottom()
+        .max(context_ui.min_rect().bottom());
+    ui.advance_cursor_after_rect(egui::Rect::from_min_max(
+        start,
+        egui::pos2(available_rect.right(), bottom),
+    ));
 }
 
 pub(crate) fn search_field_width(ui: &egui::Ui) -> f32 {
@@ -125,7 +166,7 @@ fn status_color(tone: StatusTone) -> egui::Color32 {
 
 /// A single, wide call to action for the most likely next step on a screen.
 pub(crate) fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let width = ui.available_width().max(1.0);
+    let width = ui.available_width().clamp(1.0, 360.0);
     ui.add_sized(
         [width, 38.0],
         egui::Button::new(egui::RichText::new(label).strong()).fill(ACCENT_FILL),

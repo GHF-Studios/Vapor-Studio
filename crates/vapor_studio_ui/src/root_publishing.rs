@@ -1,8 +1,6 @@
 use super::StudioApp;
-use super::operation_protocol::OperationResult;
-use std::path::PathBuf;
-use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID, RootPublishRequest};
-use vapor_studio_core::OperationKind;
+use vapor_client_protocol::RootPublishingSnapshot;
+use vapor_client_protocol::{ClientAction, PublishingAction};
 
 #[derive(Default)]
 pub(super) struct RootPublishingState {
@@ -11,7 +9,7 @@ pub(super) struct RootPublishingState {
     pub(super) description: String,
     pub(super) set_live_branch: String,
     pub(super) confirmation: String,
-    pub(super) preview: Option<vapor_sdk_core::root::types::RootPublishReport>,
+    pub(super) preview: Option<RootPublishingSnapshot>,
     pub(super) status: String,
 }
 
@@ -26,6 +24,9 @@ impl StudioApp {
     pub(super) fn invalidate_root_publish_review(&mut self) {
         self.root_publishing.preview = None;
         self.root_publishing.confirmation.clear();
+        self.submit_service_action(ClientAction::Publishing(
+            PublishingAction::DiscardRootReview,
+        ));
     }
 
     pub(super) fn preview_steam_package(&mut self) {
@@ -41,25 +42,21 @@ impl StudioApp {
             self.root_publishing.description.trim().to_owned()
         };
         let set_live = non_empty(&self.root_publishing.set_live_branch);
-        let request = RootPublishRequest {
-            plan: true,
-            app_id: ROOT_STEAM_APP_ID,
-            depot_id: ROOT_STEAM_DEPOT_ID,
-            description,
-            account,
-            steamcmd: PathBuf::from("steamcmd"),
-            set_live,
-        };
         self.root_publishing.preview = None;
         self.root_publishing.confirmation.clear();
         self.root_publishing.status =
             "Preparing a read-only SteamPipe package and upload plan…".to_owned();
-        self.spawn(OperationKind::StageRootDistribution, move |_context| {
-            OperationResult::RootPublish(
-                vapor_sdk_core::root::publish::root_publish(&request)
-                    .map_err(|error| error.to_string()),
-            )
-        });
+        self.start_service_operation(
+            ClientAction::Publishing(PublishingAction::StageRoot {
+                account,
+                description,
+                set_live,
+            }),
+            None,
+            vapor_client_application::OperationKind::StageRootDistribution,
+            vapor_client_application::OperationPhase::Staging,
+            "Preparing a SteamPipe review through the Studio service…",
+        );
         self.status = self.root_publishing.status.clone();
     }
 
@@ -69,55 +66,30 @@ impl StudioApp {
                 "Preview the Steam root package before uploading it.".to_owned();
             return;
         };
-        let account = self.root_publishing.account.trim().to_owned();
-        let description = if self.root_publishing.description.trim().is_empty() {
-            "Vapor root package".to_owned()
-        } else {
-            self.root_publishing.description.trim().to_owned()
-        };
-        let set_live = non_empty(&self.root_publishing.set_live_branch);
-        let expected_confirmation = root_publish_confirmation(set_live.as_deref());
-        if !preview.planned
-            || preview.account != account
-            || preview.package.description != description
-            || preview.set_live != set_live
-        {
-            self.invalidate_root_publish_review();
-            self.root_publishing.status =
-                "The Steam package settings changed. Review a fresh upload plan first.".to_owned();
+        if !preview.planned {
+            self.root_publishing.status = "Stage a fresh release plan before uploading.".to_owned();
             return;
         }
-        if self.root_publishing.confirmation.trim() != expected_confirmation {
-            self.root_publishing.status =
-                format!("Type {expected_confirmation} exactly to authorize this SteamPipe upload.");
-            return;
-        }
-
-        let request = RootPublishRequest {
-            plan: false,
-            app_id: ROOT_STEAM_APP_ID,
-            depot_id: ROOT_STEAM_DEPOT_ID,
-            description,
-            account,
-            steamcmd: preview.steamcmd.clone(),
-            set_live,
-        };
-        self.spawn(OperationKind::PublishRootDistribution, move |_context| {
-            OperationResult::RootPublish(
-                vapor_sdk_core::root::publish::root_publish(&request)
-                    .map_err(|error| error.to_string()),
-            )
-        });
+        self.start_service_operation(
+            ClientAction::Publishing(PublishingAction::PublishRoot {
+                review_id: preview.review_id.clone(),
+                confirmation: self.root_publishing.confirmation.clone(),
+            }),
+            None,
+            vapor_client_application::OperationKind::PublishRootDistribution,
+            vapor_client_application::OperationPhase::Publishing,
+            "Uploading the service-reviewed Vapor root build through SteamCMD…",
+        );
         self.root_publishing.status =
-            "Uploading the reviewed Vapor root build through SteamCMD…".to_owned();
+            "Uploading the service-reviewed Vapor root build through SteamCMD…".to_owned();
         self.status = self.root_publishing.status.clone();
     }
 }
 
-pub(super) fn root_publish_confirmation(set_live: Option<&str>) -> String {
+pub(super) fn root_publish_confirmation(app_id: u32, set_live: Option<&str>) -> String {
     match set_live {
-        Some(branch) => format!("UPLOAD ROOT {ROOT_STEAM_APP_ID} AND SET LIVE {branch}"),
-        None => format!("UPLOAD ROOT {ROOT_STEAM_APP_ID}"),
+        Some(branch) => format!("UPLOAD ROOT {app_id} AND SET LIVE {branch}"),
+        None => format!("UPLOAD ROOT {app_id}"),
     }
 }
 

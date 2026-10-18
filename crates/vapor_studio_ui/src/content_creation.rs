@@ -1,10 +1,9 @@
 use super::StudioApp;
-use super::operation_protocol::WorkspaceOpenSnapshot;
 use super::workspace_editor::WorkspaceDocument;
 use crate::navigation::Section;
 use std::path::PathBuf;
-use vapor_studio_core::OperationKind;
-use vapor_studio_protocol::{AuthoringAction, StudioAction, WorkshopMetadataDraft};
+use vapor_client_protocol::{AuthoringAction, ClientAction, WorkshopMetadataDraft};
+use vapor_client_application::OperationKind;
 
 pub(super) fn starter_workspace_slug_is_valid(value: &str) -> bool {
     !value.is_empty()
@@ -85,7 +84,7 @@ impl StudioApp {
         };
         let kind = self.authoring.create.content_kind;
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::CreateContent {
+            ClientAction::Authoring(AuthoringAction::CreateContent {
                 workspace_root: root,
                 kind: kind.as_str().to_owned(),
                 id,
@@ -95,7 +94,7 @@ impl StudioApp {
             }),
             None,
             OperationKind::CreateContent,
-            vapor_studio_core::OperationPhase::Building,
+            vapor_client_application::OperationPhase::Building,
             "Creating content and opening its manifest…",
         );
     }
@@ -128,14 +127,14 @@ impl StudioApp {
             return;
         }
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::CreateWorkspace {
+            ClientAction::Authoring(AuthoringAction::CreateWorkspace {
                 parent: location.to_string_lossy().into_owned(),
                 organization,
                 name,
             }),
             None,
             OperationKind::CreateWorkspace,
-            vapor_studio_core::OperationPhase::Building,
+            vapor_client_application::OperationPhase::Building,
             "Creating a playable sample game and its project folders…",
         );
     }

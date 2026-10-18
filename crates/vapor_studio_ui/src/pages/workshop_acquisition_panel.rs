@@ -4,17 +4,17 @@ use super::super::workshop::WorkshopTab;
 use eframe::egui;
 
 enum AcquisitionAction {
-    UseAsProfileRoot(String),
-    LaunchAsProfileRoot(String),
-    ReviewActiveProfile,
+    UseAsCompositionRoot(String),
+    LaunchAsCompositionRoot(String),
+    ReviewActiveComposition,
 }
 
 impl StudioApp {
     pub(super) fn draw_workshop_acquisition_panel(&mut self, ui: &mut egui::Ui) {
         section_header(
             ui,
-            "Downloaded content",
-            "Downloaded copies live on this device. Launch a game setup from here, or add other content while editing a profile's game setup.",
+            "Library",
+            "Content you have added is ready to use here. Launch a composition or add compatible content while customizing it.",
         );
         egui::CollapsingHeader::new("Import by Workshop ID").show(ui, |ui| {
             ui.label("Use this if you already have the item's number. Most people can find content by name in Browse Workshop.");
@@ -38,8 +38,8 @@ impl StudioApp {
             let mut browse_workshop = false;
             empty_state(
                 ui,
-                "No content downloaded yet",
-                "Browse Steam Workshop to find content, or enter an item number if someone shared one with you.",
+                "Your Library is empty",
+                "Find a composition or add-on in Steam Workshop, then subscribe to add it here.",
                 |ui| {
                     browse_workshop = ui.button("Browse Steam Workshop").clicked();
                 },
@@ -50,8 +50,8 @@ impl StudioApp {
         } else {
             section_header(
                 ui,
-                "Ready to use",
-                "These downloads are available on this device. Launch a game setup or add other content to a profile.",
+                "Available content",
+                "Launch a complete composition or add compatible content to one.",
             );
             let mut action = None;
             for acquisition in &self.workshop.recent_acquisitions {
@@ -66,84 +66,73 @@ impl StudioApp {
                             .map(|version| format!("@{version}"))
                             .unwrap_or_default()
                     ));
-                    egui::CollapsingHeader::new("Technical details")
-                        .show(ui, |ui| {
-                            ui.small(format!(
-                                "Cache folder · {}",
-                                acquisition.cache_root.display()
-                            ));
-                            ui.small(format!(
-                                "File fingerprint · {}",
-                                acquisition.fingerprint
-                            ));
-                        });
                     if acquisition.kind == "packagepack" {
-                        let selected_as_root = self.is_active_profile_root(
+                        let selected_as_root = self.is_active_composition_root(
                             &acquisition.id,
                             acquisition.version.as_deref(),
                         );
                         if selected_as_root {
-                            ui.strong("Already used in this profile");
+                            ui.strong("Already used in this composition");
                             if ui
                                 .add_enabled(
                                     !self.operation.running
                                         && !self.has_unsaved_workspace_edits(),
-                                    egui::Button::new("Review game setup"),
+                                    egui::Button::new("Review composition"),
                                 )
                                 .clicked()
                             {
-                                action = Some(AcquisitionAction::ReviewActiveProfile);
+                                action = Some(AcquisitionAction::ReviewActiveComposition);
                             }
                         } else {
                             let create_draft_blocks_assignment = self
-                                .profile_root_change_blocked_by_create_draft(None);
+                                .composition_root_change_blocked_by_create_draft(None);
                             if ui.add_enabled(!self.operation.running && !self.has_unsaved_workspace_edits() && !create_draft_blocks_assignment,
                                 egui::Button::new(format!(
-                                    "Use as {}'s game setup",
-                                    self.profile.items[self.profile.active_index].name
+                                    "Use as {}'s composition",
+                                    self.composition.items[self.composition.active_index].name
                                 )))
                                 .on_disabled_hover_text(if create_draft_blocks_assignment {
-                                    "Discard the Create draft before changing this profile to cached content."
+                                    "Discard the Create draft before changing this composition to downloaded content."
                                 } else if self.has_unsaved_workspace_edits() {
-                                    "Save or discard workspace file and structured metadata drafts before changing the profile's workspace."
+                                    "Save or discard workspace file and structured metadata drafts before changing the composition's workspace."
                                 } else {
-                                    "Finish the current operation before changing the profile."
+                                    "Finish the current operation before changing the composition."
                                 })
                                 .clicked()
                             {
-                                action = Some(AcquisitionAction::UseAsProfileRoot(acquisition.id.clone()));
+                                action = Some(AcquisitionAction::UseAsCompositionRoot(acquisition.id.clone()));
                             }
                         }
                         let create_draft_blocks_assignment =
-                            self.profile_root_change_blocked_by_create_draft(None);
-                        let launch_blocked_by_profile_state = selected_as_root
+                            self.composition_root_change_blocked_by_create_draft(None);
+                        let launch_blocked_by_composition_preview = selected_as_root
                             && matches!(
-                                &self.profile.items[self.profile.active_index].installation,
-                                vapor_studio_core::InstallationState::OutOfDate { .. }
+                                &self.composition.items[self.composition.active_index].installation,
+                                vapor_client_application::InstallationState::OutOfDate { .. }
                             );
                         if ui
                             .add_enabled(
                                 !self.operation.running
-                                    && !launch_blocked_by_profile_state
+                                    && !launch_blocked_by_composition_preview
                                     && !self.has_unsaved_workspace_edits()
                                     && !create_draft_blocks_assignment,
-                                egui::Button::new("Launch this game setup"),
+                                egui::Button::new("Launch this composition"),
                             )
-                            .on_disabled_hover_text(if launch_blocked_by_profile_state {
-                                "Review or update this profile before launching."
+                            .on_disabled_hover_text(if launch_blocked_by_composition_preview {
+                                "Review or update this composition before launching."
                             } else {
-                                "Finish the current operation and save or discard edits before switching this profile."
+                                "Finish the current operation and save or discard edits before switching this composition."
                             })
                             .clicked()
                         {
-                            action = Some(AcquisitionAction::LaunchAsProfileRoot(
+                            action = Some(AcquisitionAction::LaunchAsCompositionRoot(
                                 acquisition.id.clone(),
                             ));
                         }
                         ui.weak("Review this setup's required content before launch if you want to inspect it first.");
                     } else {
-                        let active_profile = &self.profile.items[self.profile.active_index];
-                        let included_in_profile = active_profile
+                        let active_composition = &self.composition.items[self.composition.active_index];
+                        let included_in_composition = active_composition
                             .resolved_graph
                             .as_ref()
                             .is_some_and(|graph| {
@@ -152,32 +141,32 @@ impl StudioApp {
                                         && node.content.version == acquisition.version
                                 })
                             });
-                        ui.weak(if included_in_profile {
-                            "This item is included in the active profile's game setup."
+                        ui.weak(if included_in_composition {
+                            "This item is included in the active composition."
                         } else {
-                            "This downloaded item is not part of the active profile's game setup."
+                            "This downloaded item is not part of the active composition."
                         });
-                        if included_in_profile && ui
+                        if included_in_composition && ui
                             .add_enabled(
                                 !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                egui::Button::new("Review game setup"),
+                                egui::Button::new("Review composition"),
                             )
                             .clicked()
                         {
-                            action = Some(AcquisitionAction::ReviewActiveProfile);
+                            action = Some(AcquisitionAction::ReviewActiveComposition);
                         }
                     }
                 });
             }
             match action {
-                Some(AcquisitionAction::UseAsProfileRoot(id)) => {
-                    self.use_workshop_as_profile_root(&id);
+                Some(AcquisitionAction::UseAsCompositionRoot(id)) => {
+                    self.use_workshop_as_composition_root(&id);
                 }
-                Some(AcquisitionAction::LaunchAsProfileRoot(id)) => {
+                Some(AcquisitionAction::LaunchAsCompositionRoot(id)) => {
                     self.launch_workshop_acquisition(&id);
                 }
-                Some(AcquisitionAction::ReviewActiveProfile) => {
-                    self.activate_navigation_section(super::super::Section::Library);
+                Some(AcquisitionAction::ReviewActiveComposition) => {
+                    self.activate_navigation_section(super::super::Section::Compositions);
                     self.preview_selected_composition();
                 }
                 None => {}

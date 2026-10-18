@@ -1,8 +1,0 @@
-[package]
-name = "vapor_studio_client"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-serde_json = "1"
-vapor_studio_protocol = { path = "../vapor_studio_protocol" }

@@ -4,21 +4,24 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use vapor_core::ContentKind;
-use vapor_studio_core::ContentIdentity;
-use vapor_studio_protocol::{
-    CatalogEntry as ServiceCatalogEntry, CatalogLocationKind as ServiceLocationKind, ProtocolFrame,
-    StudioAction, StudioEvent, StudioResponseKind,
+use vapor_client_protocol::{
+    CatalogEntry as ServiceCatalogEntry, CatalogLocationKind as ServiceLocationKind, ClientAction,
+    ClientEvent, ClientResponseKind, ProtocolFrame,
 };
+use vapor_core::ContentKind;
+use vapor_client_application::ContentReference;
 
 pub(super) struct CatalogState {
     pub(super) discover_tab: DiscoverTab,
     pub(super) search_query: String,
-    pub(super) sources: Vec<vapor_studio_core::SourceContent>,
+    pub(super) library_search_query: String,
+    pub(super) library_kind_filter: Option<String>,
+    pub(super) sources: Vec<vapor_client_application::SourceContent>,
     pub(super) source_discovery_loaded: bool,
     pub(super) source_discovery_error: Option<String>,
-    pub(super) items: Vec<vapor_studio_core::CatalogContent>,
+    pub(super) items: Vec<vapor_client_application::CatalogContent>,
     pub(super) catalog_discovery_loaded: bool,
+    pub(super) catalog_omitted: usize,
     pub(super) catalog_discovery_error: Option<String>,
     pub(super) source_filter: CatalogSourceFilter,
     pub(super) kind_filter: Option<String>,
@@ -37,11 +40,14 @@ impl Default for CatalogState {
         Self {
             discover_tab: DiscoverTab::Local,
             search_query: String::new(),
+            library_search_query: String::new(),
+            library_kind_filter: None,
             sources: Vec::new(),
             source_discovery_loaded: false,
             source_discovery_error: None,
             items: Vec::new(),
             catalog_discovery_loaded: false,
+            catalog_omitted: 0,
             catalog_discovery_error: None,
             source_filter: CatalogSourceFilter::All,
             kind_filter: None,
@@ -56,7 +62,9 @@ impl CatalogState {
     }
 
     pub(super) fn local_catalog_current(&self) -> bool {
-        self.catalog_discovery_loaded && self.catalog_discovery_error.is_none()
+        self.catalog_discovery_loaded
+            && self.catalog_discovery_error.is_none()
+            && self.catalog_omitted == 0
     }
 
     pub(super) fn clear_workspace_content(&mut self) {
@@ -65,6 +73,7 @@ impl CatalogState {
         self.source_discovery_error = None;
         self.items.clear();
         self.catalog_discovery_loaded = false;
+        self.catalog_omitted = 0;
         self.catalog_discovery_error = None;
         self.selected = None;
     }
@@ -77,15 +86,15 @@ impl StudioApp {
             .map(|(id, version)| (id.to_owned(), Some(version.to_owned())))
             .unwrap_or_else(|| (selector.clone(), None));
         self.catalog.selected = Some(selector);
-        self.submit_service_action(StudioAction::Catalog(
-            vapor_studio_protocol::CatalogAction::Inspect {
+        self.submit_service_action(ClientAction::Catalog(
+            vapor_client_protocol::CatalogAction::Inspect {
                 content_id,
                 version,
             },
         ));
     }
 
-    pub(super) fn apply_service_action(&mut self, action: StudioAction) -> Result<(), String> {
+    pub(super) fn apply_service_action(&mut self, action: ClientAction) -> Result<(), String> {
         let Some(service) = self.service.as_mut() else {
             return Err(self
                 .service_error
@@ -110,7 +119,7 @@ impl StudioApp {
             match frame {
                 ProtocolFrame::Response(response) if response.request_id == request_id => {
                     self.apply_service_catalog_snapshot(&response.snapshot);
-                    return if response.kind == StudioResponseKind::Applied {
+                    return if response.kind == ClientResponseKind::Applied {
                         Ok(())
                     } else {
                         Err(response.error.map_or_else(
@@ -122,19 +131,19 @@ impl StudioApp {
                 ProtocolFrame::Response(response) => {
                     self.apply_service_catalog_snapshot(&response.snapshot);
                 }
-                ProtocolFrame::Event(StudioEvent::Snapshot(snapshot)) => {
+                ProtocolFrame::Event(ClientEvent::Snapshot(snapshot)) => {
                     self.apply_service_catalog_snapshot(&snapshot);
                 }
-                ProtocolFrame::Event(StudioEvent::OperationChanged(event)) => {
+                ProtocolFrame::Event(ClientEvent::OperationChanged(event)) => {
                     self.apply_service_operation_event(&event);
                 }
-                ProtocolFrame::Event(StudioEvent::WorkspaceFileResult(result)) => {
+                ProtocolFrame::Event(ClientEvent::WorkspaceFileResult(result)) => {
                     self.apply_service_workspace_file_result(*result);
                 }
-                ProtocolFrame::Event(StudioEvent::AuthoringResult(result)) => {
+                ProtocolFrame::Event(ClientEvent::AuthoringResult(result)) => {
                     self.apply_service_authoring_result(*result);
                 }
-                ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
+                ProtocolFrame::Event(ClientEvent::ProtocolError(error)) => {
                     return Err(error.message);
                 }
                 _ => {}
@@ -148,15 +157,15 @@ impl StudioApp {
             .editor
             .save_editor_drafts(&self.workspace.root);
         let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
-        self.apply_service_action(StudioAction::Session(
-            vapor_studio_protocol::SessionAction::CheckpointLocalState {
+        self.apply_service_action(ClientAction::Session(
+            vapor_client_protocol::SessionAction::CheckpointLocalState {
                 editor_drafts,
                 operation_history,
             },
         ))
     }
 
-    pub(super) fn submit_service_action(&mut self, action: StudioAction) {
+    pub(super) fn submit_service_action(&mut self, action: ClientAction) {
         let Some(service) = self.service.as_mut() else {
             if self.service_error.is_none() {
                 self.service_error = Some("Studio service is not connected.".to_owned());
@@ -202,7 +211,7 @@ impl StudioApp {
                         .map(|operation| operation.kind.clone());
                     if operation_request {
                         self.operation.service_request_id = None;
-                        if response.kind != StudioResponseKind::OperationAccepted {
+                        if response.kind != ClientResponseKind::OperationAccepted {
                             self.operation.running = false;
                             self.operation.service_owned = false;
                             self.operation.active_operation = None;
@@ -212,55 +221,50 @@ impl StudioApp {
                         Some(error) => {
                             if operation_request {
                                 match operation_kind {
-                                    Some(vapor_studio_core::OperationKind::SearchWorkshop) => {
+                                    Some(vapor_client_application::OperationKind::SearchWorkshop) => {
                                         self.apply_workshop_error(error.message.clone());
                                     }
-                                    Some(vapor_studio_core::OperationKind::Acquire) => {
+                                    Some(vapor_client_application::OperationKind::Acquire) => {
                                         self.apply_workshop_acquisition_error(error.message.clone());
                                     }
-                                    Some(vapor_studio_core::OperationKind::StageWorkshop) => {
+                                    Some(vapor_client_application::OperationKind::StageWorkshop) => {
                                         self.apply_workshop_stage_error(error.message.clone());
                                     }
-                                    Some(vapor_studio_core::OperationKind::PublishWorkshop) => {
+                                    Some(vapor_client_application::OperationKind::PublishWorkshop) => {
                                         self.apply_workshop_error(error.message.clone());
                                     }
-                                    Some(vapor_studio_core::OperationKind::LoadWorkshopSubscriptions)
-                                    | Some(vapor_studio_core::OperationKind::ChangeWorkshopSubscription) => {
+                                    Some(vapor_client_application::OperationKind::LoadWorkshopSubscriptions)
+                                    | Some(vapor_client_application::OperationKind::ChangeWorkshopSubscription) => {
                                         self.apply_workshop_subscriptions_error(error.message.clone());
                                     }
                                     _ => self.status = error.message.clone(),
                                 }
                             } else {
-                                self.catalog.catalog_discovery_error = Some(error.message.clone());
-                                self.service_error = Some(error.message);
+                                self.status = error.message;
                             }
                         }
                         None if !operation_request
-                            && response.kind == StudioResponseKind::Applied =>
+                            && response.kind == ClientResponseKind::Applied =>
                         {
-                            self.catalog.catalog_discovery_error = None;
                             self.service_error = None;
                         }
                         None => {}
                     }
                 }
-                ProtocolFrame::Event(StudioEvent::Snapshot(snapshot)) => {
+                ProtocolFrame::Event(ClientEvent::Snapshot(snapshot)) => {
                     self.apply_service_catalog_snapshot(&snapshot);
                 }
-                ProtocolFrame::Event(StudioEvent::OperationChanged(event)) => {
+                ProtocolFrame::Event(ClientEvent::OperationChanged(event)) => {
                     self.apply_service_operation_event(&event);
                 }
-                ProtocolFrame::Event(StudioEvent::WorkspaceFileResult(result)) => {
+                ProtocolFrame::Event(ClientEvent::WorkspaceFileResult(result)) => {
                     self.apply_service_workspace_file_result(*result);
                 }
-                ProtocolFrame::Event(StudioEvent::AuthoringResult(result)) => {
+                ProtocolFrame::Event(ClientEvent::AuthoringResult(result)) => {
                     self.apply_service_authoring_result(*result);
                 }
-                ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
-                    self.catalog.catalog_discovery_error = Some(error.message.clone());
-                    if error.code == vapor_studio_protocol::StudioErrorCode::ProviderFailure {
-                        self.catalog.catalog_discovery_loaded = false;
-                    }
+                ProtocolFrame::Event(ClientEvent::ProtocolError(error)) => {
+                    self.status = error.message.clone();
                     self.service_error = Some(error.message);
                 }
                 _ => {}
@@ -282,25 +286,52 @@ impl StudioApp {
 
     pub(super) fn apply_service_catalog_snapshot(
         &mut self,
-        snapshot: &vapor_studio_protocol::StudioSnapshot,
+        snapshot: &vapor_client_protocol::ClientSnapshot,
     ) {
         self.apply_service_workshop_snapshot(&snapshot.workshop);
+        self.root_publishing.preview = snapshot.root_publishing.clone();
+        if let Some(publishing) = snapshot.root_publishing.as_ref() {
+            self.root_publishing.status = if publishing.planned {
+                format!(
+                    "Steam root review ready · App {} · depot {} · {} files · account {}.",
+                    publishing.app_id,
+                    publishing.depot_id,
+                    publishing.copied_files,
+                    publishing.account,
+                )
+            } else if publishing.succeeded {
+                format!(
+                    "Steam upload completed · App {} · depot {} · account {} · branch {}.",
+                    publishing.app_id,
+                    publishing.depot_id,
+                    publishing.account,
+                    publishing.set_live.as_deref().unwrap_or("not changed"),
+                )
+            } else {
+                format!(
+                    "Steam root upload finished with {}.",
+                    publishing.status.as_deref().unwrap_or("unknown status"),
+                )
+            };
+        }
         let durable = &snapshot.durable_state;
-        if !durable.profiles.profiles.is_empty()
-            && self.profile.service_revision != Some(durable.profile_revision)
+        if !durable.compositions.compositions.is_empty()
+            && self.composition.service_revision != Some(durable.composition_revision)
         {
-            self.profile.items = durable.profiles.profiles.clone();
-            self.profile.active_index = self
-                .profile
+            self.composition.items = durable.compositions.compositions.clone();
+            self.composition.active_index = self
+                .composition
                 .items
                 .iter()
-                .position(|profile| profile.id == durable.active_profile_id)
+                .position(|composition| composition.id == durable.active_composition_id)
                 .unwrap_or(0);
-            self.profile.name_draft = self.profile.items[self.profile.active_index].name.clone();
-            self.profile.recovery_backup = durable.recovery_backup.clone();
-            self.profile.service_revision = Some(durable.profile_revision);
+            self.composition.name_draft = self.composition.items[self.composition.active_index]
+                .name
+                .clone();
+            self.composition.recovery_backup = durable.recovery_backup.clone();
+            self.composition.service_revision = Some(durable.composition_revision);
         }
-        let service_workspace = durable.workspace_root.clone().unwrap_or_default();
+        let service_workspace = durable.authoring_workspace_root.clone().unwrap_or_default();
         if self.workspace.root != service_workspace && !self.workspace.editor.has_dirty_documents()
         {
             self.workspace.root = service_workspace.clone();
@@ -311,7 +342,9 @@ impl StudioApp {
             };
         }
         self.catalog.items = snapshot.catalog.iter().map(service_catalog_entry).collect();
-        self.catalog.catalog_discovery_loaded = true;
+        self.catalog.catalog_discovery_loaded = snapshot.catalog_status.loaded;
+        self.catalog.catalog_discovery_error = snapshot.catalog_status.error.clone();
+        self.catalog.catalog_omitted = snapshot.catalog_status.omitted;
         self.catalog.sources = snapshot
             .workspace_content
             .source_projects
@@ -338,7 +371,7 @@ impl StudioApp {
                 ));
             }
         }
-        self.workspace.unregistered_projects = vapor_studio_core::UnregisteredProjectScan {
+        self.workspace.unregistered_projects = vapor_client_application::UnregisteredProjectScan {
             candidates,
             diagnostics,
         };
@@ -349,24 +382,24 @@ impl StudioApp {
             .unregistered_projects_error
             .clone();
         self.apply_service_operation_snapshot(snapshot.active_operation.as_ref());
-        let selected_profile_id = self
-            .profile
+        let selected_composition_id = self
+            .composition
             .items
-            .get(self.profile.active_index)
-            .map(|profile| profile.id.as_str());
+            .get(self.composition.active_index)
+            .map(|composition| composition.id.as_str());
         if let Some(preview) = snapshot
             .composition_preview
             .as_ref()
-            .filter(|preview| Some(preview.profile_id.as_str()) == selected_profile_id)
+            .filter(|preview| Some(preview.composition_id.as_str()) == selected_composition_id)
         {
             let preview = protocol_composition_preview(preview);
-            if self.profile_composition.preview() != Some(&preview) {
+            if self.composition_preview.preview() != Some(&preview) {
                 self.apply_composition_preview(preview);
             }
         } else if snapshot.composition_preview.is_none()
-            && self.profile_composition.preview().is_some()
+            && self.composition_preview.preview().is_some()
         {
-            self.profile_composition.invalidate_preview();
+            self.composition_preview.invalidate_preview();
         }
         if let Some(selected_id) = snapshot.selected_content_id.as_deref() {
             self.catalog.selected = self
@@ -386,8 +419,10 @@ impl StudioApp {
             self.catalog.selected = None;
         }
         if self.catalog.local_catalog_current() && self.catalog.source_snapshot_current() {
-            match self.profile_composition.take_repreview_request() {
-                Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::ActiveProfile) => {
+            match self.composition_preview.take_repreview_request() {
+                Some(
+                    super::composition_lifecycle::RepreviewAfterCatalogRefresh::ActiveComposition,
+                ) => {
                     self.preview_selected_composition();
                 }
                 Some(super::composition_lifecycle::RepreviewAfterCatalogRefresh::Source {
@@ -396,7 +431,7 @@ impl StudioApp {
                 }) => self.preview_composition(
                     selector,
                     Some(workspace_root),
-                    "Re-resolving the source composition against the refreshed cache…",
+                    "Refreshing available content for this composition…",
                 ),
                 None => {}
             }
@@ -404,61 +439,25 @@ impl StudioApp {
     }
 
     pub(super) fn refresh_content_catalog(&mut self) {
-        self.profile_composition.invalidate_preview();
-        self.submit_service_action(StudioAction::Catalog(
-            vapor_studio_protocol::CatalogAction::Refresh,
+        self.composition_preview.invalidate_preview();
+        self.submit_service_action(ClientAction::Catalog(
+            vapor_client_protocol::CatalogAction::Refresh,
         ));
     }
 }
 
 fn protocol_composition_preview(
-    preview: &vapor_studio_protocol::CompositionPreviewSnapshot,
-) -> vapor_studio_core::CompositionPreview {
-    vapor_studio_core::CompositionPreview {
+    preview: &vapor_client_protocol::CompositionPreviewSnapshot,
+) -> vapor_client_application::CompositionPreview {
+    vapor_client_application::CompositionPreview {
         selector: preview.selector.clone(),
-        nodes: preview
-            .nodes
-            .iter()
-            .map(|node| vapor_studio_core::CompositionPreviewNode {
-                id: node.id.clone(),
-                version: node.version.clone(),
-                kind: node.kind.clone(),
-                published_file_id: node.published_file_id.clone(),
-                source: match node.source {
-                    vapor_studio_protocol::CompositionPreviewSource::Workspace => {
-                        vapor_studio_core::CompositionPreviewSource::Workspace
-                    }
-                    vapor_studio_protocol::CompositionPreviewSource::Cache => {
-                        vapor_studio_core::CompositionPreviewSource::Cache
-                    }
-                    vapor_studio_protocol::CompositionPreviewSource::Installed => {
-                        vapor_studio_core::CompositionPreviewSource::Installed
-                    }
-                    vapor_studio_protocol::CompositionPreviewSource::DownloadRequired => {
-                        vapor_studio_core::CompositionPreviewSource::DownloadRequired
-                    }
-                },
-                already_installed: node.already_installed,
-                dependencies: node
-                    .dependencies
-                    .iter()
-                    .map(
-                        |dependency| vapor_studio_core::CompositionPreviewDependency {
-                            id: dependency.id.clone(),
-                            relationship: dependency.relationship.clone(),
-                            version: dependency.version.clone(),
-                            optional: dependency.optional,
-                        },
-                    )
-                    .collect(),
-            })
-            .collect(),
+        nodes: preview.nodes.clone(),
         blockers: preview.blockers.clone(),
         warnings: preview.warnings.clone(),
     }
 }
 
-pub(super) fn content_selector(identity: &ContentIdentity) -> String {
+pub(super) fn content_selector(identity: &ContentReference) -> String {
     identity
         .version
         .as_deref()
@@ -466,7 +465,7 @@ pub(super) fn content_selector(identity: &ContentIdentity) -> String {
         .unwrap_or_else(|| identity.id.clone())
 }
 
-pub(crate) fn source_content_selector(content: &vapor_studio_core::SourceContent) -> String {
+pub(crate) fn source_content_selector(content: &vapor_client_application::SourceContent) -> String {
     content
         .version
         .as_deref()
@@ -475,18 +474,18 @@ pub(crate) fn source_content_selector(content: &vapor_studio_core::SourceContent
 }
 
 pub(crate) fn source_content_selector_matches(
-    content: &vapor_studio_core::SourceContent,
+    content: &vapor_client_application::SourceContent,
     selector: &str,
 ) -> bool {
     content_selector_matches(&content.id, content.version.as_deref(), selector)
 }
 
-pub(crate) fn catalog_content_selector(content: &vapor_studio_core::CatalogContent) -> String {
+pub(crate) fn catalog_content_selector(content: &vapor_client_application::CatalogContent) -> String {
     content_selector(&content.identity())
 }
 
 pub(crate) fn catalog_content_selector_matches(
-    content: &vapor_studio_core::CatalogContent,
+    content: &vapor_client_application::CatalogContent,
     selector: &str,
 ) -> bool {
     content_selector_matches(&content.id, content.version.as_deref(), selector)
@@ -515,29 +514,29 @@ pub(crate) fn source_content_kind(kind: &str) -> Option<ContentKind> {
         "engine-mod" => ContentKind::EngineMod,
         "game-mod" => ContentKind::GameMod,
         "extension-mod" => ContentKind::ExtensionMod,
-        "library" => ContentKind::Library,
+        "crate" => ContentKind::Crate,
         _ => return None,
     })
 }
 
-pub(crate) fn content_kind_title(kind: ContentKind) -> &'static str {
+pub(crate) fn content_kind_name(kind: ContentKind) -> &'static str {
     match kind {
-        ContentKind::Packagepack => "Playable game setup",
-        ContentKind::Enginepack => "Engine setup",
-        ContentKind::Gamepack => "Game setup collection",
-        ContentKind::Modpack => "Add-on collection",
-        ContentKind::Engine => "Game engine",
-        ContentKind::Game => "Game content",
-        ContentKind::EngineMod => "Engine add-on",
-        ContentKind::GameMod => "Game add-on",
-        ContentKind::ExtensionMod => "General add-on",
-        ContentKind::Library => "Content project",
+        ContentKind::Packagepack => "Packagepack",
+        ContentKind::Enginepack => "Enginepack",
+        ContentKind::Gamepack => "Gamepack",
+        ContentKind::Modpack => "Modpack",
+        ContentKind::Engine => "Engine",
+        ContentKind::Game => "Game",
+        ContentKind::EngineMod => "Engine Mod",
+        ContentKind::GameMod => "Game Mod",
+        ContentKind::ExtensionMod => "Extension Mod",
+        ContentKind::Crate => "Crate",
     }
 }
 
 pub(crate) fn display_content_kind(kind: &str) -> String {
     source_content_kind(kind)
-        .map(content_kind_title)
+        .map(content_kind_name)
         .unwrap_or(kind)
         .to_owned()
 }
@@ -545,17 +544,18 @@ pub(crate) fn display_content_kind(kind: &str) -> String {
 pub(super) struct CatalogFilter {
     source: CatalogSourceFilter,
     kind: Option<String>,
-    query: String,
+    query: vapor_client_protocol::CatalogQuery,
+    library_only: bool,
 }
 
 pub(super) fn catalog_location_label(
-    location: &vapor_studio_core::CatalogLocation,
+    location: &vapor_client_application::CatalogLocation,
 ) -> &'static str {
     match location.kind {
-        vapor_studio_core::CatalogLocationKind::Workspace => "Workspace",
-        vapor_studio_core::CatalogLocationKind::Cache => "Vapor cache",
-        vapor_studio_core::CatalogLocationKind::Installed if location.enabled => "Installed",
-        vapor_studio_core::CatalogLocationKind::Installed => "Installed · disabled",
+        vapor_client_application::CatalogLocationKind::Workspace => "Workspace",
+        vapor_client_application::CatalogLocationKind::Cache => "Downloaded",
+        vapor_client_application::CatalogLocationKind::Installed if location.enabled => "Installed",
+        vapor_client_application::CatalogLocationKind::Installed => "Installed · disabled",
     }
 }
 
@@ -564,27 +564,48 @@ impl CatalogFilter {
         Self {
             source,
             kind,
-            query: query.trim().to_lowercase(),
+            query: vapor_client_protocol::CatalogQuery::new(query),
+            library_only: false,
         }
     }
 
-    pub(super) fn matches_catalog(&self, content: &vapor_studio_core::CatalogContent) -> bool {
+    pub(super) fn library(kind: Option<String>, query: &str) -> Self {
+        Self {
+            source: CatalogSourceFilter::All,
+            kind,
+            query: vapor_client_protocol::CatalogQuery::new(query),
+            library_only: true,
+        }
+    }
+
+    pub(super) fn matches_catalog(&self, content: &vapor_client_application::CatalogContent) -> bool {
         let source_matches =
             match self.source {
                 CatalogSourceFilter::All => true,
                 CatalogSourceFilter::Workspace => content.locations.iter().any(|location| {
-                    location.kind == vapor_studio_core::CatalogLocationKind::Workspace
+                    location.kind == vapor_client_application::CatalogLocationKind::Workspace
                 }),
                 CatalogSourceFilter::Cache => content
                     .locations
                     .iter()
-                    .any(|location| location.kind == vapor_studio_core::CatalogLocationKind::Cache),
+                    .any(|location| location.kind == vapor_client_application::CatalogLocationKind::Cache),
                 CatalogSourceFilter::Installed => content.locations.iter().any(|location| {
-                    location.kind == vapor_studio_core::CatalogLocationKind::Installed
+                    location.kind == vapor_client_application::CatalogLocationKind::Installed
                 }),
                 CatalogSourceFilter::Workshop => content.published_file_id.is_some(),
             };
+        let library_matches = !self.library_only
+            || (content.kind != vapor_core::ContentKind::Packagepack.as_str()
+                && content.kind != vapor_core::ContentKind::Crate.as_str()
+                && content.locations.iter().any(|location| {
+                    matches!(
+                        location.kind,
+                        vapor_client_application::CatalogLocationKind::Cache
+                            | vapor_client_application::CatalogLocationKind::Installed
+                    )
+                }));
         if !source_matches
+            || !library_matches
             || self
                 .kind
                 .as_deref()
@@ -592,25 +613,17 @@ impl CatalogFilter {
         {
             return false;
         }
-        self.query.is_empty()
-            || content.id.to_lowercase().contains(&self.query)
-            || content.kind.to_lowercase().contains(&self.query)
-            || content
-                .version
-                .as_deref()
-                .unwrap_or_default()
-                .to_lowercase()
-                .contains(&self.query)
-            || content
-                .published_file_id
-                .as_deref()
-                .unwrap_or_default()
-                .contains(&self.query)
+        self.query.matches_fields([
+            content.id.as_str(),
+            content.kind.as_str(),
+            content.version.as_deref().unwrap_or_default(),
+            content.published_file_id.as_deref().unwrap_or_default(),
+        ])
     }
 
     pub(super) fn matches_workspace(
         &self,
-        candidate: &vapor_studio_core::UnregisteredProjectCandidate,
+        candidate: &vapor_client_application::UnregisteredProjectCandidate,
     ) -> bool {
         if !matches!(
             self.source,
@@ -622,19 +635,16 @@ impl CatalogFilter {
         if self.kind.as_deref().is_some_and(|filter| filter != kind) {
             return false;
         }
-        self.query.is_empty()
-            || candidate.id.to_lowercase().contains(&self.query)
-            || kind.to_lowercase().contains(&self.query)
-            || candidate
-                .path
-                .to_string_lossy()
-                .to_lowercase()
-                .contains(&self.query)
+        self.query.matches_fields([
+            candidate.id.as_str(),
+            kind.as_str(),
+            candidate.path.to_string_lossy().as_ref(),
+        ])
     }
 }
 
-fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_studio_core::CatalogContent {
-    vapor_studio_core::CatalogContent {
+fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_client_application::CatalogContent {
+    vapor_client_application::CatalogContent {
         id: entry.id.clone(),
         version: entry.version.clone(),
         kind: entry.kind.clone(),
@@ -643,7 +653,7 @@ fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_studio_core::Cata
         conflicts: entry
             .conflicts
             .iter()
-            .map(|conflict| vapor_studio_core::CatalogConflict {
+            .map(|conflict| vapor_client_application::CatalogConflict {
                 field: conflict.field.clone(),
                 first_value: conflict.first_value.clone(),
                 first_location: PathBuf::from(&conflict.first_location),
@@ -654,14 +664,14 @@ fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_studio_core::Cata
         locations: entry
             .locations
             .iter()
-            .map(|location| vapor_studio_core::CatalogLocation {
+            .map(|location| vapor_client_application::CatalogLocation {
                 kind: match location.kind {
                     ServiceLocationKind::Workspace => {
-                        vapor_studio_core::CatalogLocationKind::Workspace
+                        vapor_client_application::CatalogLocationKind::Workspace
                     }
-                    ServiceLocationKind::Cache => vapor_studio_core::CatalogLocationKind::Cache,
+                    ServiceLocationKind::Cache => vapor_client_application::CatalogLocationKind::Cache,
                     ServiceLocationKind::Installed => {
-                        vapor_studio_core::CatalogLocationKind::Installed
+                        vapor_client_application::CatalogLocationKind::Installed
                     }
                 },
                 root: PathBuf::from(&location.root),
@@ -674,9 +684,9 @@ fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_studio_core::Cata
 }
 
 fn service_source_project(
-    project: &vapor_studio_protocol::WorkspaceSourceProject,
-) -> vapor_studio_core::SourceContent {
-    vapor_studio_core::SourceContent {
+    project: &vapor_client_protocol::WorkspaceSourceProject,
+) -> vapor_client_application::SourceContent {
+    vapor_client_application::SourceContent {
         id: project.id.clone(),
         version: project.version.clone(),
         kind: project.kind.clone(),
@@ -685,7 +695,7 @@ fn service_source_project(
         binaries: project.binaries.clone(),
         libraries: project.libraries.clone(),
         dependencies: project.dependencies.clone(),
-        workshop: vapor_studio_core::SourceWorkshopPolicy {
+        workshop: vapor_client_application::SourceWorkshopPolicy {
             app_id: project.workshop.app_id,
             published_file_id: project.workshop.published_file_id.clone(),
             visibility: project.workshop.visibility.clone(),
@@ -698,19 +708,19 @@ fn service_source_project(
 }
 
 fn service_workspace_candidate(
-    candidate: &vapor_studio_protocol::WorkspaceProjectCandidate,
-) -> Option<vapor_studio_core::UnregisteredProjectCandidate> {
-    Some(vapor_studio_core::UnregisteredProjectCandidate {
+    candidate: &vapor_client_protocol::WorkspaceProjectCandidate,
+) -> Option<vapor_client_application::UnregisteredProjectCandidate> {
+    Some(vapor_client_application::UnregisteredProjectCandidate {
         path: PathBuf::from(&candidate.path),
         id: candidate.id.clone(),
-        kind: vapor_studio_core::source_project_kind(&candidate.kind)?,
+        kind: vapor_client_application::source_project_kind(&candidate.kind)?,
     })
 }
 
 #[cfg(test)]
 mod selector_tests {
     use super::{content_selector_matches, service_source_project, service_workspace_candidate};
-    use vapor_studio_protocol::{
+    use vapor_client_protocol::{
         WorkspaceProjectCandidate, WorkspaceSourceProject, WorkspaceWorkshopPolicy,
     };
 
@@ -787,5 +797,36 @@ mod selector_tests {
     fn unversioned_content_matches_only_its_exact_identity() {
         assert!(content_selector_matches("moon", None, "moon"));
         assert!(!content_selector_matches("moon", None, "moon@1.2.0"));
+    }
+}
+
+#[cfg(test)]
+mod catalog_view_tests {
+    use super::*;
+
+    #[test]
+    fn browse_and_library_queries_do_not_filter_each_others_facts() {
+        let content = vapor_client_application::CatalogContent {
+            id: "moon".into(),
+            version: Some("1.0".into()),
+            kind: "game-mod".into(),
+            published_file_id: Some("3762162251".into()),
+            dependencies: vec![],
+            conflicts: vec![],
+            locations: vec![vapor_client_application::CatalogLocation {
+                kind: vapor_client_application::CatalogLocationKind::Cache,
+                root: "download/moon".into(),
+                enabled: true,
+                fingerprint: None,
+                install_source: None,
+            }],
+        };
+        let browse = CatalogFilter::new(CatalogSourceFilter::All, None, "absent");
+        let library = CatalogFilter::library(None, "3762162251");
+        assert!(!browse.matches_catalog(&content));
+        assert!(library.matches_catalog(&content));
+        assert!(
+            CatalogFilter::new(CatalogSourceFilter::All, None, " MOON ").matches_catalog(&content)
+        );
     }
 }

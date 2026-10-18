@@ -12,6 +12,7 @@ use std::{
 pub(super) enum DirectoryPickerPurpose {
     OpenWorkspace,
     WorkspaceParent,
+    Superworkspace,
 }
 
 pub(super) enum DirectoryPickerResult {
@@ -120,6 +121,7 @@ impl DirectoryPicker {
         let title = match self.purpose {
             DirectoryPickerPurpose::OpenWorkspace => "Open a project folder",
             DirectoryPickerPurpose::WorkspaceParent => "Choose where to create a project folder",
+            DirectoryPickerPurpose::Superworkspace => "Choose Vapor's shared source folder",
         };
         let mut window_open = self.open;
         let mut result = None;
@@ -140,6 +142,9 @@ impl DirectoryPicker {
                     }
                     DirectoryPickerPurpose::WorkspaceParent => {
                         "Studio will create a new project folder inside this location."
+                    }
+                    DirectoryPickerPurpose::Superworkspace => {
+                        "Vapor will use this as its one shared source and development folder."
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
@@ -228,10 +233,12 @@ impl DirectoryPicker {
                             self.error.is_none() && recognized_workspace
                         }
                         DirectoryPickerPurpose::WorkspaceParent => self.error.is_none(),
+                        DirectoryPickerPurpose::Superworkspace => self.error.is_none(),
                     };
                     let label = match self.purpose {
                         DirectoryPickerPurpose::OpenWorkspace => "Open this project folder",
                         DirectoryPickerPurpose::WorkspaceParent => "Choose this location",
+                        DirectoryPickerPurpose::Superworkspace => "Use this location",
                     };
                     if ui
                         .add_enabled(can_select, egui::Button::new(label).fill(ACCENT_FILL))
@@ -276,6 +283,19 @@ impl StudioApp {
         self.directory_picker = Some(DirectoryPicker::new(
             DirectoryPickerPurpose::WorkspaceParent,
             Path::new(self.workspace.starter_path.trim()),
+        ));
+    }
+
+    pub(super) fn open_superworkspace_picker(&mut self) {
+        let root = self
+            .service
+            .as_ref()
+            .and_then(|service| service.latest_snapshot().superworkspace.root.as_deref())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.workspace.fallback_root.clone());
+        self.directory_picker = Some(DirectoryPicker::new(
+            DirectoryPickerPurpose::Superworkspace,
+            &root,
         ));
     }
 }

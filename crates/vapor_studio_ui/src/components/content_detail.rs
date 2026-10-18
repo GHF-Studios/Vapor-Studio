@@ -6,8 +6,8 @@ use std::path::PathBuf;
 enum ContentDetailAction {
     StageWorkshop(String),
     ReviewPublish,
-    ReviewProfile,
-    AssignProfileRoot(vapor_studio_core::ContentIdentity, Option<PathBuf>),
+    ReviewComposition,
+    AssignCompositionRoot(vapor_client_application::ContentReference, Option<PathBuf>),
 }
 
 impl StudioApp {
@@ -36,12 +36,8 @@ impl StudioApp {
                     egui::CollapsingHeader::new("Conflicting copies").show(ui, |ui| {
                         for conflict in &content.conflicts {
                             ui.small(format!(
-                                "{} differs: '{}' at {} · '{}' at {}",
-                                conflict.field,
-                                conflict.first_value,
-                                conflict.first_location.display(),
-                                conflict.conflicting_value,
-                                conflict.conflicting_location.display(),
+                                "{} differs between available copies: '{}' and '{}'",
+                                conflict.field, conflict.first_value, conflict.conflicting_value,
                             ));
                         }
                     });
@@ -52,30 +48,6 @@ impl StudioApp {
                         ui.small(super::super::catalog::catalog_location_label(location));
                     }
                 });
-                egui::CollapsingHeader::new("File locations and integrity details").show(
-                    ui,
-                    |ui| {
-                        for location in &content.locations {
-                            let source = super::super::catalog::catalog_location_label(location);
-                            ui.label(format!(
-                                "{source}{} · {}",
-                                location
-                                    .install_source
-                                    .as_deref()
-                                    .map(|source| format!(" · via {source}"))
-                                    .unwrap_or_default(),
-                                location.root.display()
-                            ));
-                            ui.small(format!(
-                                "File fingerprint: {}",
-                                location
-                                    .fingerprint
-                                    .as_deref()
-                                    .unwrap_or("not recorded for this source")
-                            ));
-                        }
-                    },
-                );
                 egui::CollapsingHeader::new(format!(
                     "Included content · {}",
                     content.dependencies.len()
@@ -134,27 +106,29 @@ impl StudioApp {
                         .locations
                         .iter()
                         .any(|location| {
-                            location.kind == vapor_studio_core::CatalogLocationKind::Workspace
+                            location.kind == vapor_client_application::CatalogLocationKind::Workspace
                         })
                         .then(|| std::path::PathBuf::from(self.workspace.root.trim()));
                     let create_draft_blocks_assignment = self
-                        .profile_root_change_blocked_by_create_draft(content_workspace.as_deref());
-                    let selected_for_profile =
-                        self.is_active_profile_root(&content.id, content.version.as_deref());
+                        .composition_root_change_blocked_by_create_draft(
+                            content_workspace.as_deref(),
+                        );
+                    let selected_for_composition =
+                        self.is_active_composition_root(&content.id, content.version.as_deref());
                     let catalog_snapshot_current = self.catalog.local_catalog_current();
-                    if selected_for_profile {
-                        ui.strong("This is the current play profile's game setup");
+                    if selected_for_composition {
+                        ui.strong("This is the current composition");
                         if ui
                             .add_enabled(
                                 !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                egui::Button::new("Review game setup"),
+                                egui::Button::new("Review composition"),
                             )
                             .on_disabled_hover_text(
-                                "Save or discard project edits before checking this profile's game setup.",
+                                "Save or discard project edits before checking this composition.",
                             )
                             .clicked()
                         {
-                            action = Some(ContentDetailAction::ReviewProfile);
+                            action = Some(ContentDetailAction::ReviewComposition);
                         }
                     } else if ui
                         .add_enabled(
@@ -163,22 +137,22 @@ impl StudioApp {
                                 && !create_draft_blocks_assignment
                                 && catalog_snapshot_current
                                 && content.is_unambiguous(),
-                                egui::Button::new("Use as this profile's game setup"),
+                                egui::Button::new("Use as the current composition"),
                         )
                         .on_disabled_hover_text(if !content.is_unambiguous() {
                             "Review the conflicting copies before selecting this content."
                         } else if !catalog_snapshot_current {
                             "Refresh the on-device content list before selecting from previous results."
                         } else if create_draft_blocks_assignment {
-                            "Discard the Create draft before changing the active profile's workspace."
+                            "Discard the Create draft before changing the active composition's workspace."
                         } else if self.has_unsaved_workspace_edits() {
-                            "Save or discard project edits before changing the profile's project folder."
+                            "Save or discard project edits before changing the composition's project folder."
                         } else {
-                            "Finish the current operation before changing the active profile."
+                            "Finish the current operation before changing the active composition."
                         })
                         .clicked()
                     {
-                        action = Some(ContentDetailAction::AssignProfileRoot(
+                        action = Some(ContentDetailAction::AssignCompositionRoot(
                             content.identity(),
                             content_workspace,
                         ));
@@ -195,12 +169,12 @@ impl StudioApp {
                     super::super::root_publishing::PublishTab::WorkshopContent;
                 self.activate_navigation_section(Section::Publish);
             }
-            Some(ContentDetailAction::ReviewProfile) => {
-                self.activate_navigation_section(Section::Library);
+            Some(ContentDetailAction::ReviewComposition) => {
+                self.activate_navigation_section(Section::Compositions);
                 self.preview_selected_composition();
             }
-            Some(ContentDetailAction::AssignProfileRoot(identity, workspace)) => {
-                self.assign_profile_root(identity, workspace);
+            Some(ContentDetailAction::AssignCompositionRoot(identity, workspace)) => {
+                self.assign_composition_root(identity, workspace);
             }
             None => {}
         }

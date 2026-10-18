@@ -87,7 +87,7 @@ impl StudioApp {
             );
             ui.heading(format!(
                 "New {} project",
-                super::super::content_kind_title(self.authoring.create.content_kind)
+                super::super::content_kind_name(self.authoring.create.content_kind)
             ));
         });
         ui.label("Give this project a name and choose the content it needs. Steam Workshop details are optional and can be added later.");
@@ -101,6 +101,7 @@ impl StudioApp {
                 "Choose one game engine to include in this setup."
             }
             vapor_core::ContentKind::Gamepack => "Choose one game to include in this setup.",
+            vapor_core::ContentKind::Crate => "Choose any Rust Crates this crate depends on.",
             _ => "Required content is checked against the type of project you are creating.",
         };
         let source_shape = match self.authoring.create.content_kind {
@@ -119,11 +120,11 @@ impl StudioApp {
             | vapor_core::ContentKind::ExtensionMod => {
                 "This creates a code project that adds game behavior or extensions."
             }
-            vapor_core::ContentKind::Library => {
-                "Choose one of the supported project types to continue."
+            vapor_core::ContentKind::Crate => {
+                "This creates a plain Rust crate built for static linking. It has no runtime-loaded game behavior."
             }
         };
-        let required_role_groups = vapor_studio_core::source_required_dependency_choice_groups(
+        let required_role_groups = vapor_client_application::source_required_dependency_choice_groups(
             self.authoring.create.content_kind,
         );
         let selected_in_role_group = |required_group: &&str| {
@@ -134,7 +135,7 @@ impl StudioApp {
                     .iter()
                     .any(|selected| selected == &super::super::source_content_selector(content))
                     && super::super::source_content_kind(&content.kind).is_some_and(|kind| {
-                        vapor_studio_core::source_dependency_choice_group(
+                        vapor_client_application::source_dependency_choice_group(
                             self.authoring.create.content_kind,
                             kind,
                         ) == Some(*required_group)
@@ -344,7 +345,7 @@ impl StudioApp {
                                 let child_kind =
                                     super::super::source_content_kind(&content.kind);
                                 let allowed = child_kind.is_some_and(|kind| {
-                                    vapor_studio_core::source_dependency_allowed(
+                                    vapor_client_application::source_dependency_allowed(
                                         self.authoring.create.content_kind,
                                         kind,
                                     )
@@ -367,7 +368,7 @@ impl StudioApp {
                                 }
                                 visible_dependencies += 1;
                                 let role_group = child_kind.and_then(|kind| {
-                                    vapor_studio_core::source_dependency_choice_group(
+                                    vapor_client_application::source_dependency_choice_group(
                                         self.authoring.create.content_kind,
                                         kind,
                                     )
@@ -489,10 +490,10 @@ impl StudioApp {
     }
 
     fn draw_starter_workspace_section(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Start from a complete playable workspace")
-            .default_open(self.workspace.root.trim().is_empty())
+        egui::CollapsingHeader::new("Start from a sample workspace · optional")
+            .default_open(false)
             .show(ui, |ui| {
-                ui.label("Creates a sample game engine, game, playable setup, and the project folders they need.");
+                ui.label("Creates example Engine, Game, and Packagepack projects together. Use this when you want a complete starting workspace.");
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Location");
                     let path_width = ui.available_width().min(360.0);
@@ -550,7 +551,7 @@ impl StudioApp {
                             && !self.workspace.starter_path.trim().is_empty()
                             && organization_valid
                             && name_valid,
-                        egui::Button::new("Create sample projects"),
+                        egui::Button::new("Create sample workspace"),
                     )
                     .on_disabled_hover_text(if !organization_valid || !name_valid {
                         "Enter a valid creator and project name to continue."
@@ -574,48 +575,46 @@ impl StudioApp {
     fn draw_content_template_step(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
                 ui.label(egui::RichText::new("STEP 1 OF 2 · TEMPLATE").small().strong().color(ACCENT));
-                ui.heading("Choose a content template");
-                ui.label("Choose what you want to make. A game setup combines existing content; a code project adds new game behavior.");
+                ui.heading("Choose a Vapor content type");
+                ui.label("These are the content types supported by Vapor. Each one has a different role and dependency rules.");
                 let templates = [
-                    ("GAME SETUPS", vapor_core::ContentKind::Packagepack, "Playable game setup", "Combines one game engine and one game."),
-                    ("GAME SETUPS", vapor_core::ContentKind::Enginepack, "Engine setup", "A reusable selection of a game engine."),
-                    ("GAME SETUPS", vapor_core::ContentKind::Gamepack, "Game setup collection", "A reusable selection of a game."),
-                    ("GAME SETUPS", vapor_core::ContentKind::Modpack, "Add-on collection", "A reusable group of compatible add-ons."),
-                    ("CODE PROJECTS", vapor_core::ContentKind::Engine, "Game engine", "Code that starts and runs a game."),
-                    ("CODE PROJECTS", vapor_core::ContentKind::Game, "Game content", "Code and assets that create a game for an engine."),
-                    ("ADD-ONS", vapor_core::ContentKind::EngineMod, "Engine add-on", "Adds features to a game engine."),
-                    ("ADD-ONS", vapor_core::ContentKind::GameMod, "Game add-on", "Adds features to a game."),
-                    ("ADD-ONS", vapor_core::ContentKind::ExtensionMod, "General add-on", "A reusable extension for other content."),
+                    (vapor_core::ContentKind::Packagepack, "Packagepack", "A complete playable composition with one Engine and one Game."),
+                    (vapor_core::ContentKind::Enginepack, "Enginepack", "A reusable collection that selects an Engine."),
+                    (vapor_core::ContentKind::Gamepack, "Gamepack", "A reusable collection that selects a Game."),
+                    (vapor_core::ContentKind::Modpack, "Modpack", "A reusable collection of compatible add-ons."),
+                    (vapor_core::ContentKind::Engine, "Engine", "The runtime that loads and runs a Game."),
+                    (vapor_core::ContentKind::Game, "Game", "Game rules, assets, and behavior for an Engine."),
+                    (vapor_core::ContentKind::EngineMod, "Engine Mod", "Adds behavior or tools to an Engine."),
+                    (vapor_core::ContentKind::GameMod, "Game Mod", "Adds behavior or content to a Game."),
+                    (vapor_core::ContentKind::ExtensionMod, "Extension Mod", "Adds reusable capabilities to supported content."),
+                    (vapor_core::ContentKind::Crate, "Crate", "Rust-only code for static linking into Engine, Game, and add-on projects."),
                 ];
                 let card_style = ui.style().clone();
                 let template_change_pending =
                     self.authoring.create.pending_template_change.is_some();
-                for group in ["GAME SETUPS", "CODE PROJECTS", "ADD-ONS"] {
-                    ui.small(group);
-                    ui.horizontal_wrapped(|ui| {
-                        for (_, kind, title, description) in templates.iter().filter(|(family, ..)| *family == group) {
-                            egui::Frame::group(&card_style).show(ui, |ui| {
-            let card_width = ui.available_width().clamp(1.0, 220.0);
-                                ui.set_min_width(card_width);
-                                ui.set_max_width(card_width);
-                                let selected = self.authoring.create.content_kind == *kind;
-                                if ui.add_enabled(
-                                    !template_change_pending,
-                                    egui::Button::selectable(selected, egui::RichText::new(*title).strong())
-                                        .min_size(egui::vec2(ui.available_width(), 34.0)),
-                                ).clicked() && !selected {
-                                    if self.authoring.create.dependencies.is_empty() {
-                                        self.authoring.create.content_kind = *kind;
-                                        self.authoring.create.dependency_search.clear();
-                                    } else {
-                                        self.authoring.create.pending_template_change = Some(*kind);
-                                    }
+                ui.horizontal_wrapped(|ui| {
+                    for (kind, name, description) in templates {
+                        egui::Frame::group(&card_style).show(ui, |ui| {
+                            let card_width = ui.available_width().clamp(180.0, 260.0);
+                            ui.set_min_width(card_width);
+                            ui.set_max_width(card_width);
+                            let selected = self.authoring.create.content_kind == kind;
+                            if ui.add_enabled(
+                                !template_change_pending,
+                                egui::Button::selectable(selected, egui::RichText::new(name).strong())
+                                    .min_size(egui::vec2(ui.available_width(), 34.0)),
+                            ).clicked() && !selected {
+                                if self.authoring.create.dependencies.is_empty() {
+                                    self.authoring.create.content_kind = kind;
+                                    self.authoring.create.dependency_search.clear();
+                                } else {
+                                    self.authoring.create.pending_template_change = Some(kind);
                                 }
-                                ui.small(*description);
-                            });
-                        }
-                    });
-                }
+                            }
+                            ui.small(description);
+                        });
+                    }
+                });
                 if let Some(next_kind) = self.authoring.create.pending_template_change {
                     let description = format!(
                         "Changing from {} to {} clears the {} selected content items. The project identity and Workshop details stay in this draft.",
@@ -637,7 +636,7 @@ impl StudioApp {
                             self.authoring.create.dependency_search.clear();
                             self.status = format!(
                                 "Changed the project type to {}; content choices were cleared.",
-                                super::super::content_kind_title(next_kind)
+                                super::super::content_kind_name(next_kind)
                             );
                         }
                         self.authoring.create.pending_template_change = None;
@@ -653,7 +652,7 @@ impl StudioApp {
                     vapor_core::ContentKind::EngineMod => "An add-on project for a game engine.",
                     vapor_core::ContentKind::GameMod => "An add-on project for a game.",
                     vapor_core::ContentKind::ExtensionMod => "A general add-on project.",
-                    vapor_core::ContentKind::Library => "Choose one of the supported project types.",
+                    vapor_core::ContentKind::Crate => "A Rust-only crate for static linking, with no runtime-loaded content.",
                 };
                 ui.label(description);
                 ui.add_space(6.0);

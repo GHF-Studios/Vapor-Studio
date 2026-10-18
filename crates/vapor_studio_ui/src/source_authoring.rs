@@ -1,7 +1,7 @@
 use super::{StudioApp, source_content_selector};
 use std::path::PathBuf;
-use vapor_studio_core::{ContentIdentity, OperationKind};
-use vapor_studio_protocol::{AuthoringAction, CompositionDependency, StudioAction};
+use vapor_client_protocol::{AuthoringAction, ClientAction, CompositionDependency};
+use vapor_client_application::{ContentReference, OperationKind};
 
 #[derive(Clone, Copy)]
 pub(super) enum PendingManifestDraftDiscard {
@@ -16,16 +16,16 @@ pub(super) struct AuthoringState {
     pub(super) pending_composition_role_change: Option<PendingCompositionRoleChange>,
     pub(super) composition_edit_selector: String,
     pub(super) composition_source_search: String,
-    pub(super) composition_edit: Option<vapor_studio_core::SourceComposition>,
-    pub(super) composition_original_links: Option<Vec<vapor_studio_core::SourceCompositionLink>>,
+    pub(super) composition_edit: Option<vapor_client_application::SourceComposition>,
+    pub(super) composition_original_links: Option<Vec<vapor_client_application::SourceCompositionLink>>,
     pub(super) composition_link_candidate: String,
     pub(super) composition_link_search: String,
     pub(super) packagepack_engine_search: String,
     pub(super) packagepack_game_search: String,
-    pub(super) workshop_metadata_edit: Option<vapor_studio_core::SourceWorkshopMetadata>,
+    pub(super) workshop_metadata_edit: Option<vapor_client_application::SourceWorkshopMetadata>,
     pub(super) manifest_metadata_dirty: bool,
     pub(super) pending_manifest_discard: Option<PendingManifestDraftDiscard>,
-    pub(super) runtime_outputs_edit: Option<vapor_studio_core::SourceRuntimeOutputs>,
+    pub(super) runtime_outputs_edit: Option<vapor_client_application::SourceRuntimeOutputs>,
     pub(super) runtime_binaries_text: String,
     pub(super) runtime_libraries_text: String,
     pub(super) workshop_metadata_app_id: String,
@@ -40,8 +40,8 @@ pub(super) struct AuthoringState {
 #[derive(Clone)]
 pub(super) struct PendingCompositionRoleChange {
     pub(super) group: &'static str,
-    pub(super) previous: Vec<vapor_studio_core::SourceCompositionLink>,
-    pub(super) proposed: Option<vapor_studio_core::SourceCompositionLink>,
+    pub(super) previous: Vec<vapor_client_application::SourceCompositionLink>,
+    pub(super) proposed: Option<vapor_client_application::SourceCompositionLink>,
 }
 
 pub(super) struct CreateDraft {
@@ -242,12 +242,12 @@ impl StudioApp {
             return;
         }
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::LoadComposition {
+            ClientAction::Authoring(AuthoringAction::LoadComposition {
                 project_id: selector.clone(),
             }),
             None,
             OperationKind::LoadComposition,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             &format!("Loading dependencies for {selector} through the Studio service…"),
         );
     }
@@ -286,21 +286,21 @@ impl StudioApp {
             })
             .collect();
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::SaveComposition {
+            ClientAction::Authoring(AuthoringAction::SaveComposition {
                 project_id: selector,
                 expected_fingerprint: composition.source,
                 dependencies,
             }),
             None,
             OperationKind::SaveComposition,
-            vapor_studio_core::OperationPhase::Building,
+            vapor_client_application::OperationPhase::Building,
             "Validating and saving composition dependencies through the Studio service…",
         );
     }
 
     pub(super) fn load_source_workshop_metadata(
         &mut self,
-        content: &vapor_studio_core::SourceContent,
+        content: &vapor_client_application::SourceContent,
     ) {
         if !self.require_open_workspace("edit Workshop metadata") {
             return;
@@ -310,19 +310,19 @@ impl StudioApp {
         self.authoring.runtime_outputs_edit = None;
         let selector = source_content_selector(content);
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::LoadWorkshopMetadata {
+            ClientAction::Authoring(AuthoringAction::LoadWorkshopMetadata {
                 project_id: selector.clone(),
             }),
             None,
             OperationKind::LoadWorkshopMetadata,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             &format!("Loading Workshop metadata for {selector}…"),
         );
     }
 
     pub(super) fn load_source_runtime_outputs(
         &mut self,
-        content: &vapor_studio_core::SourceContent,
+        content: &vapor_client_application::SourceContent,
     ) {
         if !self.require_open_workspace("edit runtime output declarations") {
             return;
@@ -330,12 +330,12 @@ impl StudioApp {
         self.authoring.workshop_metadata_edit = None;
         let selector = source_content_selector(content);
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::LoadRuntimeOutputs {
+            ClientAction::Authoring(AuthoringAction::LoadRuntimeOutputs {
                 project_id: selector.clone(),
             }),
             None,
             OperationKind::LoadRuntimeOutputs,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             &format!("Loading runtime output declarations for {selector}…"),
         );
     }
@@ -369,7 +369,7 @@ impl StudioApp {
             .unwrap_or_else(|| outputs.id.clone());
         let expected_source = outputs.source;
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::SaveRuntimeOutputs {
+            ClientAction::Authoring(AuthoringAction::SaveRuntimeOutputs {
                 project_id: selector,
                 expected_fingerprint: expected_source,
                 binaries,
@@ -377,40 +377,43 @@ impl StudioApp {
             }),
             None,
             OperationKind::SaveRuntimeOutputs,
-            vapor_studio_core::OperationPhase::Building,
+            vapor_client_application::OperationPhase::Building,
             "Validating and saving runtime outputs through the Studio service…",
         );
     }
 
     pub(super) fn set_runtime_output_fields(
         &mut self,
-        outputs: &vapor_studio_core::SourceRuntimeOutputs,
+        outputs: &vapor_client_application::SourceRuntimeOutputs,
     ) {
         self.authoring.runtime_binaries_text = outputs.binaries.join("\n");
         self.authoring.runtime_libraries_text = outputs.libraries.join("\n");
     }
 
-    pub(super) fn invalidate_profiles_for_source_content(&mut self, identity: &ContentIdentity) {
+    pub(super) fn invalidate_compositions_for_source_content(
+        &mut self,
+        identity: &ContentReference,
+    ) {
         self.invalidate_workshop_review();
-        let active_profile_affected = self
-            .profile
+        let active_composition_affected = self
+            .composition
             .items
-            .get(self.profile.active_index)
-            .is_some_and(|profile| {
-                profile
+            .get(self.composition.active_index)
+            .is_some_and(|composition| {
+                composition
                     .root_package
                     .as_ref()
                     .is_some_and(|root| root == identity)
-                    || profile.resolved_graph.as_ref().is_some_and(|graph| {
+                    || composition.resolved_graph.as_ref().is_some_and(|graph| {
                         graph.nodes.iter().any(|node| &node.content == identity)
                     })
             });
-        if active_profile_affected {
-            self.profile_composition
+        if active_composition_affected {
+            self.composition_preview
                 .request_repreview_after_catalog_refresh();
         }
-        if let Err(error) = self.apply_service_action(StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::InvalidateContent {
+        if let Err(error) = self.apply_service_action(ClientAction::Composition(
+            vapor_client_protocol::CompositionAction::InvalidateContent {
                 content_id: identity.id.clone(),
                 content_version: identity.version.clone(),
             },
@@ -446,7 +449,7 @@ impl StudioApp {
             let value = value.trim();
             (!value.is_empty()).then(|| value.to_owned())
         };
-        let policy = vapor_studio_core::WorkshopPolicyDraft {
+        let policy = vapor_client_application::WorkshopPolicyDraft {
             app_id,
             published_file_id: non_empty(&self.authoring.workshop_metadata_published_file_id),
             visibility: non_empty(&self.authoring.workshop_metadata_visibility),
@@ -469,7 +472,7 @@ impl StudioApp {
             .unwrap_or_else(|| metadata.id.clone());
         let expected_source = metadata.source;
         self.start_service_operation(
-            StudioAction::Authoring(AuthoringAction::SaveWorkshopMetadata {
+            ClientAction::Authoring(AuthoringAction::SaveWorkshopMetadata {
                 project_id: selector,
                 expected_fingerprint: expected_source,
                 app_id: policy.app_id,
@@ -482,14 +485,14 @@ impl StudioApp {
             }),
             None,
             OperationKind::SaveWorkshopMetadata,
-            vapor_studio_core::OperationPhase::Building,
+            vapor_client_application::OperationPhase::Building,
             "Validating and saving Workshop metadata through the Studio service…",
         );
     }
 
     pub(super) fn set_workshop_metadata_fields(
         &mut self,
-        policy: &vapor_studio_core::WorkshopPolicyDraft,
+        policy: &vapor_client_application::WorkshopPolicyDraft,
     ) {
         self.authoring.workshop_metadata_app_id = policy
             .app_id
@@ -506,21 +509,20 @@ impl StudioApp {
             policy.change_note.clone().unwrap_or_default();
     }
 
-    pub(super) fn use_edited_composition_for_profile(&mut self) {
+    pub(super) fn use_edited_composition_for_composition(&mut self) {
         let Some(composition) = self.authoring.composition_edit.as_ref() else {
-            self.status = "Load a playable game setup first.".to_owned();
+            self.status = "Load a playable composition first.".to_owned();
             return;
         };
         if composition.kind != vapor_core::ContentKind::Packagepack.as_str() {
-            self.status =
-                "Only a playable game setup can be assigned to a play profile.".to_owned();
+            self.status = "Only a playable Packagepack can be added to a composition.".to_owned();
             return;
         }
-        let root = ContentIdentity {
+        let root = ContentReference {
             id: composition.id.clone(),
             version: composition.version.clone(),
         };
-        if self.assign_profile_root(root, Some(PathBuf::from(self.workspace.root.trim()))) {
+        if self.assign_composition_root(root, Some(PathBuf::from(self.workspace.root.trim()))) {
             self.preview_selected_composition();
         }
     }

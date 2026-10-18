@@ -10,6 +10,8 @@ mod command_palette;
 mod components;
 #[path = "composition_lifecycle.rs"]
 mod composition_lifecycle;
+#[path = "compositions.rs"]
+mod compositions;
 #[path = "content_creation.rs"]
 mod content_creation;
 #[path = "directory_picker.rs"]
@@ -24,8 +26,6 @@ mod operation_results;
 mod operations;
 #[path = "pages/mod.rs"]
 mod pages;
-#[path = "profiles.rs"]
-mod profiles;
 #[path = "root_publishing.rs"]
 mod root_publishing;
 #[path = "source_authoring.rs"]
@@ -42,35 +42,35 @@ mod workspace_ops;
 use crate::navigation::Section;
 use catalog::{
     CatalogFilter, CatalogState, catalog_content_selector, catalog_content_selector_matches,
-    content_kind_title, content_selector, display_content_kind, source_content_kind,
+    content_kind_name, content_selector, display_content_kind, source_content_kind,
     source_content_selector, source_content_selector_matches,
 };
-use composition_lifecycle::ProfileCompositionState;
+use composition_lifecycle::CompositionPreviewState;
+use compositions::CompositionState;
 use directory_picker::DirectoryPicker;
 use eframe::egui;
 use operations::OperationState;
-use profiles::ProfileState;
 use root_publishing::RootPublishingState;
 use source_authoring::AuthoringState;
 use std::path::PathBuf;
-use vapor_studio_client::{ServiceBootstrap, StudioClient, service_sibling_path};
-use vapor_studio_core::decode_profiles;
-use vapor_studio_protocol::{LegacyStorageSeed, StudioAction};
+use vapor_client::{Client, ClientHostConfig, service_sibling_path};
+use vapor_client_protocol::{ClientAction, LegacyStorageSeed};
+use vapor_client_application::decode_compositions;
 use workshop::WorkshopState;
 use workspace_ops::WorkspaceState;
 
 pub struct StudioApp {
     section: Section,
     workspace: WorkspaceState,
-    profile: ProfileState,
+    composition: CompositionState,
     catalog: CatalogState,
     authoring: AuthoringState,
-    profile_composition: ProfileCompositionState,
+    composition_preview: CompositionPreviewState,
     workshop: WorkshopState,
     root_publishing: RootPublishingState,
     status: String,
     operation: OperationState,
-    service: Option<StudioClient>,
+    service: Option<Client>,
     service_error: Option<String>,
     diagnostics: vapor_devtools::app::DevtoolsApp,
     directory_picker: Option<DirectoryPicker>,
@@ -81,6 +81,16 @@ pub struct StudioApp {
 }
 
 impl StudioApp {
+    pub(super) fn service_action_enabled(&self, action_id: &str) -> Option<bool> {
+        self.service
+            .as_ref()?
+            .latest_snapshot()
+            .available_actions
+            .iter()
+            .find(|action| action.id == action_id)
+            .map(|action| action.enabled)
+    }
+
     pub fn new(
         creation: &eframe::CreationContext<'_>,
         workspace: Option<PathBuf>,
@@ -107,76 +117,86 @@ impl StudioApp {
             .clone()
             .or(current_directory)
             .unwrap_or_default();
-        let saved_profiles = creation
-            .storage
-            .and_then(|storage| storage.get_string("profiles"));
-        let (profile_document, profile_recovery) = decode_profiles(saved_profiles.as_deref());
-        let profiles = profile_document.profiles;
-        let saved_profile_id = creation
-            .storage
-            .and_then(|storage| storage.get_string("active_profile_id"));
+        let saved_compositions = creation.storage.and_then(|storage| {
+            storage
+                .get_string("profiles")
+                .or_else(|| storage.get_string("compositions"))
+        });
+        let (composition_document, composition_recovery) =
+            decode_compositions(saved_compositions.as_deref());
+        let compositions = composition_document.compositions;
+        let saved_composition_id = creation.storage.and_then(|storage| {
+            storage
+                .get_string("active_profile_id")
+                .or_else(|| storage.get_string("active_composition_id"))
+        });
         let saved_operation_history = creation
             .storage
             .and_then(|storage| storage.get_string("operation_history"));
         let legacy_storage = LegacyStorageSeed {
-            profiles: saved_profiles.clone(),
-            active_profile_id: saved_profile_id.clone(),
+            profiles: saved_compositions.clone(),
+            active_profile_id: saved_composition_id.clone(),
             active_profile_index: creation
                 .storage
                 .and_then(|storage| storage.get_string("active_profile")),
             workspace_root: saved_workspace.clone(),
             editor_drafts: saved_editor_drafts.clone(),
             operation_history: saved_operation_history.clone(),
-            recovery_backup: creation
-                .storage
-                .and_then(|storage| storage.get_string("profiles.recovery_backup")),
+            recovery_backup: creation.storage.and_then(|storage| {
+                storage
+                    .get_string("profiles.recovery_backup")
+                    .or_else(|| storage.get_string("compositions.recovery_backup"))
+            }),
         };
-        let active_profile = saved_profile_id
+        let active_composition = saved_composition_id
             .as_deref()
             .and_then(|id| {
-                profiles
+                compositions
                     .iter()
-                    .position(|profile| profile.id.as_str() == id)
+                    .position(|composition| composition.id.as_str() == id)
             })
             .or_else(|| {
                 creation
                     .storage
-                    .and_then(|storage| storage.get_string("active_profile"))
+                    .and_then(|storage| {
+                        storage
+                            .get_string("active_profile")
+                            .or_else(|| storage.get_string("active_composition"))
+                    })
                     .and_then(|value| value.parse::<usize>().ok())
-                    .filter(|index| *index < profiles.len())
+                    .filter(|index| *index < compositions.len())
             })
             .unwrap_or(0);
-        let workspace_root = profiles[active_profile]
-            .workspace
+        let workspace_root = requested_workspace
             .as_ref()
-            .map(|workspace| workspace.root.display().to_string())
+            .map(|workspace| workspace.display().to_string())
             .unwrap_or_default();
         let workspace_root_draft = if workspace_root.is_empty() {
             root.display().to_string()
         } else {
             workspace_root.clone()
         };
-        let profile_name_draft = profiles[active_profile].name.clone();
+        let composition_name_draft = compositions[active_composition].name.clone();
         let mut workspace_state = WorkspaceState::new(workspace_root, workspace_root_draft, root);
         workspace_state.editor.draft_recovery = saved_editor_drafts;
         let mut operation = OperationState::default();
         operation.restore_history(saved_operation_history.as_deref());
         let mut app = Self {
             section: if play_mode {
-                Section::Library
+                Section::Compositions
             } else {
                 Section::Home
             },
             workspace: workspace_state,
-            profile: ProfileState::new(
-                profiles,
-                active_profile,
-                profile_name_draft,
-                profile_recovery
+            composition: CompositionState::new(
+                compositions,
+                active_composition,
+                composition_name_draft,
+                composition_recovery
                     .as_ref()
                     .map(|recovery| recovery.message.clone()),
-                if profile_recovery.is_some() {
-                    saved_profiles
+                if composition_recovery.is_some() {
+                    saved_compositions
                 } else {
                     None
                 },
@@ -185,7 +205,7 @@ impl StudioApp {
             workshop: WorkshopState::default(),
             root_publishing: RootPublishingState::default(),
             authoring: AuthoringState::default(),
-            profile_composition: ProfileCompositionState::default(),
+            composition_preview: CompositionPreviewState::default(),
             status: "Choose a workspace or discover content in this folder.".to_owned(),
             operation,
             service: None,
@@ -199,26 +219,30 @@ impl StudioApp {
         };
         app.start_service(
             explicit_workspace,
-            Some(app.profile.items[app.profile.active_index].id.clone()),
+            Some(
+                app.composition.items[app.composition.active_index]
+                    .id
+                    .clone(),
+            ),
             legacy_storage,
         );
         app.refresh_registered_sources();
         if !play_mode
-            && app.profile.items[app.profile.active_index].id == "default"
-            && app.profile.items[app.profile.active_index]
+            && app.composition.items[app.composition.active_index].id == "default"
+            && app.composition.items[app.composition.active_index]
                 .root_package
                 .is_none()
-            && app.profile.items[app.profile.active_index]
+            && app.composition.items[app.composition.active_index]
                 .workspace
                 .is_none()
         {
-            app.ensure_default_profile_root();
+            app.ensure_default_composition_root();
         }
         if play_mode {
-            app.submit_service_action(StudioAction::Catalog(
-                vapor_studio_protocol::CatalogAction::Refresh,
+            app.submit_service_action(ClientAction::Catalog(
+                vapor_client_protocol::CatalogAction::Refresh,
             ));
-            app.launch_default_profile();
+            app.launch_default_composition();
         } else if let Some(workspace) = requested_workspace {
             app.open_workspace_path_to(workspace, Section::Home);
         } else {
@@ -230,7 +254,7 @@ impl StudioApp {
     fn start_service(
         &mut self,
         workspace_root: Option<PathBuf>,
-        active_profile_id: Option<String>,
+        active_composition_id: Option<String>,
         legacy_storage: LegacyStorageSeed,
     ) {
         let executable = match std::env::current_exe() {
@@ -243,13 +267,13 @@ impl StudioApp {
             }
         };
         let service_path = service_sibling_path(&executable);
-        match StudioClient::spawn(
+        match Client::connect_or_start(
             &service_path,
-            ServiceBootstrap {
+            ClientHostConfig {
                 application_executable: executable,
                 workshop_app_id: Some(vapor_sdk_core::root::types::ROOT_STEAM_APP_ID),
                 workspace_root,
-                active_profile_id,
+                active_composition_id,
                 fixture_mode: false,
                 legacy_storage,
                 state_directory: None,
@@ -266,7 +290,15 @@ impl StudioApp {
                     .restore_history(initial_snapshot.durable_state.operation_history.as_deref());
             }
             Err(error) => {
-                let message = format!("Studio service is unavailable: {error}");
+                let message = match &error {
+                    vapor_client::ClientError::Spawn(detail)
+                        if detail.contains("os error 2") || detail.contains("No such file") =>
+                    {
+                        eprintln!("[vapor-studio] background service failed to start: {detail}");
+                        "Studio could not start its background component. Repair or update Vapor Studio, then try again.".to_owned()
+                    }
+                    _ => format!("Studio could not start a required background component: {error}"),
+                };
                 self.catalog.catalog_discovery_loaded = false;
                 self.catalog.catalog_discovery_error = Some(message.clone());
                 self.service_error = Some(message);

@@ -1,6 +1,6 @@
 use super::super::StudioApp;
 use super::super::components::design::{StatusTone, page_header, status_text};
-use super::super::workspace_ops::WorkspacePanel;
+use super::super::workspace_ops::{WorkspaceContentPanel, WorkspacePanel};
 use eframe::egui;
 
 impl StudioApp {
@@ -27,7 +27,7 @@ impl StudioApp {
             ui,
             "Author",
             "My projects",
-            "Open a project folder to edit files, find its content, and prepare it to run.",
+            "Choose the project you are authoring. This stays separate from each composition's launch source.",
         );
         ui.label(if self.workspace.root.trim().is_empty() {
             "Choose a folder to get started. You can open an existing project or create one from a template."
@@ -65,10 +65,37 @@ impl StudioApp {
         match self.workspace.overview_panel {
             WorkspacePanel::Sources => self.draw_workspace_registry_panel(ui),
             WorkspacePanel::Content => {
-                let query = self.draw_workspace_content_search(ui);
-                self.draw_workspace_content_panel(ui, &query);
-                self.draw_unregistered_projects_panel(ui, &query);
-                self.draw_workspace_authoring_panel(ui);
+                ui.horizontal_wrapped(|ui| {
+                    for (panel, label) in [
+                        (WorkspaceContentPanel::Projects, "Projects in this folder"),
+                        (WorkspaceContentPanel::AddExisting, "Add existing"),
+                        (WorkspaceContentPanel::ProjectSettings, "Project settings"),
+                    ] {
+                        if ui
+                            .add(egui::Button::selectable(
+                                self.workspace.content_panel == panel,
+                                label,
+                            ))
+                            .clicked()
+                        {
+                            self.workspace.content_panel = panel;
+                        }
+                    }
+                });
+                ui.separator();
+                match self.workspace.content_panel {
+                    WorkspaceContentPanel::Projects => {
+                        let query = self.draw_workspace_content_search(ui);
+                        self.draw_workspace_content_panel(ui, &query);
+                    }
+                    WorkspaceContentPanel::AddExisting => {
+                        let query = self.draw_workspace_content_search(ui);
+                        self.draw_unregistered_projects_panel(ui, &query);
+                    }
+                    WorkspaceContentPanel::ProjectSettings => {
+                        self.draw_workspace_authoring_panel(ui);
+                    }
+                }
             }
             WorkspacePanel::Build => self.draw_workspace_operations_panel(ui),
         }

@@ -3,13 +3,13 @@ use super::super::components::design::{
 };
 use super::super::workshop::WorkshopTab;
 use super::super::workspace_ops::WorkspacePanel;
-use super::super::{Section, StudioApp, content_selector};
+use super::super::{Section, StudioApp};
 use eframe::egui;
-use vapor_studio_core::InstallationState;
+use vapor_client_application::InstallationState;
 
-struct HomeProfileSummary {
+struct HomeCompositionSummary {
     name: String,
-    root_package: Option<vapor_studio_core::ContentIdentity>,
+    root_package: Option<vapor_client_application::ContentReference>,
     installation_status_text: &'static str,
     installation_tone: super::super::components::design::StatusTone,
     play_blocked_by_out_of_date: bool,
@@ -18,21 +18,21 @@ struct HomeProfileSummary {
 }
 impl StudioApp {
     pub(in crate::app) fn draw_home(&mut self, ui: &mut egui::Ui) {
-        let profile = {
-            let profile = &self.profile.items[self.profile.active_index];
-            let (status, tone) = installation_status(&profile.installation);
-            HomeProfileSummary {
-                name: profile.name.clone(),
-                root_package: profile.root_package.clone(),
+        let composition = {
+            let composition = &self.composition.items[self.composition.active_index];
+            let (status, tone) = installation_status(&composition.installation);
+            HomeCompositionSummary {
+                name: composition.name.clone(),
+                root_package: composition.root_package.clone(),
                 installation_status_text: status,
                 installation_tone: tone,
                 play_blocked_by_out_of_date: matches!(
-                    &profile.installation,
+                    &composition.installation,
                     InstallationState::OutOfDate { .. }
                 ),
-                has_workspace_source: profile.workspace.is_some(),
+                has_workspace_source: composition.workspace.is_some(),
                 needs_review: matches!(
-                    &profile.installation,
+                    &composition.installation,
                     InstallationState::OutOfDate { .. }
                         | InstallationState::Partial { .. }
                         | InstallationState::NeedsRepair { .. }
@@ -42,18 +42,19 @@ impl StudioApp {
         page_header(
             ui,
             "Play",
-            "Choose a game setup and launch",
-            "Your profile keeps the game setup you want to play. Find a ready-made setup, add it to this profile, then launch it here.",
+            "Choose a composition and launch",
+            "Launch a complete setup, find more content, or create your own composition.",
         );
         ui.add_space(8.0);
         let card_style = ui.style().clone();
-        egui::Frame::group(&card_style).show(ui, |ui| self.draw_home_profile_card(ui, &profile));
+        egui::Frame::group(&card_style)
+            .show(ui, |ui| self.draw_home_composition_card(ui, &composition));
 
         ui.add_space(12.0);
         ui.horizontal_wrapped(|ui| {
             let mut find_clicked = false;
             ui.add_enabled_ui(!self.operation.running, |ui| {
-                find_clicked = primary_button(ui, "Find game setups and add-ons").clicked();
+                find_clicked = primary_button(ui, "Discover content").clicked();
             });
             if find_clicked {
                 self.open_workshop_tab(WorkshopTab::Browse);
@@ -82,29 +83,23 @@ impl StudioApp {
         });
     }
 
-    fn draw_home_profile_card(&mut self, ui: &mut egui::Ui, profile: &HomeProfileSummary) {
-        ui.small("PLAY PROFILE");
-        ui.heading(&profile.name);
-        if let Some(root) = profile.root_package.as_ref() {
-            let selector = content_selector(root);
-            ui.small("CURRENT GAME SETUP");
-            ui.strong(&root.id);
-            if let Some(version) = root.version.as_deref() {
-                ui.weak(format!("Version {version}"));
-            }
-            ui.weak("A play profile remembers the game setup and launch settings you want to use.");
-            egui::CollapsingHeader::new("Technical setup details")
-                .id_salt("home-profile-setup-details")
-                .show(ui, |ui| {
-                    ui.monospace(selector.clone());
-                    ui.small("Exact content selector");
-                });
+    fn draw_home_composition_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        composition: &HomeCompositionSummary,
+    ) {
+        ui.small("ACTIVE COMPOSITION");
+        ui.heading(&composition.name);
+        if composition.root_package.is_some() {
             status_text(
                 ui,
-                profile.installation_status_text,
-                profile.installation_tone,
+                composition.installation_status_text,
+                composition.installation_tone,
             );
-            let can_play = !self.operation.running && !profile.play_blocked_by_out_of_date;
+            let can_play = !self.operation.running
+                && self
+                    .service_action_enabled("composition.launch")
+                    .unwrap_or(!composition.play_blocked_by_out_of_date);
             let mut play_clicked = false;
             ui.add_enabled_ui(can_play, |ui| {
                 play_clicked = primary_button(ui, "Launch").clicked();
@@ -113,16 +108,20 @@ impl StudioApp {
             .on_disabled_hover_text(if self.operation.running {
                 "Wait for the current operation to finish before launching."
             } else {
-                "This profile's saved game setup differs from what is installed. Review or update it before launching."
+                "The installed content differs from this composition. Review or update it before launching."
             });
             if play_clicked {
                 self.run_installed_selected();
             }
             ui.horizontal_wrapped(|ui| {
-                if profile.has_workspace_source
+                if composition.has_workspace_source
                     && ui
                         .add_enabled(
-                            !self.operation.running && !self.has_unsaved_workspace_edits(),
+                            !self.operation.running
+                                && self
+                                    .service_action_enabled("composition.build-and-launch")
+                                    .unwrap_or(true)
+                                && !self.has_unsaved_workspace_edits(),
                             egui::Button::new("Build and launch project"),
                         )
                         .on_disabled_hover_text(
@@ -132,16 +131,16 @@ impl StudioApp {
                 {
                     self.run_selected();
                 }
-                if profile.needs_review && ui.button("Review or repair this setup").clicked() {
-                    self.activate_navigation_section(Section::Library);
+                if composition.needs_review && ui.button("Review or repair this composition").clicked() {
+                    self.activate_navigation_section(Section::Compositions);
                 }
                 if ui.small_button("Find more content on Steam Workshop").clicked() {
                     self.open_workshop_tab(WorkshopTab::Browse);
                 }
             });
         } else {
-            ui.weak("Choose a game setup for this profile to make Launch available.");
-            if primary_button(ui, "Find a game setup").clicked() {
+            ui.weak("Choose a playable composition to enable Launch.");
+            if primary_button(ui, "Find a playable composition").clicked() {
                 self.open_workshop_tab(WorkshopTab::Browse);
                 self.search_workshop();
             }
@@ -160,7 +159,7 @@ impl StudioApp {
                     self.navigate_to_workspace_content();
                 }
             } else {
-                ui.weak("Create or find a game setup, then choose it for this play profile.");
+                ui.weak("Find a playable composition, or create your own.");
             }
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -179,11 +178,11 @@ impl StudioApp {
             });
         }
         if ui
-            .button("Manage profiles")
-            .on_hover_text("Each play profile remembers a game setup and its launch settings.")
+            .button("Manage compositions")
+            .on_hover_text("Each composition has its own content and launch settings.")
             .clicked()
         {
-            self.activate_navigation_section(Section::Library);
+            self.activate_navigation_section(Section::Compositions);
         }
     }
 

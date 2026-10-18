@@ -2,9 +2,8 @@ use super::super::StudioApp;
 use super::super::components::design::empty_state;
 use super::super::content_selector;
 use eframe::egui;
-use vapor_studio_core::InstallationState;
 
-pub(super) enum ProfileCompositionAction {
+pub(super) enum CompositionContentAction {
     BrowseContent,
     CreateContent,
     EditComposition(String),
@@ -13,31 +12,31 @@ pub(super) enum ProfileCompositionAction {
 }
 
 impl StudioApp {
-    pub(super) fn draw_profile_composition_panel(
+    pub(super) fn draw_composition_content_panel(
         &self,
         ui: &mut eframe::egui::Ui,
-        profile: &vapor_studio_core::CompositionProfile,
-    ) -> Option<ProfileCompositionAction> {
-        let Some(root) = &profile.root_package else {
+        composition: &vapor_client_application::Composition,
+    ) -> Option<CompositionContentAction> {
+        let Some(root) = &composition.root_package else {
             let mut action = None;
             empty_state(
                 ui,
-                "No game setup selected",
-                "Choose a playable setup for this profile, or make one from your own projects. Your project files stay where they are.",
+                "Choose a composition",
+                "Choose a complete playable setup, or create one from your projects. Your project files stay where they are.",
                 |ui| {
-                    if ui.button("Find a game setup").clicked() {
-                        action = Some(ProfileCompositionAction::BrowseContent);
+                    if ui.button("Browse compositions").clicked() {
+                        action = Some(CompositionContentAction::BrowseContent);
                     }
                     let resume_draft = self.authoring.create.is_dirty();
                     if ui
                         .button(if resume_draft {
                             "Continue content draft"
                         } else {
-                            "Create a game setup"
+                            "Create a composition"
                         })
                         .clicked()
                     {
-                        action = Some(ProfileCompositionAction::CreateContent);
+                        action = Some(CompositionContentAction::CreateContent);
                     }
                 },
             );
@@ -51,29 +50,29 @@ impl StudioApp {
         if ui
             .add_enabled(
                 !self.operation.running && !self.has_unsaved_workspace_edits() && editable_source,
-                egui::Button::new("Edit game setup"),
+                egui::Button::new("Edit composition"),
             )
             .on_disabled_hover_text(
-                "Only a game setup project in an open project folder can be edited here.",
+                "Only a Packagepack project in an open project folder can be edited here.",
             )
             .clicked()
         {
-            action = Some(ProfileCompositionAction::EditComposition(selector.clone()));
+            action = Some(CompositionContentAction::EditComposition(selector.clone()));
         }
         if ui
             .add_enabled(
                 !self.operation.running && !self.has_unsaved_workspace_edits(),
-                egui::Button::new("Review game setup"),
+                egui::Button::new("Review composition"),
             )
             .on_disabled_hover_text(
                 "Save or discard your open project edits first; Studio reads the saved project details.",
             )
             .clicked()
         {
-            action = Some(ProfileCompositionAction::PreviewPlan);
+            action = Some(CompositionContentAction::PreviewPlan);
         }
         if let Some(preview) = self
-            .profile_composition
+            .composition_preview
             .preview()
             .filter(|preview| preview.selector == selector)
         {
@@ -84,13 +83,13 @@ impl StudioApp {
                     !self.operation.running && !self.has_unsaved_workspace_edits(),
                 );
             if !published_file_ids.is_empty() {
-                action = Some(ProfileCompositionAction::DownloadDependencies(
+                action = Some(CompositionContentAction::DownloadDependencies(
                     published_file_ids,
                 ));
             }
         }
 
-        if let Some(graph) = &profile.resolved_graph {
+        if let Some(graph) = &composition.resolved_graph {
             ui.group(|ui| {
                 ui.label(format!("This setup contains {} items", graph.nodes.len()));
                 ui.horizontal_wrapped(|ui| {
@@ -120,31 +119,9 @@ impl StudioApp {
                             });
                         }
                     });
-                egui::CollapsingHeader::new("Integrity details").show(ui, |ui| {
-                    if let InstallationState::Installed {
-                        graph_fingerprint: Some(fingerprint),
-                        ..
-                    } = &profile.installation
-                    {
-                        ui.small(format!("Composition fingerprint: {fingerprint}"));
-                    }
-                    for node in &graph.nodes {
-                        ui.small(format!(
-                            "{} · {} · source {} · file fingerprint {}",
-                            node.kind,
-                            content_selector(&node.content),
-                            node.source.as_deref().unwrap_or("not recorded"),
-                            node.fingerprint
-                                .as_deref()
-                                .unwrap_or("file fingerprint unavailable"),
-                        ));
-                    }
-                });
             });
         } else {
-            ui.weak(
-                "Install this composition to record its exact content versions and dependencies.",
-            );
+            ui.weak("Install this composition to see its included content and launch status.");
         }
         action
     }

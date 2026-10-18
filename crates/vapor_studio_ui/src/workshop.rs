@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use vapor_studio_core::OperationKind;
+use vapor_client_application::OperationKind;
 
 const WORKSHOP_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const WORKSHOP_PROGRESS_POLL_MAX_INTERVAL: Duration = Duration::from_secs(30);
@@ -20,13 +20,13 @@ pub(super) enum WorkshopTab {
 
 pub(super) struct WorkshopState {
     pub(super) tab: WorkshopTab,
-    pub(super) preview: Option<vapor_studio_core::WorkshopPackagePreview>,
+    pub(super) preview: Option<vapor_client_application::WorkshopPackagePreview>,
     pub(super) published_file_id: String,
     pub(super) publisher_account: String,
     pub(super) change_note: String,
     pub(super) confirmation: String,
     pub(super) selected_items: std::collections::BTreeSet<String>,
-    pub(super) recent_acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
+    pub(super) recent_acquisitions: Vec<vapor_client_application::WorkshopAcquisition>,
     pub(super) pending_acquisition_ids: std::collections::BTreeSet<String>,
     pub(super) service_review_id: Option<String>,
     pub(super) omitted_review_file_paths: usize,
@@ -35,7 +35,7 @@ pub(super) struct WorkshopState {
     pub(super) service_search_revision: u64,
     pub(super) pending_service_search_revision: Option<u64>,
     pub(super) service_acquisition_revision: u64,
-    pub(super) results: Vec<vapor_studio_core::WorkshopItem>,
+    pub(super) results: Vec<vapor_client_application::WorkshopItem>,
     pub(super) focused_result: Option<String>,
     pub(super) results_query: Option<String>,
     pub(super) subscriptions: std::collections::BTreeSet<String>,
@@ -44,7 +44,7 @@ pub(super) struct WorkshopState {
     pub(super) service_subscriptions_revision: Option<u64>,
     pub(super) subscription_search_query: String,
     pub(super) subscription_details:
-        std::collections::BTreeMap<String, vapor_studio_core::WorkshopSubscription>,
+        std::collections::BTreeMap<String, vapor_client_application::WorkshopSubscription>,
     pub(super) subscription_poll_interval: Duration,
     pub(super) next_subscription_poll: Option<Instant>,
     pub(super) total_results: u32,
@@ -88,7 +88,7 @@ impl Default for WorkshopState {
 }
 
 enum RepreviewRequest {
-    ActiveProfile,
+    ActiveComposition,
     Source {
         selector: String,
         workspace_root: PathBuf,
@@ -98,7 +98,7 @@ enum RepreviewRequest {
 impl StudioApp {
     pub(super) fn apply_service_workshop_snapshot(
         &mut self,
-        snapshot: &vapor_studio_protocol::WorkshopSnapshot,
+        snapshot: &vapor_client_protocol::WorkshopSnapshot,
     ) {
         if let Some(search) = snapshot.search.as_ref() {
             let pending_matches = self
@@ -115,11 +115,11 @@ impl StudioApp {
                 self.workshop.service_search_revision = search.revision;
                 self.workshop.pending_service_search_revision = None;
                 self.apply_workshop_search(
-                    vapor_studio_core::WorkshopPage {
+                    vapor_client_application::WorkshopPage {
                         items: search
                             .items
                             .iter()
-                            .map(|item| vapor_studio_core::WorkshopItem {
+                            .map(|item| vapor_client_application::WorkshopItem {
                                 published_file_id: item.published_file_id.clone(),
                                 title: item.title.clone(),
                                 description: item.description.clone(),
@@ -144,7 +144,7 @@ impl StudioApp {
             let subscriptions = snapshot
                 .subscriptions
                 .iter()
-                .map(|item| vapor_studio_core::WorkshopSubscription {
+                .map(|item| vapor_client_application::WorkshopSubscription {
                     published_file_id: item.published_file_id.clone(),
                     title: item.title.clone(),
                     description: item.description.clone(),
@@ -168,7 +168,7 @@ impl StudioApp {
             let acquisitions = batch
                 .items
                 .iter()
-                .map(|item| vapor_studio_core::WorkshopAcquisition {
+                .map(|item| vapor_client_application::WorkshopAcquisition {
                     id: item.id.clone(),
                     version: item.version.clone(),
                     kind: item.kind.clone(),
@@ -181,7 +181,7 @@ impl StudioApp {
         }
 
         if let Some(review) = snapshot.review.as_ref() {
-            let preview = vapor_studio_core::WorkshopPackagePreview {
+            let preview = vapor_client_application::WorkshopPackagePreview {
                 id: review.preview.id.clone(),
                 version: review.preview.version.clone(),
                 app_id: review.preview.app_id,
@@ -233,8 +233,8 @@ impl StudioApp {
         self.workshop.omitted_review_file_paths = 0;
         self.workshop.confirmation.clear();
         if discard_service_review && self.service.is_some() {
-            self.submit_service_action(vapor_studio_protocol::StudioAction::Workshop(
-                vapor_studio_protocol::WorkshopAction::DiscardReview,
+            self.submit_service_action(vapor_client_protocol::ClientAction::Workshop(
+                vapor_client_protocol::WorkshopAction::DiscardReview,
             ));
         }
     }
@@ -283,7 +283,7 @@ impl StudioApp {
 
     pub(super) fn apply_workshop_acquisition(
         &mut self,
-        acquisitions: Vec<vapor_studio_core::WorkshopAcquisition>,
+        acquisitions: Vec<vapor_client_application::WorkshopAcquisition>,
         requested: usize,
     ) {
         let imported = acquisitions.len();
@@ -298,8 +298,8 @@ impl StudioApp {
         self.workshop
             .recent_acquisitions
             .truncate(MAX_RECENT_WORKSHOP_ACQUISITIONS);
-        self.open_workshop_tab(WorkshopTab::Imports);
         if imported == requested {
+            self.activate_navigation_section(crate::navigation::Section::Library);
             self.status = if imported == 1 {
                 "Added the Workshop item to content available on this device.".to_owned()
             } else {
@@ -309,6 +309,7 @@ impl StudioApp {
                 self.workshop.selected_items.remove(&id);
             }
         } else {
+            self.open_workshop_tab(WorkshopTab::Imports);
             self.status = format!(
                 "Downloaded {imported} of {requested} Workshop items. Your selection is still here so you can try again."
             );
@@ -323,7 +324,7 @@ impl StudioApp {
 
     pub(super) fn apply_workshop_search(
         &mut self,
-        page: vapor_studio_core::WorkshopPage,
+        page: vapor_client_application::WorkshopPage,
         query: String,
     ) {
         self.workshop.pending_search = None;
@@ -355,7 +356,7 @@ impl StudioApp {
 
     pub(super) fn apply_workshop_subscriptions(
         &mut self,
-        subscriptions: Vec<vapor_studio_core::WorkshopSubscription>,
+        subscriptions: Vec<vapor_client_application::WorkshopSubscription>,
     ) {
         self.workshop.subscriptions_loaded = true;
         self.workshop.subscriptions_stale = false;
@@ -393,12 +394,12 @@ impl StudioApp {
         }
         self.invalidate_workshop_review();
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workshop(
-                vapor_studio_protocol::WorkshopAction::Stage { selector },
+            vapor_client_protocol::ClientAction::Workshop(
+                vapor_client_protocol::WorkshopAction::Stage { selector },
             ),
             None,
             OperationKind::StageWorkshop,
-            vapor_studio_core::OperationPhase::Staging,
+            vapor_client_application::OperationPhase::Staging,
             "Building and staging a Workshop review package…",
         );
     }
@@ -406,7 +407,7 @@ impl StudioApp {
     pub(super) fn publish_reviewed_workshop_content(
         &mut self,
         selector: String,
-        expected_review: vapor_studio_core::WorkshopPackagePreview,
+        expected_review: vapor_client_application::WorkshopPackagePreview,
     ) {
         if !self.catalog.source_snapshot_current() || !self.catalog.local_catalog_current() {
             self.status = "Refresh the project list and on-device content list before publishing. Studio needs current information to check the selected version and find conflicting copies.".to_owned();
@@ -445,8 +446,8 @@ impl StudioApp {
         }
         let change_note = self.workshop.change_note.trim().to_owned();
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workshop(
-                vapor_studio_protocol::WorkshopAction::Publish {
+            vapor_client_protocol::ClientAction::Workshop(
+                vapor_client_protocol::WorkshopAction::Publish {
                     review_id,
                     account,
                     confirmation: self.workshop.confirmation.trim().to_owned(),
@@ -455,7 +456,7 @@ impl StudioApp {
             ),
             None,
             OperationKind::PublishWorkshop,
-            vapor_studio_core::OperationPhase::Publishing,
+            vapor_client_application::OperationPhase::Publishing,
             "Uploading the reviewed Workshop artifact through Vapor Shell…",
         );
     }
@@ -484,11 +485,14 @@ impl StudioApp {
         self.download_workshop_items(ids, None);
     }
 
-    pub(in crate::app) fn download_profile_composition_dependencies(
+    pub(in crate::app) fn download_composition_dependencies(
         &mut self,
         published_file_ids: Vec<String>,
     ) {
-        self.download_workshop_items(published_file_ids, Some(RepreviewRequest::ActiveProfile));
+        self.download_workshop_items(
+            published_file_ids,
+            Some(RepreviewRequest::ActiveComposition),
+        );
     }
 
     pub(in crate::app) fn download_source_composition_dependencies(
@@ -534,14 +538,14 @@ impl StudioApp {
         let count = published_file_ids.len();
         let pending_acquisition_ids = published_file_ids.iter().cloned().collect();
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workshop(
-                vapor_studio_protocol::WorkshopAction::Acquire {
+            vapor_client_protocol::ClientAction::Workshop(
+                vapor_client_protocol::WorkshopAction::Acquire {
                     item_ids: published_file_ids,
                 },
             ),
             None,
             OperationKind::Acquire,
-            vapor_studio_core::OperationPhase::Acquiring,
+            vapor_client_application::OperationPhase::Acquiring,
             &if count == 1 {
                 "Downloading this item for use in Studio…".to_owned()
             } else {
@@ -560,15 +564,15 @@ impl StudioApp {
         self.workshop.pending_acquisition_ids = pending_acquisition_ids;
         if let Some(request) = repreview_after_acquisition {
             match request {
-                RepreviewRequest::ActiveProfile => {
-                    self.profile_composition
+                RepreviewRequest::ActiveComposition => {
+                    self.composition_preview
                         .request_repreview_after_catalog_refresh();
                 }
                 RepreviewRequest::Source {
                     selector,
                     workspace_root,
                 } => {
-                    self.profile_composition
+                    self.composition_preview
                         .request_source_repreview_after_catalog_refresh(selector, workspace_root);
                 }
             }
@@ -598,12 +602,12 @@ impl StudioApp {
         self.workshop.pending_search = Some((query.clone(), page));
         self.workshop.pending_service_search_revision = Some(self.workshop.service_search_revision);
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workshop(
-                vapor_studio_protocol::WorkshopAction::Search { query, page },
+            vapor_client_protocol::ClientAction::Workshop(
+                vapor_client_protocol::WorkshopAction::Search { query, page },
             ),
             None,
             OperationKind::SearchWorkshop,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             &status,
         );
         self.status = status;
@@ -616,12 +620,12 @@ impl StudioApp {
         self.workshop.next_subscription_poll =
             Some(Instant::now() + self.workshop.subscription_poll_interval);
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workshop(
-                vapor_studio_protocol::WorkshopAction::LoadSubscriptions,
+            vapor_client_protocol::ClientAction::Workshop(
+                vapor_client_protocol::WorkshopAction::LoadSubscriptions,
             ),
             None,
             OperationKind::LoadWorkshopSubscriptions,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             "Loading Steam Workshop subscriptions…",
         );
         self.status = "Loading Steam Workshop subscriptions…".to_owned();
@@ -655,10 +659,10 @@ impl StudioApp {
             self.status = "Select at least one Workshop item.".to_owned();
             return;
         }
-        if ids.len() > vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH {
+        if ids.len() > vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH {
             self.status = format!(
                 "Select no more than {} Workshop items for one subscription change.",
-                vapor_studio_core::MAX_WORKSHOP_SUBSCRIPTION_BATCH
+                vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH
             );
             return;
         }
@@ -678,19 +682,19 @@ impl StudioApp {
             return;
         }
         let action = if subscribed {
-            vapor_studio_protocol::WorkshopAction::Subscribe {
+            vapor_client_protocol::WorkshopAction::Subscribe {
                 item_ids: normalized_ids,
             }
         } else {
-            vapor_studio_protocol::WorkshopAction::Unsubscribe {
+            vapor_client_protocol::WorkshopAction::Unsubscribe {
                 item_ids: normalized_ids,
             }
         };
         self.start_service_operation(
-            vapor_studio_protocol::StudioAction::Workshop(action),
+            vapor_client_protocol::ClientAction::Workshop(action),
             None,
             OperationKind::ChangeWorkshopSubscription,
-            vapor_studio_core::OperationPhase::Resolving,
+            vapor_client_application::OperationPhase::Resolving,
             if subscribed {
                 "Subscribing to Steam Workshop items…"
             } else {
