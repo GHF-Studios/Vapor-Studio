@@ -27,16 +27,29 @@ pub(crate) fn contextual_split(
 ) {
     let available = ui.available_width();
     let gap = ui.spacing().item_spacing.x;
-    let context_width = CONTEXT_PANEL_WIDTH.min((available - gap - 1.0).max(1.0));
-    let main_width = (available - context_width - gap).max(1.0);
     let start = ui.next_widget_position();
     let available_rect = ui.available_rect_before_wrap();
-    let main_rect =
-        egui::Rect::from_min_size(start, egui::vec2(main_width, available_rect.height()));
-    let context_rect = egui::Rect::from_min_size(
-        egui::pos2(start.x + main_width + gap, start.y),
-        egui::vec2(context_width, available_rect.height()),
-    );
+    let stacked = use_stacked_panels(ui);
+    let (main_rect, context_rect) = if stacked {
+        let list_height = (available_rect.height() * 0.42).clamp(240.0, 320.0);
+        (
+            egui::Rect::from_min_size(start, egui::vec2(available, list_height)),
+            egui::Rect::from_min_size(
+                egui::pos2(start.x, start.y + list_height + gap),
+                egui::vec2(available, (available_rect.height() - list_height - gap).max(1.0)),
+            ),
+        )
+    } else {
+        let context_width = CONTEXT_PANEL_WIDTH;
+        let main_width = (available - context_width - gap).max(1.0);
+        (
+            egui::Rect::from_min_size(start, egui::vec2(main_width, available_rect.height())),
+            egui::Rect::from_min_size(
+                egui::pos2(start.x + main_width + gap, start.y),
+                egui::vec2(context_width, available_rect.height()),
+            ),
+        )
+    };
     let layout = egui::Layout::top_down_justified(egui::Align::Min);
     let mut main_ui = ui.new_child(egui::UiBuilder::new().max_rect(main_rect).layout(layout));
     let mut context_ui = ui.new_child(

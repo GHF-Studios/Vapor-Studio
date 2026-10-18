@@ -1,6 +1,7 @@
 use super::super::StudioApp;
 use super::super::components::design::{
-    LIST_ROW_HEIGHT, StatusTone, empty_state, search_field_width, status_text, use_stacked_panels,
+    LIST_ROW_HEIGHT, StatusTone, contextual_split, empty_state, search_field_width, section_header,
+    status_text,
 };
 use eframe::egui;
 
@@ -204,16 +205,13 @@ impl StudioApp {
             return;
         }
 
-        let narrow_layout = use_stacked_panels(ui);
         let mut action = None;
-        ui.columns(if narrow_layout { 1 } else { 2 }, |columns| {
-            {
-                let list = &mut columns[0];
-                list.set_min_width(if narrow_layout { 1.0 } else { 320.0 });
-                list.heading("Items");
-                egui::ScrollArea::vertical()
-                    .id_salt("workshop-search-results")
-                    .show(list, |ui| {
+        contextual_split(ui, |list, details| {
+            section_header(list, "Workshop results", "Choose an item to see its details and actions.");
+            list.set_min_width(1.0);
+            egui::ScrollArea::vertical()
+                .id_salt("workshop-search-results")
+                .show(list, |ui| {
                     for item in &self.workshop.results {
                         ui.horizontal_wrapped(|ui| {
                             let mut selected = self
@@ -247,15 +245,7 @@ impl StudioApp {
                         ui.separator();
                     }
                 });
-            }
-
-            let details = if narrow_layout {
-                columns[0].separator();
-                &mut columns[0]
-            } else {
-                &mut columns[1]
-            };
-            details.heading("Item details");
+            section_header(details, "Item details", "Subscription and composition actions.");
             let focused_item = self.workshop.results.iter().find(|item|
                 self.workshop.focused_result.as_deref() == Some(item.published_file_id.as_str())
             );
