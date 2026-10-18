@@ -24,9 +24,11 @@ pub use profile::{
 };
 pub use state::{
     AvailableAction, CatalogConflict, CatalogEntry, CatalogLocation, CatalogLocationKind,
-    DurableStateSnapshot, HostSummary, OperationEvent, OperationPhase, OperationStatus,
-    OperationSummary, StudioEvent, StudioRevision, StudioSnapshot, WorkspaceContentSnapshot,
-    WorkspaceProjectCandidate, WorkspaceSourceProject, WorkspaceWorkshopPolicy,
+    CompositionPreviewDependency, CompositionPreviewNode, CompositionPreviewSnapshot,
+    CompositionPreviewSource, DurableStateSnapshot, HostSummary, OperationEvent, OperationPhase,
+    OperationStatus, OperationSummary, StudioEvent, StudioRevision, StudioSnapshot,
+    WorkspaceContentSnapshot, WorkspaceProjectCandidate, WorkspaceSourceProject,
+    WorkspaceWorkshopPolicy,
 };
 
 #[cfg(test)]
@@ -68,18 +70,15 @@ mod tests {
                 content_version: Some("1.0.0".into()),
                 workspace_root: Some("/workspace".into()),
             }),
+            StudioAction::Profile(ProfileAction::ResolveDefaultRoot {
+                profile_id: "p1".into(),
+            }),
             StudioAction::Profile(ProfileAction::SetLaunchArguments {
                 profile_id: "p1".into(),
                 arguments: vec!["--safe".into()],
             }),
-            StudioAction::Profile(ProfileAction::SetCompositionState {
+            StudioAction::Profile(ProfileAction::AdoptVerifiedGraph {
                 profile_id: "p1".into(),
-                root_package: Some(ContentIdentity {
-                    id: "root".into(),
-                    version: Some("1.0.0".into()),
-                }),
-                resolved_graph: None,
-                installation: Box::new(InstallationState::Unknown),
             }),
             StudioAction::Profile(ProfileAction::InvalidateContent {
                 content_id: "root".into(),
@@ -101,12 +100,28 @@ mod tests {
             StudioAction::Catalog(CatalogAction::AdoptWorkspaceProject {
                 path: "mods/moon".into(),
             }),
-            StudioAction::Composition(CompositionAction::Preview),
-            StudioAction::Composition(CompositionAction::Install),
-            StudioAction::Composition(CompositionAction::Verify),
-            StudioAction::Composition(CompositionAction::Repair),
-            StudioAction::Composition(CompositionAction::Update),
-            StudioAction::Composition(CompositionAction::Launch),
+            StudioAction::Composition(CompositionAction::Preview {
+                profile_id: "p1".into(),
+                selector: Some("pack".into()),
+            }),
+            StudioAction::Composition(CompositionAction::Install {
+                profile_id: "p1".into(),
+            }),
+            StudioAction::Composition(CompositionAction::Verify {
+                profile_id: "p1".into(),
+            }),
+            StudioAction::Composition(CompositionAction::Repair {
+                profile_id: "p1".into(),
+            }),
+            StudioAction::Composition(CompositionAction::Update {
+                profile_id: "p1".into(),
+            }),
+            StudioAction::Composition(CompositionAction::Launch {
+                profile_id: "p1".into(),
+            }),
+            StudioAction::Composition(CompositionAction::RunSource {
+                profile_id: "p1".into(),
+            }),
             StudioAction::Workspace(WorkspaceAction::Discover { root: ".".into() }),
             StudioAction::Workspace(WorkspaceAction::DiscoverWorkspace { root: ".".into() }),
             StudioAction::Workspace(WorkspaceAction::Open { root: ".".into() }),
@@ -207,7 +222,7 @@ mod tests {
         ];
         assert_eq!(
             actions.len(),
-            55,
+            57,
             "update this catalog when adding/removing action variants"
         );
         for action in actions {
@@ -236,11 +251,13 @@ mod tests {
             durable_state: DurableStateSnapshot::default(),
             active_operation: Some(OperationSummary {
                 id: "operation-1".into(),
+                profile_id: Some("p1".into()),
                 action: "catalog.refresh".into(),
                 phase: OperationPhase::Resolving,
                 status: OperationStatus::Running,
                 progress: None,
             }),
+            composition_preview: None,
             catalog: vec![CatalogEntry {
                 id: "moon".into(),
                 version: Some("1.0.0".into()),
@@ -298,6 +315,7 @@ mod tests {
         assert_round_trip(StudioEvent::OperationChanged(OperationEvent {
             revision: StudioRevision(4),
             id: "operation-1".into(),
+            profile_id: Some("p1".into()),
             action: "catalog.refresh".into(),
             phase: OperationPhase::Complete,
             status: OperationStatus::Succeeded,

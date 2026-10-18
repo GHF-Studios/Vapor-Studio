@@ -14,8 +14,9 @@ pub use catalog::{
     CatalogConflict, CatalogContent, CatalogLocation, CatalogLocationKind, discover_content_catalog,
 };
 pub use operation::{
-    OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
-    Progress,
+    CoreOperationEvent, CoreOperationRequest, OperationContext, OperationEvent, OperationEventSink,
+    OperationId, OperationKind, OperationPhase, OperationRequest, OperationService,
+    OperationStatus, Progress,
 };
 pub use profile::{
     CURRENT_SCHEMA_VERSION, CompositionProfile, ContentIdentity, InstallationState,

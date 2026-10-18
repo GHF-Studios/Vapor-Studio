@@ -25,7 +25,6 @@ pub(super) enum OperationResult {
         >,
     ),
     Message(Result<String, String>),
-    CompositionPreview(Result<vapor_studio_core::CompositionPreview, String>),
     WorkspaceFiles(Result<Vec<PathBuf>, String>),
     WorkspaceFileCreated(Result<PathBuf, String>),
     FileContents(Result<(PathBuf, String), String>),
@@ -38,12 +37,6 @@ pub(super) enum OperationResult {
     SourceWorkshopSaved(Result<vapor_studio_core::SourceWorkshopMetadata, String>),
     SourceRuntimeOutputsLoaded(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
     SourceRuntimeOutputsSaved(Result<vapor_studio_core::SourceRuntimeOutputs, String>),
-    Install(Result<vapor_studio_core::InstalledComposition, String>),
-    RunInstalled(Result<vapor_studio_core::ProfileRunResult, String>),
-    Update(Result<vapor_studio_core::InstalledComposition, String>),
-    RunProfile(Result<vapor_studio_core::ProfileRunResult, String>),
-    Verify(Result<vapor_studio_core::InstallationCheck, String>),
-    Repair(Result<vapor_studio_core::InstalledComposition, String>),
     WorkshopStage(Result<vapor_studio_core::WorkshopPackagePreview, String>),
     WorkshopAcquisition(Result<(Vec<vapor_studio_core::WorkshopAcquisition>, usize), String>),
     WorkshopPublish(Result<vapor_studio_core::WorkshopPublication, String>),
@@ -61,7 +54,6 @@ impl OperationResult {
             | Self::RememberedSources(Err(error))
             | Self::AdoptedContentProject(Err(error))
             | Self::UnregisteredContentProject(Err(error))
-            | Self::CompositionPreview(Err(error))
             | Self::Message(Err(error))
             | Self::WorkspaceFiles(Err(error))
             | Self::WorkspaceFileCreated(Err(error))
@@ -74,12 +66,6 @@ impl OperationResult {
             | Self::SourceWorkshopSaved(Err(error))
             | Self::SourceRuntimeOutputsLoaded(Err(error))
             | Self::SourceRuntimeOutputsSaved(Err(error))
-            | Self::Install(Err(error))
-            | Self::RunInstalled(Err(error))
-            | Self::Update(Err(error))
-            | Self::RunProfile(Err(error))
-            | Self::Verify(Err(error))
-            | Self::Repair(Err(error))
             | Self::WorkshopStage(Err(error))
             | Self::WorkshopAcquisition(Err(error))
             | Self::WorkshopPublish(Err(error))
@@ -100,7 +86,6 @@ impl OperationResult {
                     *requested,
                 ))
             }
-            Self::Verify(Ok(check)) if !check.ok => Some(check.detail.join("; ")),
             Self::RootPublish(Ok(report))
                 if report
                     .status
@@ -115,23 +100,13 @@ impl OperationResult {
                         .map_or_else(|| "unknown status".to_owned(), ToString::to_string)
                 ))
             }
-            Self::RunInstalled(Ok(result)) | Self::RunProfile(Ok(result))
-                if result.launch_error.is_some() =>
-            {
-                result.launch_error.clone()
-            }
             _ => None,
         }
     }
 
     pub(super) fn refreshes_content_catalog(&self) -> bool {
         match self {
-            Self::WorkshopAcquisition(_)
-            | Self::Install(_)
-            | Self::Update(_)
-            | Self::Repair(_)
-            | Self::RunInstalled(_)
-            | Self::RunProfile(_) => true,
+            Self::WorkshopAcquisition(_) => true,
             Self::FileSaved(Ok(path)) => path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().ends_with(".vapor.toml")),

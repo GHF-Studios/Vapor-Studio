@@ -1,7 +1,12 @@
 use crate::{
     ServiceBootstrap, StudioSession, host::StudioHostContext, persistence::StudioStateStore,
 };
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+use std::{
+    io::{self, BufRead, BufReader, BufWriter, Read, Write},
+    sync::mpsc::{self, RecvTimeoutError, SyncSender},
+    thread,
+    time::Duration,
+};
 use vapor_studio_protocol::{
     LegacyStorageSeed, PROTOCOL_VERSION, ProtocolFrame, StudioError, StudioErrorCode, StudioEvent,
 };
@@ -14,7 +19,7 @@ pub fn run_stdio_service(
 ) -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut input = BufReader::new(stdin.lock());
+    let mut input = BufReader::new(stdin);
     let seed = read_initialization(&mut input)?;
     let session = if bootstrap.fixture_mode {
         StudioSession::new(bootstrap)
@@ -65,7 +70,7 @@ fn read_initialization(input: &mut impl BufRead) -> Result<LegacyStorageSeed, St
 }
 
 fn serve(
-    mut input: impl BufRead,
+    input: impl BufRead + Send + 'static,
     mut output: impl Write,
     mut session: StudioSession,
 ) -> Result<(), String> {
@@ -80,94 +85,155 @@ fn serve(
         &ProtocolFrame::Event(StudioEvent::Snapshot(Box::new(session.snapshot()))),
     )?;
 
+    let (sender, receiver) = mpsc::sync_channel(8);
+    thread::Builder::new()
+        .name("studio-service-protocol-input".to_owned())
+        .spawn(move || read_requests(input, sender))
+        .map_err(|error| format!("could not start service input reader: {error}"))?;
+
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(25)) {
+            Ok(Ok(Some(mut buffer))) => {
+                if buffer.last() == Some(&b'\n') {
+                    buffer.pop();
+                }
+                if buffer.last() == Some(&b'\r') {
+                    buffer.pop();
+                }
+                if buffer.is_empty() {
+                    continue;
+                }
+                process_frame(&buffer, &mut output, &mut session)?;
+            }
+            Ok(Ok(None)) => return Ok(()),
+            Ok(Err(message)) => {
+                let limit_exceeded = message == "protocol frame limit exceeded";
+                write_frame(
+                    &mut output,
+                    &ProtocolFrame::Event(StudioEvent::ProtocolError(StudioError {
+                        code: StudioErrorCode::InvalidRequest,
+                        message: if limit_exceeded {
+                            "protocol frame exceeds the 1 MiB limit".to_owned()
+                        } else {
+                            message.clone()
+                        },
+                        retryable: false,
+                    })),
+                )?;
+                return Err(message);
+            }
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+
+        for event in session.poll_background_operations() {
+            write_frame(&mut output, &ProtocolFrame::Event(event))?;
+            write_frame(
+                &mut output,
+                &ProtocolFrame::Event(StudioEvent::Snapshot(Box::new(session.snapshot()))),
+            )?;
+        }
+    }
+}
+
+fn read_requests(input: impl BufRead, sender: SyncSender<Result<Option<Vec<u8>>, String>>) {
+    let mut input = input;
     let mut buffer = Vec::new();
     loop {
         buffer.clear();
-        let read = input
+        let read = match input
             .by_ref()
             .take((MAX_FRAME_BYTES + 1) as u64)
             .read_until(b'\n', &mut buffer)
-            .map_err(|error| format!("failed reading protocol input: {error}"))?;
+        {
+            Ok(read) => read,
+            Err(error) => {
+                let _ = sender.send(Err(format!("failed reading protocol input: {error}")));
+                return;
+            }
+        };
         if read == 0 {
-            return Ok(());
+            let _ = sender.send(Ok(None));
+            return;
         }
         if buffer.len() > MAX_FRAME_BYTES {
+            let _ = sender.send(Err("protocol frame limit exceeded".to_owned()));
+            return;
+        }
+        if sender.send(Ok(Some(buffer.clone()))).is_err() {
+            return;
+        }
+    }
+}
+
+fn process_frame(
+    buffer: &[u8],
+    output: &mut impl Write,
+    session: &mut StudioSession,
+) -> Result<(), String> {
+    match serde_json::from_slice::<ProtocolFrame>(buffer) {
+        Ok(ProtocolFrame::Initialize { .. }) => {
             let error = StudioError {
                 code: StudioErrorCode::InvalidRequest,
-                message: "protocol frame exceeds the 1 MiB limit".to_owned(),
+                message: "service initialization is only valid as the first frame".to_owned(),
                 retryable: false,
             };
             write_frame(
-                &mut output,
+                output,
                 &ProtocolFrame::Event(StudioEvent::ProtocolError(error)),
             )?;
-            return Err("protocol frame limit exceeded".to_owned());
         }
-        if buffer.last() == Some(&b'\n') {
-            buffer.pop();
+        Ok(ProtocolFrame::Request(request)) => {
+            let response = if request.protocol_version != PROTOCOL_VERSION {
+                vapor_studio_protocol::StudioResponse {
+                    protocol_version: PROTOCOL_VERSION,
+                    request_id: request.request_id,
+                    revision: session.snapshot().revision,
+                    kind: vapor_studio_protocol::StudioResponseKind::Rejected,
+                    snapshot: session.snapshot(),
+                    error: Some(StudioError {
+                        code: StudioErrorCode::UnsupportedProtocol,
+                        message: format!(
+                            "client protocol {} is unsupported; service protocol is {}",
+                            request.protocol_version, PROTOCOL_VERSION
+                        ),
+                        retryable: false,
+                    }),
+                }
+            } else {
+                session.dispatch(request)
+            };
+            write_frame(output, &ProtocolFrame::Response(Box::new(response)))?;
         }
-        if buffer.last() == Some(&b'\r') {
-            buffer.pop();
-        }
-        if buffer.is_empty() {
-            continue;
-        }
-        match serde_json::from_slice::<ProtocolFrame>(&buffer) {
-            Ok(ProtocolFrame::Initialize { .. }) => {
-                let error = StudioError {
+        Ok(_) => {
+            write_frame(
+                output,
+                &ProtocolFrame::Event(StudioEvent::ProtocolError(StudioError {
                     code: StudioErrorCode::InvalidRequest,
-                    message: "service initialization is only valid as the first frame".to_owned(),
+                    message: "service accepts request frames only".to_owned(),
                     retryable: false,
-                };
-                write_frame(
-                    &mut output,
-                    &ProtocolFrame::Event(StudioEvent::ProtocolError(error)),
-                )?;
-            }
-            Ok(ProtocolFrame::Request(request)) => {
-                let response = if request.protocol_version != PROTOCOL_VERSION {
-                    vapor_studio_protocol::StudioResponse {
-                        protocol_version: PROTOCOL_VERSION,
-                        request_id: request.request_id,
-                        revision: session.snapshot().revision,
-                        kind: vapor_studio_protocol::StudioResponseKind::Rejected,
-                        snapshot: session.snapshot(),
-                        error: Some(StudioError {
-                            code: StudioErrorCode::UnsupportedProtocol,
-                            message: format!(
-                                "client protocol {} is unsupported; service protocol is {}",
-                                request.protocol_version, PROTOCOL_VERSION
-                            ),
-                            retryable: false,
-                        }),
-                    }
-                } else {
-                    session.dispatch(request)
-                };
-                write_frame(&mut output, &ProtocolFrame::Response(Box::new(response)))?;
-            }
-            Ok(_) => {
-                write_frame(
-                    &mut output,
-                    &ProtocolFrame::Event(StudioEvent::ProtocolError(StudioError {
-                        code: StudioErrorCode::InvalidRequest,
-                        message: "service accepts request frames only".to_owned(),
-                        retryable: false,
-                    })),
-                )?;
-            }
-            Err(error) => {
-                write_frame(
-                    &mut output,
-                    &ProtocolFrame::Event(StudioEvent::ProtocolError(StudioError {
-                        code: StudioErrorCode::InvalidRequest,
-                        message: format!("invalid protocol frame: {error}"),
-                        retryable: false,
-                    })),
-                )?;
-            }
+                })),
+            )?;
+        }
+        Err(error) => {
+            write_frame(
+                output,
+                &ProtocolFrame::Event(StudioEvent::ProtocolError(StudioError {
+                    code: StudioErrorCode::InvalidRequest,
+                    message: format!("invalid protocol frame: {error}"),
+                    retryable: false,
+                })),
+            )?;
         }
     }
+    for event in session.poll_background_operations() {
+        write_frame(output, &ProtocolFrame::Event(event))?;
+        write_frame(
+            output,
+            &ProtocolFrame::Event(StudioEvent::Snapshot(Box::new(session.snapshot()))),
+        )?;
+    }
+    Ok(())
 }
 
 fn write_frame(writer: &mut impl Write, frame: &ProtocolFrame) -> Result<(), String> {

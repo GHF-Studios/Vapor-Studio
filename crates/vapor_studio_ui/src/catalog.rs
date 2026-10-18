@@ -125,6 +125,9 @@ impl StudioApp {
                 ProtocolFrame::Event(StudioEvent::Snapshot(snapshot)) => {
                     self.apply_service_catalog_snapshot(&snapshot);
                 }
+                ProtocolFrame::Event(StudioEvent::OperationChanged(event)) => {
+                    self.apply_service_operation_event(&event);
+                }
                 ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
                     return Err(error.message);
                 }
@@ -184,8 +187,21 @@ impl StudioApp {
             match frame {
                 ProtocolFrame::Response(response) => {
                     self.apply_service_catalog_snapshot(&response.snapshot);
+                    let composition_request =
+                        self.operation.service_request_id.as_ref() == Some(&response.request_id);
+                    if composition_request {
+                        self.operation.service_request_id = None;
+                        if response.kind != StudioResponseKind::OperationAccepted {
+                            self.operation.running = false;
+                            self.operation.service_owned = false;
+                            self.operation.active_operation = None;
+                        }
+                    }
                     match response.error {
                         Some(error) => {
+                            if composition_request {
+                                self.status = error.message.clone();
+                            }
                             self.catalog.catalog_discovery_error = Some(error.message.clone());
                             self.service_error = Some(error.message);
                         }
@@ -199,6 +215,9 @@ impl StudioApp {
                 ProtocolFrame::Event(StudioEvent::Snapshot(snapshot)) => {
                     self.apply_service_catalog_snapshot(&snapshot);
                 }
+                ProtocolFrame::Event(StudioEvent::OperationChanged(event)) => {
+                    self.apply_service_operation_event(&event);
+                }
                 ProtocolFrame::Event(StudioEvent::ProtocolError(error)) => {
                     self.catalog.catalog_discovery_error = Some(error.message.clone());
                     if error.code == vapor_studio_protocol::StudioErrorCode::ProviderFailure {
@@ -211,6 +230,12 @@ impl StudioApp {
         }
         if let Some(error) = disconnected {
             let message = format!("Studio service disconnected: {error}");
+            if self.operation.service_owned {
+                self.operation.running = false;
+                self.operation.service_owned = false;
+                self.operation.service_request_id = None;
+                self.operation.active_operation = None;
+            }
             self.catalog.catalog_discovery_error = Some(message.clone());
             self.service_error = Some(message);
             self.service = None;
@@ -284,6 +309,26 @@ impl StudioApp {
             .workspace_content
             .unregistered_projects_error
             .clone();
+        self.apply_service_operation_snapshot(snapshot.active_operation.as_ref());
+        let selected_profile_id = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .map(|profile| profile.id.as_str());
+        if let Some(preview) = snapshot
+            .composition_preview
+            .as_ref()
+            .filter(|preview| Some(preview.profile_id.as_str()) == selected_profile_id)
+        {
+            let preview = protocol_composition_preview(preview);
+            if self.profile_composition.preview() != Some(&preview) {
+                self.apply_composition_preview(preview);
+            }
+        } else if snapshot.composition_preview.is_none()
+            && self.profile_composition.preview().is_some()
+        {
+            self.profile_composition.invalidate_preview();
+        }
         if let Some(selected_id) = snapshot.selected_content_id.as_deref() {
             self.catalog.selected = self
                 .catalog
@@ -324,6 +369,53 @@ impl StudioApp {
         self.submit_service_action(StudioAction::Catalog(
             vapor_studio_protocol::CatalogAction::Refresh,
         ));
+    }
+}
+
+fn protocol_composition_preview(
+    preview: &vapor_studio_protocol::CompositionPreviewSnapshot,
+) -> vapor_studio_core::CompositionPreview {
+    vapor_studio_core::CompositionPreview {
+        selector: preview.selector.clone(),
+        nodes: preview
+            .nodes
+            .iter()
+            .map(|node| vapor_studio_core::CompositionPreviewNode {
+                id: node.id.clone(),
+                version: node.version.clone(),
+                kind: node.kind.clone(),
+                published_file_id: node.published_file_id.clone(),
+                source: match node.source {
+                    vapor_studio_protocol::CompositionPreviewSource::Workspace => {
+                        vapor_studio_core::CompositionPreviewSource::Workspace
+                    }
+                    vapor_studio_protocol::CompositionPreviewSource::Cache => {
+                        vapor_studio_core::CompositionPreviewSource::Cache
+                    }
+                    vapor_studio_protocol::CompositionPreviewSource::Installed => {
+                        vapor_studio_core::CompositionPreviewSource::Installed
+                    }
+                    vapor_studio_protocol::CompositionPreviewSource::DownloadRequired => {
+                        vapor_studio_core::CompositionPreviewSource::DownloadRequired
+                    }
+                },
+                already_installed: node.already_installed,
+                dependencies: node
+                    .dependencies
+                    .iter()
+                    .map(
+                        |dependency| vapor_studio_core::CompositionPreviewDependency {
+                            id: dependency.id.clone(),
+                            relationship: dependency.relationship.clone(),
+                            version: dependency.version.clone(),
+                            optional: dependency.optional,
+                        },
+                    )
+                    .collect(),
+            })
+            .collect(),
+        blockers: preview.blockers.clone(),
+        warnings: preview.warnings.clone(),
     }
 }
 

@@ -1,7 +1,6 @@
-use super::operation_protocol::OperationResult;
-use super::{StudioApp, content_selector};
+use super::StudioApp;
 use std::path::PathBuf;
-use vapor_studio_core::{InstalledArtifactRecord, OperationKind};
+use vapor_studio_core::OperationKind;
 use vapor_studio_protocol::StudioAction;
 
 pub(super) enum RepreviewAfterCatalogRefresh {
@@ -76,269 +75,88 @@ impl StudioApp {
         self.profile_composition.set_preview(preview);
     }
 
-    pub(super) fn apply_installed_composition(
-        &mut self,
-        composition: vapor_studio_core::InstalledComposition,
-        status: &str,
-    ) {
-        self.profile_composition.invalidate_preview();
-        let graph_fingerprint = vapor_studio_core::fingerprint_resolved_graph(&composition.graph);
-        self.profile.items[self.profile.active_index].resolved_graph = Some(composition.graph);
-        self.profile.items[self.profile.active_index].installation =
-            vapor_studio_core::InstallationState::Installed {
-                artifacts: installed_records(composition.artifacts),
-                graph_fingerprint,
-            };
-        self.persist_active_profile_composition();
-        self.status = status.to_owned();
-    }
-
-    pub(super) fn apply_profile_run_result(
-        &mut self,
-        result: vapor_studio_core::ProfileRunResult,
-        completed_message: &str,
-    ) {
-        let vapor_studio_core::ProfileRunResult {
-            composition,
-            profile_graph_matches,
-            launch_error,
-        } = result;
-        if !profile_graph_matches {
-            let detail = launch_error.unwrap_or_else(|| {
-                "The installed content no longer matches this profile's saved composition."
-                    .to_owned()
-            });
-            self.profile.items[self.profile.active_index].installation =
-                vapor_studio_core::InstallationState::OutOfDate {
-                    detail: detail.clone(),
-                    actual_graph: composition.graph,
-                    artifacts: installed_records(composition.artifacts),
-                    verified: false,
-                };
-            self.persist_active_profile_composition();
-            self.status = format!("Profile lock differs from the installed content: {detail}");
-            return;
-        }
-
-        let status = launch_error.map_or_else(
-            || completed_message.to_owned(),
-            |error| format!("Composition is intact, but launch failed: {error}"),
-        );
-        self.apply_installed_composition(composition, &status);
-    }
-
-    pub(super) fn apply_repaired_composition(
-        &mut self,
-        composition: vapor_studio_core::InstalledComposition,
-    ) {
-        if self.profile.items[self.profile.active_index]
-            .resolved_graph
-            .as_ref()
-            .is_some_and(|saved| {
-                !vapor_studio_core::resolved_graph_matches(saved, &composition.graph)
-            })
-        {
-            let detail = "Repair restored valid content, but its graph differs from this profile's saved composition.".to_owned();
-            self.profile.items[self.profile.active_index].installation =
-                vapor_studio_core::InstallationState::OutOfDate {
-                    detail: detail.clone(),
-                    actual_graph: composition.graph,
-                    artifacts: installed_records(composition.artifacts),
-                    verified: false,
-                };
-            self.persist_active_profile_composition();
-            self.status =
-                format!("{detail} Review the installed graph, then update or explicitly adopt it.");
-            return;
-        }
-        self.apply_installed_composition(
-            composition,
-            "Repaired the selected composition without changing its saved graph.",
-        );
-    }
-
-    pub(super) fn apply_installation_check(&mut self, check: vapor_studio_core::InstallationCheck) {
-        let checked = check.detail.len();
-        let detail = check.detail.join("; ");
-        let artifacts = installed_records(check.artifacts);
-        if check.ok {
-            let graph_fingerprint = check
-                .graph
-                .as_ref()
-                .and_then(vapor_studio_core::fingerprint_resolved_graph);
-            if let Some(actual_graph) = check.graph {
-                let saved_graph = self.profile.items[self.profile.active_index]
-                    .resolved_graph
-                    .as_ref();
-                if saved_graph.is_some_and(|saved| {
-                    !vapor_studio_core::resolved_graph_matches(saved, &actual_graph)
-                }) {
-                    let message =
-                        "Verified installed content differs from this profile's saved setup."
-                            .to_owned();
-                    self.profile.items[self.profile.active_index].installation =
-                        vapor_studio_core::InstallationState::OutOfDate {
-                            detail: message.clone(),
-                            actual_graph,
-                            artifacts,
-                            verified: true,
-                        };
-                    self.persist_active_profile_composition();
-                    self.status = format!(
-                        "{message} Review the installed content, then update or save it to the profile."
-                    );
-                    return;
-                }
-                self.profile.items[self.profile.active_index].resolved_graph = Some(actual_graph);
-            }
-            self.profile.items[self.profile.active_index].installation =
-                vapor_studio_core::InstallationState::Installed {
-                    artifacts,
-                    graph_fingerprint,
-                };
-            self.persist_active_profile_composition();
-            self.status =
-                format!("Installed composition verified. {checked} content items checked.");
-        } else {
-            self.profile.items[self.profile.active_index].installation =
-                vapor_studio_core::InstallationState::NeedsRepair {
-                    detail: detail.clone(),
-                    artifacts,
-                };
-            self.persist_active_profile_composition();
-            self.status = format!("Installed composition needs repair: {detail}");
-        }
-    }
-
     pub(super) fn adopt_installed_profile_graph(&mut self) {
-        let state = self.profile.items[self.profile.active_index]
-            .installation
-            .clone();
-        let vapor_studio_core::InstallationState::OutOfDate {
-            actual_graph,
-            artifacts,
-            verified: true,
-            ..
-        } = state
-        else {
+        let Some(profile) = self.profile.items.get(self.profile.active_index) else {
             return;
         };
-        let graph_fingerprint = vapor_studio_core::fingerprint_resolved_graph(&actual_graph);
-        self.profile.items[self.profile.active_index].resolved_graph = Some(actual_graph);
-        self.profile.items[self.profile.active_index].installation =
-            vapor_studio_core::InstallationState::Installed {
-                artifacts,
-                graph_fingerprint,
-            };
-        self.persist_active_profile_composition();
-        self.status = "Saved the verified installed setup to this profile.".to_owned();
-    }
-
-    pub(super) fn apply_verification_error(&mut self, error: String) {
-        let artifacts = match self.profile.items[self.profile.active_index]
-            .installation
-            .clone()
-        {
-            vapor_studio_core::InstallationState::Installed { artifacts, .. }
-            | vapor_studio_core::InstallationState::NeedsRepair { artifacts, .. }
-            | vapor_studio_core::InstallationState::OutOfDate { artifacts, .. } => artifacts,
-            _ => Vec::new(),
-        };
-        self.profile.items[self.profile.active_index].installation =
-            vapor_studio_core::InstallationState::NeedsRepair {
-                detail: error.clone(),
-                artifacts,
-            };
-        self.persist_active_profile_composition();
-        self.status = format!("Could not verify the full composition: {error}");
-    }
-
-    pub(super) fn apply_composition_action_error(&mut self, error: String) {
-        self.profile.items[self.profile.active_index].installation =
-            vapor_studio_core::InstallationState::Partial {
-                detail: error.clone(),
-            };
-        self.persist_active_profile_composition();
-        self.status = error;
+        if !matches!(
+            &profile.installation,
+            vapor_studio_core::InstallationState::OutOfDate { verified: true, .. }
+        ) {
+            return;
+        }
+        let profile_id = profile.id.clone();
+        match self.apply_service_action(StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::AdoptVerifiedGraph { profile_id },
+        )) {
+            Ok(()) => self.status = "Saved the verified installed setup to this profile.".into(),
+            Err(error) => self.status = error,
+        }
     }
 
     pub(super) fn install_selected(&mut self) {
         if !self.require_saved_workspace("install this workspace composition") {
             return;
         }
-        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
+        let Some(profile_id) = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .map(|p| p.id.clone())
+        else {
             return;
         };
-        let Some(root_package) = profile.root_package else {
-            return;
-        };
-        let workspace = profile.workspace.map(|workspace| workspace.root);
-        let executable = match std::env::current_exe() {
-            Ok(executable) => executable,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let selector = root_package
-            .version
-            .as_deref()
-            .map(|version| format!("{}@{}", root_package.id, version))
-            .unwrap_or_else(|| root_package.id.clone());
-        self.spawn(OperationKind::Install, move |_context| {
-            OperationResult::Install(vapor_studio_core::install_profile_composition(
-                &executable,
-                workspace.as_deref(),
-                &selector,
-            ))
-        });
-        self.status = "Installing the selected composition and dependencies…".to_owned();
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Install {
+                profile_id,
+            }),
+            OperationKind::Install,
+            vapor_studio_core::OperationPhase::Acquiring,
+            "Installing the selected composition and dependencies…",
+        );
     }
 
     pub(super) fn update_selected(&mut self) {
         if !self.require_saved_workspace("update this workspace composition") {
             return;
         }
-        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
+        let Some(profile_id) = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .map(|p| p.id.clone())
+        else {
             return;
         };
-        let Some(root_package) = profile.root_package else {
-            return;
-        };
-        let workspace = profile.workspace.map(|workspace| workspace.root);
-        let executable = match std::env::current_exe() {
-            Ok(executable) => executable,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let selector = content_selector(&root_package);
-        self.spawn(OperationKind::Update, move |_context| {
-            OperationResult::Update(vapor_studio_core::update_profile_composition(
-                &executable,
-                workspace.as_deref(),
-                &selector,
-            ))
-        });
-        self.status = "Updating the selected composition through Vapor Shell…".to_owned();
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Update {
+                profile_id,
+            }),
+            OperationKind::Update,
+            vapor_studio_core::OperationPhase::Acquiring,
+            "Updating the selected composition through Vapor Shell…",
+        );
     }
 
     pub(super) fn preview_selected_composition(&mut self) {
         if !self.require_saved_workspace("resolve this workspace composition") {
             return;
         }
-        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
+        let Some(profile_id) = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .map(|p| p.id.clone())
+        else {
             return;
         };
-        let Some(root_package) = profile.root_package else {
-            return;
-        };
-        let selector = content_selector(&root_package);
-        let workspace = profile.workspace.map(|workspace| workspace.root);
-        self.preview_composition(
-            selector,
-            workspace,
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Preview {
+                profile_id,
+                selector: None,
+            }),
+            OperationKind::Resolve,
+            vapor_studio_core::OperationPhase::Resolving,
             "Resolving this profile against workspace, cache, and installed content…",
         );
     }
@@ -358,108 +176,68 @@ impl StudioApp {
     pub(super) fn preview_composition(
         &mut self,
         selector: String,
-        workspace: Option<PathBuf>,
+        _workspace: Option<PathBuf>,
         status: &str,
     ) {
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        self.profile_composition.invalidate_preview();
-        self.spawn(OperationKind::Resolve, move |_context| {
-            OperationResult::CompositionPreview(vapor_studio_core::preview_profile_composition(
-                &executable,
-                workspace.as_deref(),
-                &selector,
-            ))
-        });
-        self.status = status.to_owned();
-    }
-
-    pub(super) fn verify_selected_installation(&mut self) {
-        let Some(root_package) = self
+        let Some(profile_id) = self
             .profile
             .items
             .get(self.profile.active_index)
-            .and_then(|profile| profile.root_package.clone())
+            .map(|p| p.id.clone())
         else {
             return;
         };
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = error.to_string();
-                return;
-            }
+        self.profile_composition.invalidate_preview();
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Preview {
+                profile_id,
+                selector: Some(selector),
+            }),
+            OperationKind::Resolve,
+            vapor_studio_core::OperationPhase::Resolving,
+            status,
+        );
+    }
+
+    pub(super) fn verify_selected_installation(&mut self) {
+        let Some(profile_id) = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .map(|profile| profile.id.clone())
+        else {
+            return;
         };
-        let selectors = self.profile.items[self.profile.active_index]
-            .resolved_graph
-            .as_ref()
-            .map(|graph| {
-                graph
-                    .nodes
-                    .iter()
-                    .map(|node| content_selector(&node.content))
-                    .collect()
-            })
-            .unwrap_or_else(|| vec![content_selector(&root_package)]);
-        self.spawn(OperationKind::Verify, move |_context| {
-            OperationResult::Verify(vapor_studio_core::verify_installation(
-                &executable,
-                &content_selector(&root_package),
-                &selectors,
-            ))
-        });
-        self.status = "Verifying installed composition…".to_owned();
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Verify {
+                profile_id,
+            }),
+            OperationKind::Verify,
+            vapor_studio_core::OperationPhase::Verifying,
+            "Verifying installed composition…",
+        );
     }
 
     pub(super) fn repair_selected_installation(&mut self) {
         if !self.require_saved_workspace("repair this workspace composition") {
             return;
         }
-        let Some(root_package) = self
+        let Some(profile_id) = self
             .profile
             .items
             .get(self.profile.active_index)
-            .and_then(|profile| profile.root_package.clone())
+            .map(|profile| profile.id.clone())
         else {
             return;
         };
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = error.to_string();
-                return;
-            }
-        };
-        let workspace = self.profile.items[self.profile.active_index]
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.root.clone());
-        let selector = content_selector(&root_package);
-        let graph_selectors = self.profile.items[self.profile.active_index]
-            .resolved_graph
-            .as_ref()
-            .map(|graph| {
-                graph
-                    .nodes
-                    .iter()
-                    .map(|node| content_selector(&node.content))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        self.spawn(OperationKind::Repair, move |_context| {
-            OperationResult::Repair(vapor_studio_core::repair_profile_composition(
-                &executable,
-                workspace.as_deref(),
-                &selector,
-                &graph_selectors,
-            ))
-        });
-        self.status = "Repairing installed composition…".to_owned();
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Repair {
+                profile_id,
+            }),
+            OperationKind::Repair,
+            vapor_studio_core::OperationPhase::Acquiring,
+            "Repairing installed composition…",
+        );
     }
 
     pub(super) fn run_installed_selected(&mut self) {
@@ -473,30 +251,15 @@ impl StudioApp {
             self.status = "Review or update this profile's game setup before launching.".to_owned();
             return;
         }
-        let Some(root_package) = profile.root_package else {
+        if profile.root_package.is_none() {
             return;
-        };
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let selector = content_selector(&root_package);
-        let workspace = profile.workspace.map(|workspace| workspace.root);
-        let expected_graph = profile.resolved_graph;
-        let arguments = profile.launch.arguments;
-        self.spawn(OperationKind::RunInstalled, move |_context| {
-            OperationResult::RunInstalled(vapor_studio_core::run_installed_profile(
-                &executable,
-                workspace.as_deref(),
-                &selector,
-                expected_graph.as_ref(),
-                &arguments,
-            ))
-        });
-        self.status = "Preparing game setup. Steam must be open and signed in if Workshop items need downloading…".to_owned();
+        }
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::Launch { profile_id: profile.id }),
+            OperationKind::RunInstalled,
+            vapor_studio_core::OperationPhase::Running,
+            "Preparing game setup. Steam must be open and signed in if Workshop items need downloading…",
+        );
     }
 
     pub(super) fn ensure_default_profile_root(&mut self) -> bool {
@@ -506,37 +269,13 @@ impl StudioApp {
         {
             return true;
         }
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
+        let profile_id = self.profile.items[self.profile.active_index].id.clone();
+        match self.apply_service_action(StudioAction::Profile(
+            vapor_studio_protocol::ProfileAction::ResolveDefaultRoot { profile_id },
+        )) {
+            Ok(()) => true,
             Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return false;
-            }
-        };
-        match vapor_studio_core::default_packagepack_selector(&executable, "default") {
-            Ok(id) => {
-                let profile_id = self.profile.items[self.profile.active_index].id.clone();
-                let workspace_root = self.profile.items[self.profile.active_index]
-                    .workspace
-                    .as_ref()
-                    .map(|workspace| workspace.root.display().to_string());
-                match self.apply_service_action(StudioAction::Profile(
-                    vapor_studio_protocol::ProfileAction::SetRoot {
-                        profile_id,
-                        content_id: Some(id),
-                        content_version: None,
-                        workspace_root,
-                    },
-                )) {
-                    Ok(()) => true,
-                    Err(error) => {
-                        self.status = error;
-                        false
-                    }
-                }
-            }
-            Err(error) => {
-                self.status = format!("This app has no default playable composition: {error}");
+                self.status = error;
                 false
             }
         }
@@ -555,47 +294,19 @@ impl StudioApp {
         let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
             return;
         };
-        let Some(root_package) = profile.root_package else {
+        if profile.root_package.is_none() || profile.workspace.is_none() {
             return;
-        };
-        let Some(workspace) = profile.workspace.map(|workspace| workspace.root) else {
-            return;
-        };
-        let executable = match std::env::current_exe() {
-            Ok(value) => value,
-            Err(error) => {
-                self.status = format!("Could not locate the Studio executable: {error}");
-                return;
-            }
-        };
-        let selector = content_selector(&root_package);
-        let arguments = profile.launch.arguments;
-        self.spawn(OperationKind::Run, move |_context| {
-            OperationResult::RunProfile(vapor_studio_core::run_source_profile(
-                &executable,
-                &workspace,
-                &selector,
-                &arguments,
-            ))
-        });
-        self.status = concat!(
-            "Building this project and starting the game. ",
-            "Open and sign in to Steam if missing Workshop items are needed…",
-        )
-        .to_owned();
+        }
+        self.start_service_composition_operation(
+            StudioAction::Composition(vapor_studio_protocol::CompositionAction::RunSource {
+                profile_id: profile.id,
+            }),
+            OperationKind::Run,
+            vapor_studio_core::OperationPhase::Running,
+            concat!(
+                "Building this project and starting the game. ",
+                "Open and sign in to Steam if missing Workshop items are needed…",
+            ),
+        );
     }
-}
-
-pub(super) fn installed_records(
-    artifacts: Vec<vapor_studio_core::InstalledArtifact>,
-) -> Vec<InstalledArtifactRecord> {
-    artifacts
-        .into_iter()
-        .map(|artifact| InstalledArtifactRecord {
-            id: artifact.id,
-            version: artifact.version,
-            root: artifact.root,
-            fingerprint: artifact.fingerprint,
-        })
-        .collect()
 }

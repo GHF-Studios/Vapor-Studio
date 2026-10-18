@@ -49,15 +49,15 @@ pub enum ProfileAction {
         content_version: Option<String>,
         workspace_root: Option<String>,
     },
+    ResolveDefaultRoot {
+        profile_id: String,
+    },
     SetLaunchArguments {
         profile_id: String,
         arguments: Vec<String>,
     },
-    SetCompositionState {
+    AdoptVerifiedGraph {
         profile_id: String,
-        root_package: Option<crate::ContentIdentity>,
-        resolved_graph: Option<Box<crate::ResolvedCompositionGraph>>,
-        installation: Box<crate::InstallationState>,
     },
     InvalidateContent {
         content_id: String,
@@ -85,12 +85,29 @@ pub enum CatalogAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
 pub enum CompositionAction {
-    Preview,
-    Install,
-    Verify,
-    Repair,
-    Update,
-    Launch,
+    Preview {
+        profile_id: String,
+        #[serde(default)]
+        selector: Option<String>,
+    },
+    Install {
+        profile_id: String,
+    },
+    Verify {
+        profile_id: String,
+    },
+    Repair {
+        profile_id: String,
+    },
+    Update {
+        profile_id: String,
+    },
+    Launch {
+        profile_id: String,
+    },
+    RunSource {
+        profile_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,8 +257,9 @@ impl StudioAction {
                 ProfileAction::Remove { .. } => "profile.remove",
                 ProfileAction::Select { .. } => "profile.select",
                 ProfileAction::SetRoot { .. } => "profile.set-root",
+                ProfileAction::ResolveDefaultRoot { .. } => "profile.resolve-default-root",
                 ProfileAction::SetLaunchArguments { .. } => "profile.set-launch-arguments",
-                ProfileAction::SetCompositionState { .. } => "profile.set-composition-state",
+                ProfileAction::AdoptVerifiedGraph { .. } => "profile.adopt-verified-graph",
                 ProfileAction::InvalidateContent { .. } => "profile.invalidate-content",
             },
             Self::Catalog(action) => match action {
@@ -252,12 +270,13 @@ impl StudioAction {
                 CatalogAction::AdoptWorkspaceProject { .. } => "catalog.adopt-workspace-project",
             },
             Self::Composition(action) => match action {
-                CompositionAction::Preview => "composition.preview",
-                CompositionAction::Install => "composition.install",
-                CompositionAction::Verify => "composition.verify",
-                CompositionAction::Repair => "composition.repair",
-                CompositionAction::Update => "composition.update",
-                CompositionAction::Launch => "composition.launch",
+                CompositionAction::Preview { .. } => "composition.preview",
+                CompositionAction::Install { .. } => "composition.install",
+                CompositionAction::Verify { .. } => "composition.verify",
+                CompositionAction::Repair { .. } => "composition.repair",
+                CompositionAction::Update { .. } => "composition.update",
+                CompositionAction::Launch { .. } => "composition.launch",
+                CompositionAction::RunSource { .. } => "composition.run-source",
             },
             Self::Workspace(action) => match action {
                 WorkspaceAction::Discover { .. } => "workspace.discover",

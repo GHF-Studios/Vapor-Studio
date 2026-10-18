@@ -346,6 +346,7 @@ fn empty_snapshot() -> StudioSnapshot {
         active_profile_id: None,
         durable_state: vapor_studio_protocol::DurableStateSnapshot::default(),
         active_operation: None,
+        composition_preview: None,
         catalog: Vec::new(),
         workspace_content: vapor_studio_protocol::WorkspaceContentSnapshot::default(),
         selected_content_id: None,

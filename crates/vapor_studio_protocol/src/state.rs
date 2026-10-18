@@ -30,6 +30,8 @@ pub struct StudioSnapshot {
     #[serde(default)]
     pub durable_state: DurableStateSnapshot,
     pub active_operation: Option<OperationSummary>,
+    #[serde(default)]
+    pub composition_preview: Option<CompositionPreviewSnapshot>,
     pub catalog: Vec<CatalogEntry>,
     #[serde(default)]
     pub workspace_content: WorkspaceContentSnapshot,
@@ -136,6 +138,8 @@ pub enum CatalogLocationKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OperationSummary {
     pub id: String,
+    #[serde(default)]
+    pub profile_id: Option<String>,
     pub action: String,
     pub phase: OperationPhase,
     pub status: OperationStatus,
@@ -146,11 +150,51 @@ pub struct OperationSummary {
 pub struct OperationEvent {
     pub revision: StudioRevision,
     pub id: String,
+    #[serde(default)]
+    pub profile_id: Option<String>,
     pub action: String,
     pub phase: OperationPhase,
     pub status: OperationStatus,
     pub progress: Option<f32>,
     pub message: Option<String>,
+}
+
+/// Resolved composition plan produced by the service for a profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompositionPreviewSnapshot {
+    pub profile_id: String,
+    pub selector: String,
+    pub nodes: Vec<CompositionPreviewNode>,
+    pub blockers: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompositionPreviewNode {
+    pub id: String,
+    pub version: Option<String>,
+    pub kind: String,
+    pub published_file_id: Option<String>,
+    pub source: CompositionPreviewSource,
+    pub already_installed: bool,
+    pub dependencies: Vec<CompositionPreviewDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompositionPreviewDependency {
+    pub id: String,
+    pub relationship: String,
+    pub version: Option<String>,
+    pub optional: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CompositionPreviewSource {
+    Workspace,
+    Cache,
+    Installed,
+    DownloadRequired,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

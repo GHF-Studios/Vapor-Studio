@@ -36,8 +36,7 @@ impl StudioApp {
                 }
             }
             OperationResult::WorkspaceFiles(Err(error)) => self.apply_workspace_files_error(error),
-            OperationResult::CompositionPreview(Err(error))
-            | OperationResult::WorkspaceFileCreated(Err(error))
+            OperationResult::WorkspaceFileCreated(Err(error))
             | OperationResult::FileContents(Err(error))
             | OperationResult::FileSaved(Err(error))
             | OperationResult::ContentWorkspace(Err(error))
@@ -48,17 +47,8 @@ impl StudioApp {
             | OperationResult::SourceRuntimeOutputsLoaded(Err(error))
             | OperationResult::SourceRuntimeOutputsSaved(Err(error))
             | OperationResult::UnregisteredContentProject(Err(error))
-            | OperationResult::AdoptedContentProject(Err(error))
-            | OperationResult::RunInstalled(Err(error))
-            | OperationResult::RunProfile(Err(error)) => self.status = error,
-            OperationResult::Verify(Err(error)) => self.apply_verification_error(error),
-            OperationResult::Install(Err(error))
-            | OperationResult::Update(Err(error))
-            | OperationResult::Repair(Err(error)) => self.apply_composition_action_error(error),
+            | OperationResult::AdoptedContentProject(Err(error)) => self.status = error,
             OperationResult::Message(Ok(message)) => self.status = message,
-            OperationResult::CompositionPreview(Ok(preview)) => {
-                self.apply_composition_preview(preview)
-            }
             OperationResult::WorkshopStage(Err(error)) => self.apply_workshop_stage_error(error),
             OperationResult::WorkshopAcquisition(Err(error)) => {
                 self.apply_workshop_acquisition_error(error)
@@ -151,36 +141,6 @@ impl StudioApp {
             }
             OperationResult::SourceRuntimeOutputsSaved(Ok(outputs)) => {
                 self.apply_source_runtime_outputs_saved(outputs)
-            }
-            OperationResult::Install(Ok(composition)) => {
-                self.apply_installed_composition(
-                    composition,
-                    "Installed the complete resolved composition through Vapor Shell.",
-                );
-            }
-            OperationResult::Update(Ok(composition)) => {
-                self.apply_installed_composition(
-                    composition,
-                    "Updated the selected composition from its current workspace or cache sources.",
-                );
-            }
-            OperationResult::RunProfile(Ok(result)) => {
-                self.apply_profile_run_result(
-                    result,
-                    "Finished playing the selected source composition.",
-                );
-            }
-            OperationResult::RunInstalled(Ok(result)) => {
-                self.apply_profile_run_result(
-                    result,
-                    "Finished playing the installed profile composition.",
-                );
-            }
-            OperationResult::Repair(Ok(composition)) => {
-                self.apply_repaired_composition(composition);
-            }
-            OperationResult::Verify(Ok(check)) => {
-                self.apply_installation_check(check);
             }
         }
     }

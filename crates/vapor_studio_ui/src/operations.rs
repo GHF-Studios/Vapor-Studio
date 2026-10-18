@@ -17,9 +17,15 @@ use vapor_core::{
 use vapor_studio_core::{
     OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
 };
+use vapor_studio_protocol::{
+    OperationEvent as ServiceOperationEvent, OperationPhase as ServiceOperationPhase,
+    OperationStatus as ServiceOperationStatus, RequestId, StudioAction,
+};
 
 pub(super) struct OperationState {
     pub(super) running: bool,
+    pub(super) service_owned: bool,
+    pub(super) service_request_id: Option<RequestId>,
     pub(super) receiver: Option<Receiver<(OperationId, OperationResult)>>,
     pub(super) latest_operation_event: Arc<Mutex<Option<CoreOperationEvent>>>,
     pub(super) active_operation: Option<OperationEvent>,
@@ -36,6 +42,8 @@ impl Default for OperationState {
     fn default() -> Self {
         Self {
             running: false,
+            service_owned: false,
+            service_request_id: None,
             receiver: None,
             latest_operation_event: Arc::new(Mutex::new(None)),
             active_operation: None,
@@ -82,6 +90,9 @@ fn apply_core_operation_event(event: &CoreOperationEvent, current: &mut Operatio
 
 impl StudioApp {
     pub(super) fn poll_operation(&mut self) {
+        if self.operation.service_owned {
+            return;
+        }
         if !self.operation.running {
             self.poll_workshop_download_progress();
         }
@@ -256,5 +267,231 @@ impl StudioApp {
         });
         self.operation.receiver = Some(receiver);
         self.operation.running = true;
+    }
+
+    pub(super) fn start_service_composition_operation(
+        &mut self,
+        action: StudioAction,
+        kind: OperationKind,
+        phase: OperationPhase,
+        status: &str,
+    ) {
+        if self.operation.running {
+            self.status = "Wait for the current operation to finish.".to_owned();
+            return;
+        }
+        let profile_id = self
+            .profile
+            .items
+            .get(self.profile.active_index)
+            .map(|profile| profile.id.clone());
+        let Some(profile_id) = profile_id else {
+            self.status = "Create or select a profile first.".to_owned();
+            return;
+        };
+        let Some(service) = self.service.as_mut() else {
+            self.status = self
+                .service_error
+                .clone()
+                .unwrap_or_else(|| "Studio service is not connected.".to_owned());
+            return;
+        };
+        let operation_id = OperationId::fresh();
+        let request_id = match service.send(action, None) {
+            Ok(request_id) => request_id,
+            Err(error) => {
+                self.status = format!("Could not start the composition operation: {error}");
+                return;
+            }
+        };
+        self.operation.active_operation = Some(OperationEvent {
+            id: operation_id,
+            profile_id: Some(profile_id),
+            kind,
+            phase,
+            progress: None,
+            status: OperationStatus::Running,
+        });
+        self.operation.running = true;
+        self.operation.service_owned = true;
+        self.operation.service_request_id = Some(request_id);
+        self.status = status.to_owned();
+    }
+
+    pub(super) fn apply_service_operation_event(&mut self, event: &ServiceOperationEvent) {
+        let kind = operation_kind_for_action(&event.action);
+        let id = event
+            .id
+            .parse::<u64>()
+            .map(OperationId)
+            .unwrap_or_else(|_| {
+                self.operation
+                    .active_operation
+                    .as_ref()
+                    .map_or_else(OperationId::fresh, |active| active.id)
+            });
+        let (completed_event, terminal, status_message) = {
+            let operation = self
+                .operation
+                .active_operation
+                .get_or_insert_with(|| OperationEvent {
+                    id,
+                    profile_id: event.profile_id.clone(),
+                    kind: kind.clone(),
+                    phase: OperationPhase::Queued,
+                    progress: None,
+                    status: OperationStatus::Running,
+                });
+            operation.id = id;
+            operation.profile_id = event.profile_id.clone();
+            operation.kind = kind;
+            operation.phase = service_phase(event.phase);
+            operation.progress = event.progress.map(|progress| vapor_studio_core::Progress {
+                completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
+                total: Some(100),
+                unit: "percent".to_owned(),
+            });
+            operation.status = match &event.status {
+                ServiceOperationStatus::Running => OperationStatus::Running,
+                ServiceOperationStatus::Succeeded => OperationStatus::Succeeded {
+                    summary: event
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Completed".to_owned()),
+                },
+                ServiceOperationStatus::Failed { message } => OperationStatus::Failed {
+                    message: message.clone(),
+                },
+                ServiceOperationStatus::Cancelled => OperationStatus::Cancelled,
+            };
+            let terminal = matches!(
+                &operation.status,
+                OperationStatus::Succeeded { .. }
+                    | OperationStatus::Failed { .. }
+                    | OperationStatus::Cancelled
+            );
+            if terminal {
+                operation.phase = OperationPhase::Finalizing;
+            }
+            (operation.clone(), terminal, event.message.clone())
+        };
+        if let Some(message) = status_message {
+            self.status = message.clone();
+        }
+        if terminal {
+            let completed_at_unix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_secs());
+            self.operation
+                .operation_history
+                .push_front(HistoricalOperation {
+                    completed_at_unix,
+                    event: completed_event,
+                });
+            self.operation.operation_history.truncate(20);
+            self.operation.active_operation = None;
+            self.operation.running = false;
+            self.operation.service_owned = false;
+            self.operation.service_request_id = None;
+            let editor_drafts = self
+                .workspace
+                .editor
+                .save_editor_drafts(&self.workspace.root);
+            let operation_history = serde_json::to_string(&self.operation.operation_history).ok();
+            self.submit_service_action(StudioAction::Session(
+                vapor_studio_protocol::SessionAction::CheckpointLocalState {
+                    editor_drafts,
+                    operation_history,
+                },
+            ));
+        } else {
+            self.operation.running = true;
+            self.operation.service_owned = true;
+        }
+    }
+
+    pub(super) fn apply_service_operation_snapshot(
+        &mut self,
+        operation: Option<&vapor_studio_protocol::OperationSummary>,
+    ) {
+        if !self.operation.service_owned {
+            return;
+        }
+        let Some(operation) = operation else {
+            return;
+        };
+        let id = operation
+            .id
+            .parse::<u64>()
+            .map(OperationId)
+            .unwrap_or_else(|_| {
+                self.operation
+                    .active_operation
+                    .as_ref()
+                    .map_or_else(OperationId::fresh, |active| active.id)
+            });
+        let active = self
+            .operation
+            .active_operation
+            .get_or_insert_with(|| OperationEvent {
+                id,
+                profile_id: operation.profile_id.clone(),
+                kind: operation_kind_for_action(&operation.action),
+                phase: service_phase(operation.phase),
+                progress: None,
+                status: OperationStatus::Running,
+            });
+        active.id = id;
+        active.profile_id = operation.profile_id.clone();
+        active.kind = operation_kind_for_action(&operation.action);
+        active.phase = service_phase(operation.phase);
+        active.progress = operation
+            .progress
+            .map(|progress| vapor_studio_core::Progress {
+                completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
+                total: Some(100),
+                unit: "percent".to_owned(),
+            });
+        active.status = match &operation.status {
+            ServiceOperationStatus::Running => OperationStatus::Running,
+            ServiceOperationStatus::Succeeded => OperationStatus::Succeeded {
+                summary: "Completed".to_owned(),
+            },
+            ServiceOperationStatus::Failed { message } => OperationStatus::Failed {
+                message: message.clone(),
+            },
+            ServiceOperationStatus::Cancelled => OperationStatus::Cancelled,
+        };
+        self.operation.running = true;
+    }
+}
+
+fn operation_kind_for_action(action: &str) -> OperationKind {
+    match action {
+        "composition.preview" => OperationKind::Resolve,
+        "composition.install" => OperationKind::Install,
+        "composition.verify" => OperationKind::Verify,
+        "composition.repair" => OperationKind::Repair,
+        "composition.update" => OperationKind::Update,
+        "composition.launch" => OperationKind::RunInstalled,
+        "composition.run-source" => OperationKind::Run,
+        _ => OperationKind::Resolve,
+    }
+}
+
+fn service_phase(phase: ServiceOperationPhase) -> OperationPhase {
+    match phase {
+        ServiceOperationPhase::Queued => OperationPhase::Queued,
+        ServiceOperationPhase::Resolving => OperationPhase::Resolving,
+        ServiceOperationPhase::Acquiring => OperationPhase::Acquiring,
+        ServiceOperationPhase::Installing => OperationPhase::Installing,
+        ServiceOperationPhase::Verifying => OperationPhase::Verifying,
+        ServiceOperationPhase::Building => OperationPhase::Building,
+        ServiceOperationPhase::Staging => OperationPhase::Staging,
+        ServiceOperationPhase::Publishing => OperationPhase::Publishing,
+        ServiceOperationPhase::Running => OperationPhase::Running,
+        ServiceOperationPhase::Finalizing | ServiceOperationPhase::Complete => {
+            OperationPhase::Finalizing
+        }
     }
 }

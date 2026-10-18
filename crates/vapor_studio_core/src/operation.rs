@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-pub use vapor_core::{OperationId, OperationPhase, OperationStatus, Progress};
+pub use vapor_core::{
+    OperationContext, OperationEvent as CoreOperationEvent, OperationEventSink, OperationId,
+    OperationPhase, OperationRequest as CoreOperationRequest, OperationService, OperationStatus,
+    Progress,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

@@ -201,23 +201,6 @@ impl StudioApp {
         self.activate_profile_context(index);
     }
 
-    pub(super) fn persist_active_profile_composition(&mut self) {
-        let Some(profile) = self.profile.items.get(self.profile.active_index).cloned() else {
-            return;
-        };
-        if let Err(error) = self.apply_service_action(StudioAction::Profile(
-            vapor_studio_protocol::ProfileAction::SetCompositionState {
-                profile_id: profile.id,
-                root_package: profile.root_package,
-                resolved_graph: profile.resolved_graph.map(Box::new),
-                installation: Box::new(profile.installation),
-            },
-        )) {
-            self.service_error = Some(error.clone());
-            self.status = error;
-        }
-    }
-
     fn activate_profile_context(&mut self, index: usize) {
         self.profile.active_index = index;
         self.profile.name_draft = self.profile.items[index].name.clone();
