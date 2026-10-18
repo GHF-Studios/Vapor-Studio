@@ -6,7 +6,7 @@ use vapor_client_application::{CompositionPreview, CompositionPreviewSource};
 pub(crate) fn draw_composition_preview(
     ui: &mut egui::Ui,
     preview: &CompositionPreview,
-    can_import_missing_items: bool,
+    can_download_missing_items: bool,
 ) -> Vec<String> {
     let mut workshop_downloads = Vec::new();
     ui.group(|ui| {
@@ -23,7 +23,7 @@ pub(crate) fn draw_composition_preview(
             }
         });
         ui.weak("This is a read-only plan. It has not downloaded or installed anything.");
-        if !can_import_missing_items {
+        if !can_download_missing_items {
             status_text(
                 ui,
                 "Downloads are paused until Studio finishes its current task and your saved project files are up to date.",
@@ -88,9 +88,9 @@ pub(crate) fn draw_composition_preview(
                 workshop_downloads.len(),
                 if workshop_downloads.len() == 1 { "" } else { "s" }
             ));
-            let import_clicked = ui
+            let download_clicked = ui
                 .add_enabled(
-                    can_import_missing_items,
+                    can_download_missing_items,
                     egui::Button::new(format!(
                         "Download {} missing item{}",
                         workshop_downloads.len(),
@@ -101,7 +101,7 @@ pub(crate) fn draw_composition_preview(
                     "Finish the current task and save or reload project edits before downloading these items.",
                 )
                 .clicked();
-            if !import_clicked {
+            if !download_clicked {
                 workshop_downloads.clear();
             }
         }

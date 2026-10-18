@@ -57,7 +57,15 @@ impl StudioApp {
                 .catalog
                 .items
                 .iter()
-                .filter(|content| CatalogFilter::library(None, "").matches_catalog(content))
+                .filter(|content| {
+                    let role = self
+                        .catalog
+                        .service_item_roles
+                        .get(&(content.id.clone(), content.version.clone()))
+                        .copied();
+                    CatalogFilter::library(None, "")
+                        .matches_catalog_with_role(content, role)
+                })
                 .map(|content| content.kind.clone())
                 .collect::<std::collections::BTreeSet<_>>();
             egui::ComboBox::from_id_salt("library-kind-filter")
@@ -115,7 +123,14 @@ impl StudioApp {
             .catalog
             .items
             .iter()
-            .filter(|content| filter.matches_catalog(content))
+            .filter(|content| {
+                let role = self
+                    .catalog
+                    .service_item_roles
+                    .get(&(content.id.clone(), content.version.clone()))
+                    .copied();
+                filter.matches_catalog_with_role(content, role)
+            })
             .count();
         let selected_identity = self.catalog.selected.as_deref();
         let mut selected_exists = false;
@@ -126,7 +141,12 @@ impl StudioApp {
             });
             if is_selected {
                 selected_exists = true;
-                selected_is_visible = filter.matches_catalog(content);
+                let role = self
+                    .catalog
+                    .service_item_roles
+                    .get(&(content.id.clone(), content.version.clone()))
+                    .copied();
+                selected_is_visible = filter.matches_catalog_with_role(content, role);
             }
         }
         ui.weak(format!("{matching} items in your Library"));

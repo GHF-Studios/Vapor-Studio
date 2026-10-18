@@ -20,6 +20,15 @@ pub(super) struct CatalogState {
     pub(super) source_discovery_loaded: bool,
     pub(super) source_discovery_error: Option<String>,
     pub(super) items: Vec<vapor_client_application::CatalogContent>,
+    pub(super) service_item_actions: std::collections::BTreeMap<
+        (String, Option<String>),
+        Vec<vapor_client_protocol::CatalogItemAction>,
+    >,
+    pub(super) service_item_roles: std::collections::BTreeMap<
+        (String, Option<String>),
+        vapor_client_protocol::CatalogItemRole,
+    >,
+    pub(super) add_to_composition_target: Option<String>,
     pub(super) catalog_discovery_loaded: bool,
     pub(super) catalog_omitted: usize,
     pub(super) catalog_discovery_error: Option<String>,
@@ -46,6 +55,9 @@ impl Default for CatalogState {
             source_discovery_loaded: false,
             source_discovery_error: None,
             items: Vec::new(),
+            service_item_actions: std::collections::BTreeMap::new(),
+            service_item_roles: std::collections::BTreeMap::new(),
+            add_to_composition_target: None,
             catalog_discovery_loaded: false,
             catalog_omitted: 0,
             catalog_discovery_error: None,
@@ -72,6 +84,9 @@ impl CatalogState {
         self.source_discovery_loaded = false;
         self.source_discovery_error = None;
         self.items.clear();
+        self.service_item_actions.clear();
+        self.service_item_roles.clear();
+        self.add_to_composition_target = None;
         self.catalog_discovery_loaded = false;
         self.catalog_omitted = 0;
         self.catalog_discovery_error = None;
@@ -288,6 +303,7 @@ impl StudioApp {
         &mut self,
         snapshot: &vapor_client_protocol::ClientSnapshot,
     ) {
+        self.workshop.steam_client_available = snapshot.host.steam_client_available;
         self.apply_service_workshop_snapshot(&snapshot.workshop);
         self.root_publishing.preview = snapshot.root_publishing.clone();
         if let Some(publishing) = snapshot.root_publishing.as_ref() {
@@ -341,6 +357,21 @@ impl StudioApp {
                 service_workspace
             };
         }
+        self.catalog.service_item_actions = snapshot
+            .catalog
+            .iter()
+            .map(|entry| {
+                (
+                    (entry.id.clone(), entry.version.clone()),
+                    entry.actions.clone(),
+                )
+            })
+            .collect();
+        self.catalog.service_item_roles = snapshot
+            .catalog
+            .iter()
+            .map(|entry| ((entry.id.clone(), entry.version.clone()), entry.role))
+            .collect();
         self.catalog.items = snapshot.catalog.iter().map(service_catalog_entry).collect();
         self.catalog.catalog_discovery_loaded = snapshot.catalog_status.loaded;
         self.catalog.catalog_discovery_error = snapshot.catalog_status.error.clone();
@@ -579,6 +610,14 @@ impl CatalogFilter {
     }
 
     pub(super) fn matches_catalog(&self, content: &vapor_client_application::CatalogContent) -> bool {
+        self.matches_catalog_with_role(content, None)
+    }
+
+    pub(super) fn matches_catalog_with_role(
+        &self,
+        content: &vapor_client_application::CatalogContent,
+        role: Option<vapor_client_protocol::CatalogItemRole>,
+    ) -> bool {
         let source_matches =
             match self.source {
                 CatalogSourceFilter::All => true,
@@ -595,15 +634,19 @@ impl CatalogFilter {
                 CatalogSourceFilter::Workshop => content.published_file_id.is_some(),
             };
         let library_matches = !self.library_only
-            || (content.kind != vapor_core::ContentKind::Packagepack.as_str()
-                && content.kind != vapor_core::ContentKind::Crate.as_str()
-                && content.locations.iter().any(|location| {
-                    matches!(
-                        location.kind,
-                        vapor_client_application::CatalogLocationKind::Cache
-                            | vapor_client_application::CatalogLocationKind::Installed
-                    )
-                }));
+            || (role.map_or_else(
+                || {
+                    content.kind != vapor_core::ContentKind::Packagepack.as_str()
+                        && content.kind != vapor_core::ContentKind::Crate.as_str()
+                },
+                |role| role == vapor_client_protocol::CatalogItemRole::RuntimeContent,
+            ) && content.locations.iter().any(|location| {
+                matches!(
+                    location.kind,
+                    vapor_client_application::CatalogLocationKind::Cache
+                        | vapor_client_application::CatalogLocationKind::Installed
+                )
+            }));
         if !source_matches
             || !library_matches
             || self

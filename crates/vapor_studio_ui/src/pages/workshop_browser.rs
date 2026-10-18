@@ -9,7 +9,6 @@ impl StudioApp {
             for (tab, label) in [
                 (WorkshopTab::Browse, "Browse items"),
                 (WorkshopTab::Subscriptions, "Subscriptions"),
-                (WorkshopTab::Imports, "Downloaded"),
             ] {
                 if ui
                     .add(egui::Button::selectable(self.workshop.tab == tab, label))
@@ -20,6 +19,13 @@ impl StudioApp {
             }
         });
         ui.separator();
+        if !self.workshop.steam_client_available {
+            status_text(
+                ui,
+                "Steam is unavailable. Your on-device Library still works; Workshop search, subscriptions, and downloads need the Steam client.",
+                StatusTone::Caution,
+            );
+        }
         if let Some(error) = self.catalog.catalog_discovery_error.as_deref() {
             status_text(
                 ui,
@@ -32,7 +38,6 @@ impl StudioApp {
         match self.workshop.tab {
             WorkshopTab::Browse => self.draw_workshop_search_panel(ui),
             WorkshopTab::Subscriptions => self.draw_workshop_subscriptions_panel(ui),
-            WorkshopTab::Imports => self.draw_workshop_acquisition_panel(ui),
         }
     }
 }

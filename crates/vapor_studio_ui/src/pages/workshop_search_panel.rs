@@ -6,21 +6,22 @@ use eframe::egui;
 
 enum WorkshopSearchAction {
     ReviewLocal(String),
-    Import(String),
+    Download(String),
     UseAsCompositionRoot(String),
     LaunchAsCompositionRoot(String),
     ReviewComposition,
     ChangeSubscription(String, bool),
-    RefreshCache(String),
+    Update(String),
 }
 
 impl StudioApp {
     pub(super) fn draw_workshop_search_panel(&mut self, ui: &mut egui::Ui) {
+        let steam_available = self.workshop.steam_client_available;
         let mut run_search = false;
         ui.horizontal_wrapped(|ui| {
             let search_width = search_field_width(ui);
             let response = ui.add_enabled(
-                !self.operation.running,
+                !self.operation.running && steam_available,
                 egui::TextEdit::singleline(&mut self.workshop.search_query)
                     .hint_text("Search Workshop items")
                     .desired_width(search_width),
@@ -29,13 +30,13 @@ impl StudioApp {
                 && ui.input(|input| input.key_pressed(egui::Key::Enter));
             run_search |= ui
                 .add_enabled(
-                    !self.operation.running,
+                    !self.operation.running && steam_available,
                     egui::Button::new("Search Workshop"),
                 )
                 .clicked();
         });
         ui.weak("Subscribe to add content to your Library and receive Steam updates. Add-ons can be added to a compatible composition later.");
-        if run_search && !self.operation.running {
+        if run_search && !self.operation.running && steam_available {
             self.search_workshop();
         }
         if let Some((query, page)) = self.workshop.pending_search.as_ref() {
@@ -65,13 +66,13 @@ impl StudioApp {
                 ));
                 let previous = ui
                     .add_enabled(
-                        !self.operation.running && self.workshop.page > 1,
+                        !self.operation.running && steam_available && self.workshop.page > 1,
                         egui::Button::new("Previous"),
                     )
                     .clicked();
                 let next = ui
                     .add_enabled(
-                        !self.operation.running && self.workshop.page < page_count,
+                        !self.operation.running && steam_available && self.workshop.page < page_count,
                         egui::Button::new("Next"),
                     )
                     .clicked();
@@ -131,8 +132,8 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running,
-                        egui::Button::new(format!("Add {count} to Library")),
+                        !self.operation.running && steam_available,
+                        egui::Button::new(format!("Download {count}")),
                     )
                     .clicked()
                 {
@@ -140,8 +141,8 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running && subscription_batch_supported,
-                        egui::Button::new("Subscribe and add to Library"),
+                        !self.operation.running && steam_available && subscription_batch_supported,
+                        egui::Button::new(format!("Subscribe {count}")),
                     )
                     .clicked()
                 {
@@ -149,7 +150,7 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running && subscription_batch_supported,
+                        !self.operation.running && steam_available && subscription_batch_supported,
                         egui::Button::new("Unsubscribe selected"),
                     )
                     .clicked()
@@ -163,7 +164,7 @@ impl StudioApp {
             }
             if !subscription_batch_supported {
                 ui.small(format!(
-                    "Steam subscription changes handle up to {} items at once. Import selection remains available.",
+                    "Steam subscription changes handle up to {} items at once. Download remains available.",
                     vapor_client_application::MAX_WORKSHOP_SUBSCRIPTION_BATCH
                 ));
             }
@@ -196,7 +197,7 @@ impl StudioApp {
                         }
                     },
                 );
-                if run_search && !self.operation.running {
+                if run_search && !self.operation.running && steam_available {
                     self.search_workshop();
                 }
             }
@@ -327,15 +328,17 @@ impl StudioApp {
                     }
                 } else if !locally_available {
                     let mut clicked = false;
-                    details.add_enabled_ui(!self.operation.running, |ui| {
+                    details.add_enabled_ui(
+                        !self.operation.running && steam_available,
+                        |ui| {
                         clicked = super::super::components::design::primary_button(
                             ui,
-                            "Add to Library",
+                            "Download",
                         )
                         .clicked();
                     });
                     if clicked {
-                        action = Some(WorkshopSearchAction::Import(
+                        action = Some(WorkshopSearchAction::Download(
                             item.published_file_id.clone(),
                         ));
                     }
@@ -443,7 +446,7 @@ impl StudioApp {
                 details.horizontal_wrapped(|ui| {
                     if ui
                         .add_enabled(
-                            !self.operation.running,
+                            !self.operation.running && steam_available,
                             egui::Button::new(if subscribed { "Unsubscribe" } else { "Subscribe" }),
                         )
                         .on_hover_text(if self.workshop.subscriptions_loaded {
@@ -461,12 +464,12 @@ impl StudioApp {
                     if locally_available
                         && ui
                             .add_enabled(
-                                !self.operation.running,
+                                !self.operation.running && steam_available,
                                 egui::Button::new("Update from Workshop"),
                             )
                             .clicked()
                     {
-                        action = Some(WorkshopSearchAction::RefreshCache(
+                        action = Some(WorkshopSearchAction::Update(
                             item.published_file_id.clone(),
                         ));
                     }
@@ -475,12 +478,12 @@ impl StudioApp {
                     }
                 });
             } else {
-                details.weak("Select a Workshop item to review its description, subscription, and import options.");
+                details.weak("Select a Workshop item to review its description, subscription, and download options.");
             }
         });
         match action {
             Some(WorkshopSearchAction::ReviewLocal(id)) => self.review_workshop_content(&id),
-            Some(WorkshopSearchAction::Import(id) | WorkshopSearchAction::RefreshCache(id)) => {
+            Some(WorkshopSearchAction::Download(id) | WorkshopSearchAction::Update(id)) => {
                 self.workshop.published_file_id = id;
                 self.download_workshop_item();
             }

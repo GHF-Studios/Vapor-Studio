@@ -8,25 +8,23 @@ use vapor_client_application::OperationKind;
 
 const WORKSHOP_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const WORKSHOP_PROGRESS_POLL_MAX_INTERVAL: Duration = Duration::from_secs(30);
-const MAX_RECENT_WORKSHOP_ACQUISITIONS: usize = 50;
 
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
 pub(super) enum WorkshopTab {
     #[default]
     Browse,
     Subscriptions,
-    Imports,
 }
 
 pub(super) struct WorkshopState {
     pub(super) tab: WorkshopTab,
+    pub(super) steam_client_available: bool,
     pub(super) preview: Option<vapor_client_application::WorkshopPackagePreview>,
     pub(super) published_file_id: String,
     pub(super) publisher_account: String,
     pub(super) change_note: String,
     pub(super) confirmation: String,
     pub(super) selected_items: std::collections::BTreeSet<String>,
-    pub(super) recent_acquisitions: Vec<vapor_client_application::WorkshopAcquisition>,
     pub(super) pending_acquisition_ids: std::collections::BTreeSet<String>,
     pub(super) service_review_id: Option<String>,
     pub(super) omitted_review_file_paths: usize,
@@ -55,13 +53,13 @@ impl Default for WorkshopState {
     fn default() -> Self {
         Self {
             tab: WorkshopTab::default(),
+            steam_client_available: false,
             preview: None,
             published_file_id: String::new(),
             publisher_account: String::new(),
             change_note: String::new(),
             confirmation: String::new(),
             selected_items: Default::default(),
-            recent_acquisitions: Vec::new(),
             pending_acquisition_ids: Default::default(),
             service_review_id: None,
             omitted_review_file_paths: 0,
@@ -286,32 +284,20 @@ impl StudioApp {
         acquisitions: Vec<vapor_client_application::WorkshopAcquisition>,
         requested: usize,
     ) {
-        let imported = acquisitions.len();
-        for acquisition in acquisitions.into_iter().rev() {
-            if let Some(existing) = self.workshop.recent_acquisitions.iter().position(|recent| {
-                recent.id == acquisition.id && recent.version == acquisition.version
-            }) {
-                self.workshop.recent_acquisitions.remove(existing);
-            }
-            self.workshop.recent_acquisitions.insert(0, acquisition);
-        }
-        self.workshop
-            .recent_acquisitions
-            .truncate(MAX_RECENT_WORKSHOP_ACQUISITIONS);
-        if imported == requested {
+        let downloaded = acquisitions.len();
+        if downloaded == requested {
             self.activate_navigation_section(crate::navigation::Section::Library);
-            self.status = if imported == 1 {
+            self.status = if downloaded == 1 {
                 "Added the Workshop item to content available on this device.".to_owned()
             } else {
-                format!("Added {imported} Workshop items to content available on this device.")
+                format!("Added {downloaded} Workshop items to content available on this device.")
             };
             for id in std::mem::take(&mut self.workshop.pending_acquisition_ids) {
                 self.workshop.selected_items.remove(&id);
             }
         } else {
-            self.open_workshop_tab(WorkshopTab::Imports);
             self.status = format!(
-                "Downloaded {imported} of {requested} Workshop items. Your selection is still here so you can try again."
+                "Downloaded {downloaded} of {requested} Workshop items. Return to Browse Workshop to retry the remaining selection."
             );
             self.workshop.pending_acquisition_ids.clear();
         }
@@ -510,7 +496,7 @@ impl StudioApp {
         );
     }
 
-    pub(in crate::app) fn import_workshop_items(&mut self, published_file_ids: Vec<String>) {
+    pub(in crate::app) fn download_workshop_selection(&mut self, published_file_ids: Vec<String>) {
         self.download_workshop_items(published_file_ids, None);
     }
 
@@ -521,11 +507,11 @@ impl StudioApp {
     ) {
         if self.operation.running {
             self.status =
-                "Finish the current operation before importing Workshop content.".to_owned();
+                "Finish the current operation before downloading Workshop content.".to_owned();
             return;
         }
         if published_file_ids.is_empty() {
-            self.status = "Select at least one Workshop item to import.".to_owned();
+            self.status = "Select at least one Workshop item to download.".to_owned();
             return;
         }
         if !published_file_ids

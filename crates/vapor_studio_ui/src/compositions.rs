@@ -45,54 +45,6 @@ impl StudioApp {
             .is_some_and(|root| root.id == id && root.version.as_deref() == version)
     }
 
-    pub(super) fn use_workshop_as_composition_root(&mut self, content_id: &str) -> bool {
-        self.assign_workshop_acquisition_to_composition(content_id, false)
-    }
-
-    pub(super) fn launch_workshop_acquisition(&mut self, content_id: &str) -> bool {
-        self.assign_workshop_acquisition_to_composition(content_id, true)
-    }
-
-    fn assign_workshop_acquisition_to_composition(
-        &mut self,
-        content_id: &str,
-        launch_after_assignment: bool,
-    ) -> bool {
-        let Some(acquisition) = self
-            .workshop
-            .recent_acquisitions
-            .iter()
-            .find(|acquisition| acquisition.id == content_id)
-        else {
-            self.status = "This Workshop download is no longer in the recent imports list. Import it again to use it.".to_owned();
-            return false;
-        };
-        if acquisition.kind != "packagepack" {
-            self.status = format!(
-                "{} is a {}, so it cannot be a composition root.",
-                acquisition.id, acquisition.kind
-            );
-            return false;
-        }
-        let identity = ContentReference {
-            id: acquisition.id.clone(),
-            version: acquisition.version.clone(),
-        };
-        let assigned = if launch_after_assignment {
-            self.assign_composition_root_without_catalog_refresh(identity, None)
-        } else {
-            self.assign_composition_root(identity, None)
-        };
-        if assigned {
-            if launch_after_assignment {
-                self.run_installed_selected();
-            } else {
-                self.activate_navigation_section(Section::Compositions);
-            }
-        }
-        assigned
-    }
-
     pub(super) fn use_available_workshop_package_as_composition_root(
         &mut self,
         published_file_id: &str,
@@ -218,6 +170,36 @@ impl StudioApp {
         workspace: Option<PathBuf>,
     ) -> bool {
         self.assign_composition_root_inner(identity, workspace)
+    }
+
+    pub(super) fn create_composition_from_content(
+        &mut self,
+        identity: ContentReference,
+        workspace: Option<PathBuf>,
+    ) -> bool {
+        if self.has_unsaved_context_switch_edits() {
+            self.status = "Save or discard open edits before creating a composition.".to_owned();
+            return false;
+        }
+        let short_name = identity
+            .id
+            .rsplit(['/', '.'])
+            .next()
+            .unwrap_or(identity.id.as_str())
+            .replace('-', " ");
+        if let Err(error) = self.apply_service_action(ClientAction::Composition(
+            vapor_client_protocol::CompositionAction::Create {
+                name: format!("{short_name} composition"),
+            },
+        )) {
+            self.status = error;
+            return false;
+        }
+        if !self.assign_composition_root(identity, workspace) {
+            return false;
+        }
+        self.preview_selected_composition();
+        true
     }
 
     fn assign_composition_root_without_catalog_refresh(

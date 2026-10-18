@@ -15,7 +15,7 @@ impl StudioApp {
     fn draw_create_content(&mut self, ui: &mut egui::Ui) {
         page_header(
             ui,
-            "Author",
+            "Creator",
             "Create a project",
             "Choose what you are making. Studio creates the starter files, then guides you through its name and required content.",
         );
@@ -299,29 +299,58 @@ impl StudioApp {
                                     )
                                 }),
                                 role,
+                                self.authoring
+                                    .create
+                                    .optional_dependencies
+                                    .contains(selected),
                             )
                         })
                         .collect::<Vec<_>>();
                     if !selected_dependencies.is_empty() {
                         ui.label("Selected for this draft");
                         ui.horizontal_wrapped(|ui| {
-                            for (selected, detail, role) in selected_dependencies {
+                            for (selected, detail, role, mut optional) in selected_dependencies {
                                 let role_label = role.map(|role| format!("{role} · ")).unwrap_or_default();
+                                let has_detail = detail.is_some();
                                 let label = match detail {
                                     Some(detail) => format!("{role_label}{selected} · {detail}"),
                                     None => format!("{role_label}{selected} · unavailable after refresh"),
                                 };
-                                ui.label(label);
-                                if ui
-                                    .add_enabled(
-                                        !self.authoring.create.pending_dependency_clear
-                                            && self.authoring.create.pending_role_replacement.is_none(),
-                                        egui::Button::new("Remove"),
-                                    )
-                                    .clicked()
-                                {
-                                    self.authoring.create.remove_dependency(&selected);
-                                }
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(label);
+                                    if role.is_none() && has_detail {
+                                        if ui
+                                            .add_enabled(
+                                                !self.authoring.create.pending_dependency_clear
+                                                    && self.authoring.create.pending_role_replacement.is_none(),
+                                                egui::Checkbox::new(&mut optional, "Optional"),
+                                            )
+                                            .changed()
+                                        {
+                                            if optional {
+                                                self.authoring
+                                                    .create
+                                                    .optional_dependencies
+                                                    .insert(selected.clone());
+                                            } else {
+                                                self.authoring
+                                                    .create
+                                                    .optional_dependencies
+                                                    .remove(&selected);
+                                            }
+                                        }
+                                    }
+                                    if ui
+                                        .add_enabled(
+                                            !self.authoring.create.pending_dependency_clear
+                                                && self.authoring.create.pending_role_replacement.is_none(),
+                                            egui::Button::new("Remove"),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.authoring.create.remove_dependency(&selected);
+                                    }
+                                });
                             }
                         });
                     }
@@ -577,23 +606,42 @@ impl StudioApp {
                 ui.label(egui::RichText::new("STEP 1 OF 2 · TEMPLATE").small().strong().color(ACCENT));
                 ui.heading("Choose a Vapor content type");
                 ui.label("These are the content types supported by Vapor. Each one has a different role and dependency rules.");
-                let templates = [
-                    (vapor_core::ContentKind::Packagepack, "Packagepack", "A complete playable composition with one Engine and one Game."),
-                    (vapor_core::ContentKind::Enginepack, "Enginepack", "A reusable collection that selects an Engine."),
-                    (vapor_core::ContentKind::Gamepack, "Gamepack", "A reusable collection that selects a Game."),
-                    (vapor_core::ContentKind::Modpack, "Modpack", "A reusable collection of compatible add-ons."),
-                    (vapor_core::ContentKind::Engine, "Engine", "The runtime that loads and runs a Game."),
-                    (vapor_core::ContentKind::Game, "Game", "Game rules, assets, and behavior for an Engine."),
-                    (vapor_core::ContentKind::EngineMod, "Engine Mod", "Adds behavior or tools to an Engine."),
-                    (vapor_core::ContentKind::GameMod, "Game Mod", "Adds behavior or content to a Game."),
-                    (vapor_core::ContentKind::ExtensionMod, "Extension Mod", "Adds reusable capabilities to supported content."),
-                    (vapor_core::ContentKind::Crate, "Crate", "Rust-only code for static linking into Engine, Game, and add-on projects."),
+                let template_groups: [(&str, &[(vapor_core::ContentKind, &str, &str)]); 4] = [
+                    (
+                        "Playable setup",
+                        &[(vapor_core::ContentKind::Packagepack, "Packagepack", "A complete playable composition with one Engine and one Game.")],
+                    ),
+                    (
+                        "Reusable packs",
+                        &[
+                            (vapor_core::ContentKind::Enginepack, "Enginepack", "A reusable collection that selects an Engine."),
+                            (vapor_core::ContentKind::Gamepack, "Gamepack", "A reusable collection that selects a Game."),
+                            (vapor_core::ContentKind::Modpack, "Modpack", "A reusable collection of compatible add-ons."),
+                        ],
+                    ),
+                    (
+                        "Runtime and extensions",
+                        &[
+                            (vapor_core::ContentKind::Engine, "Engine", "The runtime that loads and runs a Game."),
+                            (vapor_core::ContentKind::Game, "Game", "Game rules, assets, and behavior for an Engine."),
+                            (vapor_core::ContentKind::EngineMod, "Engine Mod", "Adds behavior or tools to an Engine."),
+                            (vapor_core::ContentKind::GameMod, "Game Mod", "Adds behavior or content to a Game."),
+                            (vapor_core::ContentKind::ExtensionMod, "Extension Mod", "Adds reusable capabilities to supported content."),
+                        ],
+                    ),
+                    (
+                        "Rust code",
+                        &[(vapor_core::ContentKind::Crate, "Crate", "Rust-only code for static linking into Engine, Game, and add-on projects.")],
+                    ),
                 ];
                 let card_style = ui.style().clone();
                 let template_change_pending =
                     self.authoring.create.pending_template_change.is_some();
-                ui.horizontal_wrapped(|ui| {
-                    for (kind, name, description) in templates {
+                for (group_name, templates) in template_groups {
+                    ui.add_space(8.0);
+                    ui.strong(group_name);
+                    ui.horizontal_wrapped(|ui| {
+                    for &(kind, name, description) in templates {
                         egui::Frame::group(&card_style).show(ui, |ui| {
                             let card_width = ui.available_width().clamp(180.0, 260.0);
                             ui.set_min_width(card_width);
@@ -615,6 +663,7 @@ impl StudioApp {
                         });
                     }
                 });
+                }
                 if let Some(next_kind) = self.authoring.create.pending_template_change {
                     let description = format!(
                         "Changing from {} to {} clears the {} selected content items. The project identity and Workshop details stay in this draft.",

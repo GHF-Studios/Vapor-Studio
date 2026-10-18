@@ -196,14 +196,18 @@ impl StudioApp {
             .unwrap_or_else(|| composition.id.clone());
         self.authoring.composition_original_links = Some(composition.links.clone());
         self.authoring.composition_edit = Some(composition);
-        self.status = format!(
-            "Loaded dependencies for this {}. Review them before saving.",
-            self.authoring
-                .composition_edit
-                .as_ref()
-                .map(|graph| graph.kind.as_str())
-                .unwrap_or("source content"),
-        );
+        let applying_addition = self.authoring.pending_composition_add.is_some();
+        self.apply_pending_composition_add();
+        if !applying_addition {
+            self.status = format!(
+                "Loaded dependencies for this {}. Review them before saving.",
+                self.authoring
+                    .composition_edit
+                    .as_ref()
+                    .map(|graph| graph.kind.as_str())
+                    .unwrap_or("source content"),
+            );
+        }
     }
 
     pub(super) fn apply_source_composition_saved(

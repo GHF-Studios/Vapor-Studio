@@ -170,33 +170,48 @@ restart or reset the service.
 
 ### 4. Complete Library, Workshop, and composition lifecycle
 
-- [ ] Represent item kind and next valid action in authoritative service state.
-- [ ] Keep discovery, subscription, acquisition, installation, Add, and Play
+- [x] Represent item kind and next valid action in authoritative service state.
+- [x] Keep discovery, subscription, acquisition, installation, Add, and Play
   as distinct actions with correlated outcomes.
-- [ ] Install a complete Packagepack as a launchable composition.
-- [ ] Route add-on installation through an explicit compatible-composition
-  chooser, with fork/create choices where needed.
-- [ ] Keep local catalog actions available when Steam is unavailable, with
+- [x] Install a complete Packagepack as a launchable composition.
+- [x] Keep local catalog actions available when Steam is unavailable, with
   provider readiness accurately represented.
 
-### 5. Align creation and navigation to the same model
+### 5. Add content to an editable composition safely
 
-- [ ] Present exact Rust-defined artifact names with concise descriptions.
-- [ ] Group creator destinations in a visibly distinct area without a global
+- [x] Offer only compositions whose Packagepack source is editable in the
+  current authoring workspace and whose dependency rules accept the item.
+- [x] Route the selected target into its Packagepack dependency editor, add the
+  item to an unsaved draft, and require an explicit save before changing source.
+- [ ] Make a downloaded Workshop artifact editable through an explicit fork;
+  never imply a cached runtime copy was added to a composition.
+- [ ] Complete Auto-Install update and reachability-based collection
+  orchestration before exposing it as a working user toggle.
+
+### 6. Align creation and navigation to the same model
+
+- [x] Present exact Rust-defined artifact names with concise descriptions.
+- [x] Group creator destinations in a visibly distinct area without a global
   player/creator mode switch.
-- [ ] Keep optional choices inside the flow they modify.
+- [x] Keep optional choices inside the flow they modify.
 - [ ] Make primary actions and current operation state stable across narrow and
   wide layouts.
 
-### 6. Verify end-to-end behavior and distribution
+### 7. Verify end-to-end behavior and distribution
 
-- [ ] Use Vapor-managed formatting and compilation for affected projects.
+- [x] Use Vapor-managed compilation and local deployment for affected projects.
 - [ ] Exercise service scenarios for setup, subscription, target selection,
-  install, launch readiness, concurrency, reconnect, and persistence.
-- [ ] Deploy locally through Vapor and confirm the shared service is present
-  in every supported launch path.
+  install, launch readiness, concurrency, reconnect, and persistence when the
+  user authorizes tests.
+- [x] Deploy locally through Vapor and confirm compilation and deployment of
+  the shared service and Studio facade.
 - [ ] Record Linux/Windows runtime evidence separately; no Steam publication
   without an explicit request.
+
+- [ ] Review nested repository diffs and ensure only the intended Vapor and
+  Studio changes are included.
+- [ ] Commit and push nested repositories before updating and pushing their
+  parent submodule references.
 
 ## Current implementation evidence and gap
 
@@ -224,3 +239,13 @@ semantics; `vapor_client_domain` owns planning and `vapor_client_provider`
 supplies source/cache/install observations. The broad `vapor_core` crate still
 combines content compatibility exports with host, CLI, and Cargo operations;
 that boundary needs further deliberate separation before it is a narrow core.
+
+Passes 4–5 now expose service-projected item roles/actions, distinct Workshop
+subscribe/download/update controls, explicit eligible-composition selection,
+and a draft-only add path through the existing Packagepack source editor.
+Pass 6 groups the Rust-defined creator artifact kinds and retains the separate
+Creator navigation area. Local deployment compiled and deployed both the
+service and Studio facade. A downloaded Workshop runtime item still cannot be
+forked into an editable source project, and Auto-Install's durable preference
+still lacks update/collection orchestration; neither is presented as working
+functionality. Tests and runtime checks were not run per the user's constraints.

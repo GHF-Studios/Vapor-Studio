@@ -1,4 +1,4 @@
-use super::{StudioApp, source_content_selector};
+use super::{StudioApp, source_content_kind, source_content_selector};
 use std::path::PathBuf;
 use vapor_client_protocol::{AuthoringAction, ClientAction, CompositionDependency};
 use vapor_client_application::{ContentReference, OperationKind};
@@ -20,6 +20,7 @@ pub(super) struct AuthoringState {
     pub(super) composition_original_links: Option<Vec<vapor_client_application::SourceCompositionLink>>,
     pub(super) composition_link_candidate: String,
     pub(super) composition_link_search: String,
+    pub(super) pending_composition_add: Option<ContentReference>,
     pub(super) packagepack_engine_search: String,
     pub(super) packagepack_game_search: String,
     pub(super) workshop_metadata_edit: Option<vapor_client_application::SourceWorkshopMetadata>,
@@ -55,6 +56,7 @@ pub(super) struct CreateDraft {
     pub(super) content_version: String,
     pub(super) content_kind: vapor_core::ContentKind,
     pub(super) dependencies: Vec<String>,
+    pub(super) optional_dependencies: std::collections::BTreeSet<String>,
     pub(super) exclusive_dependency_groups: std::collections::BTreeMap<String, &'static str>,
     pub(super) workshop_app_id: String,
     pub(super) workshop_published_file_id: String,
@@ -85,6 +87,7 @@ impl Default for CreateDraft {
             content_version: "0.1.0".to_owned(),
             content_kind: vapor_core::ContentKind::Packagepack,
             dependencies: Vec::new(),
+            optional_dependencies: std::collections::BTreeSet::new(),
             exclusive_dependency_groups: Default::default(),
             workshop_app_id: String::new(),
             workshop_published_file_id: String::new(),
@@ -131,6 +134,7 @@ impl AuthoringState {
         self.runtime_outputs_edit = None;
         self.manifest_metadata_dirty = false;
         self.pending_manifest_discard = None;
+        self.pending_composition_add = None;
     }
 }
 
@@ -185,11 +189,13 @@ impl CreateDraft {
 
     pub(super) fn remove_dependency(&mut self, id: &str) {
         self.dependencies.retain(|selected| selected != id);
+        self.optional_dependencies.remove(id);
         self.exclusive_dependency_groups.remove(id);
     }
 
     pub(super) fn clear_dependencies(&mut self) {
         self.dependencies.clear();
+        self.optional_dependencies.clear();
         self.exclusive_dependency_groups.clear();
     }
 
@@ -214,6 +220,71 @@ impl CreateDraft {
 }
 
 impl StudioApp {
+    pub(super) fn apply_pending_composition_add(&mut self) {
+        let Some(identity) = self.authoring.pending_composition_add.take() else {
+            return;
+        };
+        let Some(composition) = self.authoring.composition_edit.as_mut() else {
+            self.status = "The selected project could not be opened for adding content.".to_owned();
+            return;
+        };
+        let active = self.composition.items.get(self.composition.active_index);
+        if active
+            .and_then(|active| active.root_package.as_ref())
+            .is_none_or(|root| root.id != composition.id || root.version != composition.version)
+        {
+            self.status = "The selected composition changed. Choose it again before adding content.".to_owned();
+            return;
+        }
+        let candidate = self.catalog.sources.iter().find(|candidate| {
+            candidate.id == identity.id && candidate.version == identity.version
+        });
+        let Some(candidate) = candidate else {
+            self.status = format!(
+                "{} is no longer available in this project folder. Refresh the project list and try again.",
+                identity.id
+            );
+            return;
+        };
+        let Some(parent_kind) = source_content_kind(&composition.kind) else {
+            self.status = "The selected project has an unsupported content type.".to_owned();
+            return;
+        };
+        let Some(child_kind) = source_content_kind(&candidate.kind) else {
+            self.status = "The selected content has an unsupported content type.".to_owned();
+            return;
+        };
+        let Some(relationship) =
+            vapor_client_application::source_dependency_relationship(parent_kind, child_kind)
+        else {
+            self.status = format!(
+                "{} cannot be added to this kind of project.",
+                candidate.id
+            );
+            return;
+        };
+        if composition.links.iter().any(|link| {
+            link.id == candidate.id && link.relationship == relationship
+        }) {
+            self.authoring.composition_link_candidate = source_content_selector(candidate);
+            self.status = format!("{} is already included in this project.", candidate.id);
+            return;
+        }
+        composition.links.push(vapor_client_application::SourceCompositionLink {
+            id: candidate.id.clone(),
+            relationship: relationship.to_owned(),
+            optional: false,
+            version: candidate.version.as_ref().map(|version| format!("={version}")),
+            workshop_id: None,
+            reason: None,
+        });
+        self.authoring.composition_link_candidate = source_content_selector(candidate);
+        self.status = format!(
+            "Added {} to the project draft. Save the content choices to apply it.",
+            candidate.id
+        );
+    }
+
     pub(super) fn discard_source_composition_changes(&mut self) {
         let Some(original_links) = self.authoring.composition_original_links.clone() else {
             return;

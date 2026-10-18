@@ -16,27 +16,35 @@ struct LocalWorkshopContent {
 enum SubscriptionAction {
     SetSelected(String, bool),
     SetManySelected(Vec<String>, bool),
-    ImportMany(Vec<String>),
+    DownloadMany(Vec<String>),
     UnsubscribeMany(Vec<String>),
     ReviewLocal(String),
     UseAsCompositionRoot(String),
     LaunchAsCompositionRoot(String),
     ReviewComposition,
-    Import(String),
+    Download(String),
     Unsubscribe(String),
 }
 
 impl StudioApp {
     pub(super) fn draw_workshop_subscriptions_panel(&mut self, ui: &mut egui::Ui) {
+        let steam_available = self.workshop.steam_client_available;
         section_header(
             ui,
             "Your Steam subscriptions",
             "Steam keeps track of subscriptions. Download a copy here to make an item available to this installation.",
         );
+        if !steam_available {
+            status_text(
+                ui,
+                "Steam is unavailable. You can still review the last loaded list, but subscription and download changes need Steam.",
+                StatusTone::Caution,
+            );
+        }
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.operation.running,
+                    !self.operation.running && steam_available,
                     egui::Button::new(if self.workshop.subscriptions_loaded {
                         "Refresh subscriptions"
                     } else {
@@ -187,14 +195,14 @@ impl StudioApp {
                         .on_hover_text("Download only the selected items currently visible in this view to this installation.")
                         .clicked()
                 {
-                    action = Some(SubscriptionAction::ImportMany(
+                    action = Some(SubscriptionAction::DownloadMany(
                         visible_selected_ids.clone(),
                     ));
                 }
                 if selected_visible > 0
                     && ui
                         .add_enabled(
-                            !self.operation.running && subscription_batch_supported,
+                            !self.operation.running && steam_available && subscription_batch_supported,
                             egui::Button::new(format!("Unsubscribe visible · {selected_visible}")),
                         )
                         .on_disabled_hover_text(format!(
@@ -294,7 +302,7 @@ impl StudioApp {
                                 ui.weak(state);
                             }
                             if local.available {
-                                ui.weak("Downloaded to this app");
+                                ui.weak("Available in Library");
                                 if local.conflicted {
                                     status_text(ui, "Local conflict", StatusTone::Caution);
                                 }
@@ -318,7 +326,7 @@ impl StudioApp {
                                 );
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running,
+                                        !self.operation.running && steam_available,
                                         egui::Button::new("Review item details"),
                                     )
                                     .clicked()
@@ -405,7 +413,7 @@ impl StudioApp {
                                     "Available here · not included in this composition",
                                 );
                             }
-                            let import_label = if local.available {
+                            let download_label = if local.available {
                                 "Update local copy"
                             } else {
                                 "Download to this app"
@@ -413,16 +421,16 @@ impl StudioApp {
                             ui.horizontal_wrapped(|ui| {
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running,
-                                        egui::Button::new(import_label),
+                                        !self.operation.running && steam_available,
+                                        egui::Button::new(download_label),
                                     )
                                     .clicked()
                                 {
-                                    action = Some(SubscriptionAction::Import(id.clone()));
+                                    action = Some(SubscriptionAction::Download(id.clone()));
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running,
+                                        !self.operation.running && steam_available,
                                         egui::Button::new("Unsubscribe"),
                                     )
                                     .clicked()
@@ -463,8 +471,8 @@ impl StudioApp {
                         }
                     }
                 }
-                Some(SubscriptionAction::ImportMany(ids)) => {
-                    self.import_workshop_items(ids);
+                Some(SubscriptionAction::DownloadMany(ids)) => {
+                    self.download_workshop_selection(ids);
                 }
                 Some(SubscriptionAction::UnsubscribeMany(ids)) => {
                     self.set_workshop_subscriptions(ids, false);
@@ -480,7 +488,7 @@ impl StudioApp {
                     self.activate_navigation_section(super::super::Section::Compositions);
                     self.preview_selected_composition();
                 }
-                Some(SubscriptionAction::Import(id)) => {
+                Some(SubscriptionAction::Download(id)) => {
                     self.workshop.published_file_id = id;
                     self.download_workshop_item();
                 }

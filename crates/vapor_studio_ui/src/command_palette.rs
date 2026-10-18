@@ -70,11 +70,6 @@ impl StudioApp {
                 CommandPaletteAction::Workshop(WorkshopTab::Subscriptions),
             ),
             (
-                "Downloaded content",
-                "downloaded workshop imports subscribe",
-                CommandPaletteAction::Workshop(WorkshopTab::Imports),
-            ),
-            (
                 "Check project folder",
                 "check project setup and required content",
                 CommandPaletteAction::ValidateWorkspace,

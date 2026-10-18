@@ -90,6 +90,13 @@ impl StudioApp {
                 id,
                 version,
                 dependencies: selected,
+                optional_dependencies: self
+                    .authoring
+                    .create
+                    .optional_dependencies
+                    .iter()
+                    .cloned()
+                    .collect(),
                 workshop,
             }),
             None,

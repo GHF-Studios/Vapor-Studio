@@ -10,7 +10,6 @@ mod discover;
 mod home;
 mod library;
 mod publish;
-mod workshop_acquisition_panel;
 mod workshop_browser;
 mod workshop_search_panel;
 mod workshop_subscriptions_panel;
