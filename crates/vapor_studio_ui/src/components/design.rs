@@ -7,12 +7,13 @@ pub(crate) const MUTED_TEXT: egui::Color32 = egui::Color32::from_rgb(157, 174, 1
 pub(crate) const FORM_GRID_MIN_WIDTH: f32 = 640.0;
 pub(crate) const LIST_ROW_HEIGHT: f32 = 34.0;
 pub(crate) const SEARCH_FIELD_MAX_WIDTH: f32 = 360.0;
-pub(crate) const CONTEXT_PANEL_WIDTH: f32 = 440.0;
-const MIN_PRIMARY_PANEL_WIDTH: f32 = 480.0;
+pub(crate) const CONTEXT_PANEL_WIDTH: f32 = 360.0;
+const MIN_PRIMARY_PANEL_WIDTH: f32 = 460.0;
+const MIN_CONTEXT_PANEL_WIDTH: f32 = 300.0;
 
 pub(crate) fn use_stacked_panels(ui: &egui::Ui) -> bool {
     let minimum_width = MIN_PRIMARY_PANEL_WIDTH
-        + CONTEXT_PANEL_WIDTH
+        + MIN_CONTEXT_PANEL_WIDTH
         + ui.spacing().item_spacing.x;
     ui.available_width() < minimum_width
 }
@@ -40,7 +41,10 @@ pub(crate) fn contextual_split(
             ),
         )
     } else {
-        let context_width = CONTEXT_PANEL_WIDTH;
+        let context_width = (available * 0.36).clamp(
+            MIN_CONTEXT_PANEL_WIDTH,
+            CONTEXT_PANEL_WIDTH,
+        );
         let main_width = (available - context_width - gap).max(1.0);
         (
             egui::Rect::from_min_size(start, egui::vec2(main_width, available_rect.height())),

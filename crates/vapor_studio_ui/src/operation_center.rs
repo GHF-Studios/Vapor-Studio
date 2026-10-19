@@ -83,6 +83,7 @@ pub(super) fn operation_kind_label(kind: &vapor_client_application::OperationKin
         Repair => "Repair composition",
         CreateWorkspace => "Create project folder",
         CreateContent => "Create content project",
+        ForkContent => "Fork Workshop content",
         LoadComposition => "Load included content",
         SaveComposition => "Save included content",
         LoadWorkshopMetadata => "Load Workshop metadata",

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 enum ContentDetailAction {
     StageWorkshop(String),
+    ForkWorkshop { selector: String, name: String },
     ReviewPublish,
     ReviewComposition,
     CreateComposition(vapor_client_application::ContentReference, Option<PathBuf>),
@@ -12,11 +13,41 @@ enum ContentDetailAction {
     SelectComposition(usize),
     InstallComposition,
     PlayComposition,
+    SetAutoInstall { content_id: String, enabled: bool },
 }
 
 impl StudioApp {
     #[allow(clippy::collapsible_if)]
     pub(in crate::app) fn draw_content_detail(&mut self, ui: &mut egui::Ui) {
+        let selected = self.catalog.selected.clone();
+        if self.catalog.fork_identity != selected {
+            self.catalog.fork_identity = selected.clone();
+            let base = selected
+                .as_deref()
+                .unwrap_or_default()
+                .split('@')
+                .next()
+                .unwrap_or_default()
+                .rsplit('/')
+                .next()
+                .unwrap_or("content")
+                .to_ascii_lowercase();
+            let slug = base
+                .chars()
+                .map(|character| {
+                    if character.is_ascii_lowercase() || character.is_ascii_digit() {
+                        character
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+                .split('-')
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join("-");
+            self.catalog.fork_name = format!("{}-copy", if slug.is_empty() { "content" } else { &slug });
+        }
         let mut action = None;
         if let Some(identity) = self.catalog.selected.as_ref() {
             if let Some(content) =
@@ -70,6 +101,37 @@ impl StudioApp {
                             ui.small(format!("Workshop item: {published_file_id}"));
                         }
                     });
+                let is_cached_library_item = content.kind != vapor_core::ContentKind::Packagepack.as_str()
+                    && content.kind != vapor_core::ContentKind::Crate.as_str()
+                    && content.locations.iter().any(|location| {
+                        location.kind == vapor_client_application::CatalogLocationKind::Cache
+                    });
+                if is_cached_library_item {
+                    let referenced = self.composition.items.iter().any(|composition| {
+                        composition.resolved_graph.as_ref().is_some_and(|graph| {
+                            graph.nodes.iter().any(|node| node.content.id == content.id)
+                        })
+                    });
+                    let mut enabled = self.catalog.library_policies.iter().any(|policy| {
+                        policy.content_id.as_str() == content.id && policy.auto_install
+                    });
+                    let mut policy_changed = false;
+                    ui.add_enabled_ui(referenced || enabled, |ui| {
+                        policy_changed = ui
+                            .checkbox(&mut enabled, "Automatically update this content")
+                            .on_hover_text("Follow compatible Workshop versions for compositions that use this item, and remove its local download when no composition needs it.")
+                            .changed();
+                    });
+                    if !referenced && !enabled {
+                        ui.small("Add this item to a composition before enabling automatic updates.");
+                    }
+                    if policy_changed {
+                        action = Some(ContentDetailAction::SetAutoInstall {
+                            content_id: content.id.clone(),
+                            enabled,
+                        });
+                    }
+                }
                 let is_authored_here =
                     self.catalog.sources.iter().any(|source| {
                         super::super::source_content_selector_matches(source, identity)
@@ -91,6 +153,56 @@ impl StudioApp {
                     {
                         action = Some(ContentDetailAction::StageWorkshop(identity.clone()));
                     }
+                }
+                let acquired_runtime_content = !is_authored_here
+                    && content.kind != vapor_core::ContentKind::Packagepack.as_str()
+                    && content.kind != vapor_core::ContentKind::Crate.as_str()
+                    && content.locations.iter().any(|location| {
+                        location.kind == vapor_client_application::CatalogLocationKind::Cache
+                    });
+                if acquired_runtime_content {
+                    let can_fork = !self.operation.running
+                        && !self.workspace.root.trim().is_empty()
+                        && !self.has_unsaved_workspace_edits()
+                        && self.catalog.local_catalog_current();
+                    ui.group(|ui| {
+                        ui.strong("Make your own copy");
+                        ui.label("Fork this item into the open workspace with a new local identity. The Workshop package must include its editable source files.");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Project name");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.catalog.fork_name)
+                                    .desired_width(190.0)
+                                    .hint_text("my-content-copy"),
+                            );
+                        });
+                        let name = self.catalog.fork_name.trim();
+                        let valid_name = !name.is_empty()
+                            && name.bytes().all(|byte| {
+                                byte.is_ascii_lowercase()
+                                    || byte.is_ascii_digit()
+                                    || byte == b'-'
+                            })
+                            && name.bytes().next().is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+                            && name.bytes().last().is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit());
+                        if ui
+                            .add_enabled(
+                                valid_name
+                                    && can_fork,
+                                egui::Button::new("Fork into workspace"),
+                            )
+                            .on_disabled_hover_text("Open a workspace, choose a valid project name, and save or discard edits before forking.")
+                            .clicked()
+                        {
+                            action = Some(ContentDetailAction::ForkWorkshop {
+                                selector: content.version.as_deref().map_or_else(
+                                    || content.id.clone(),
+                                    |version| format!("{}@{version}", content.id),
+                                ),
+                                name: name.to_owned(),
+                            });
+                        }
+                    });
                 }
                 let preview = self.workshop.preview.as_ref().filter(|preview| {
                     is_authored_here
@@ -307,6 +419,22 @@ impl StudioApp {
             Some(ContentDetailAction::StageWorkshop(identity)) => {
                 self.stage_workshop_content(identity);
             }
+            Some(ContentDetailAction::ForkWorkshop { selector, name }) => {
+                let workspace_root = self.workspace.root.trim().to_owned();
+                self.start_service_operation(
+                    vapor_client_protocol::ClientAction::Authoring(
+                        vapor_client_protocol::AuthoringAction::ForkContent {
+                            workspace_root,
+                            content_id: selector,
+                            name,
+                        },
+                    ),
+                    None,
+                    vapor_client_application::OperationKind::ForkContent,
+                    vapor_client_application::OperationPhase::Building,
+                    "Forking source into your workspace…",
+                );
+            }
             Some(ContentDetailAction::ReviewPublish) => {
                 self.root_publishing.tab =
                     super::super::root_publishing::PublishTab::WorkshopContent;
@@ -332,6 +460,14 @@ impl StudioApp {
             }
             Some(ContentDetailAction::PlayComposition) => {
                 self.run_installed_selected();
+            }
+            Some(ContentDetailAction::SetAutoInstall { content_id, enabled }) => {
+                self.submit_service_action(vapor_client_protocol::ClientAction::Library(
+                    vapor_client_protocol::LibraryAction::SetAutoInstall {
+                        content_id,
+                        enabled,
+                    },
+                ));
             }
             None => {}
         }

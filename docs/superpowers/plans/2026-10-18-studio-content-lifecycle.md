@@ -183,9 +183,9 @@ restart or reset the service.
   current authoring workspace and whose dependency rules accept the item.
 - [x] Route the selected target into its Packagepack dependency editor, add the
   item to an unsaved draft, and require an explicit save before changing source.
-- [ ] Make a downloaded Workshop artifact editable through an explicit fork;
+- [x] Make a downloaded Workshop artifact editable through an explicit fork;
   never imply a cached runtime copy was added to a composition.
-- [ ] Complete Auto-Install update and reachability-based collection
+- [x] Complete Auto-Install update and reachability-based collection
   orchestration before exposing it as a working user toggle.
 
 ### 6. Align creation and navigation to the same model
@@ -200,7 +200,7 @@ restart or reset the service.
 ### 7. Verify end-to-end behavior and distribution
 
 - [x] Use Vapor-managed compilation and local deployment for affected projects.
-- [ ] Exercise service scenarios for setup, subscription, target selection,
+- [x] Exercise service scenarios for setup, subscription, target selection,
   install, launch readiness, concurrency, reconnect, and persistence when the
   user authorizes tests.
 - [x] Deploy locally through Vapor and confirm compilation and deployment of

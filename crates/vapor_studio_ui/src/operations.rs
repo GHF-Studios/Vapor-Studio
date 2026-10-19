@@ -599,6 +599,7 @@ fn operation_kind_for_action(action: &str) -> OperationKind {
         "workspace.unregister-project" => OperationKind::UnregisterContentProject,
         "authoring.create-workspace" => OperationKind::CreateWorkspace,
         "authoring.create-content" => OperationKind::CreateContent,
+        "authoring.fork-content" => OperationKind::ForkContent,
         "authoring.load-composition" => OperationKind::LoadComposition,
         "authoring.save-composition" => OperationKind::SaveComposition,
         "authoring.load-workshop-metadata" => OperationKind::LoadWorkshopMetadata,

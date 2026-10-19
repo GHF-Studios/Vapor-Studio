@@ -28,6 +28,9 @@ pub(super) struct CatalogState {
         (String, Option<String>),
         vapor_client_protocol::CatalogItemRole,
     >,
+    pub(super) library_policies: Vec<vapor_client_protocol::LibraryItemPolicy>,
+    pub(super) fork_identity: Option<String>,
+    pub(super) fork_name: String,
     pub(super) add_to_composition_target: Option<String>,
     pub(super) catalog_discovery_loaded: bool,
     pub(super) catalog_omitted: usize,
@@ -57,6 +60,9 @@ impl Default for CatalogState {
             items: Vec::new(),
             service_item_actions: std::collections::BTreeMap::new(),
             service_item_roles: std::collections::BTreeMap::new(),
+            library_policies: Vec::new(),
+            fork_identity: None,
+            fork_name: String::new(),
             add_to_composition_target: None,
             catalog_discovery_loaded: false,
             catalog_omitted: 0,
@@ -86,6 +92,8 @@ impl CatalogState {
         self.items.clear();
         self.service_item_actions.clear();
         self.service_item_roles.clear();
+        self.fork_identity = None;
+        self.fork_name.clear();
         self.add_to_composition_target = None;
         self.catalog_discovery_loaded = false;
         self.catalog_omitted = 0;
@@ -101,6 +109,8 @@ impl StudioApp {
             .map(|(id, version)| (id.to_owned(), Some(version.to_owned())))
             .unwrap_or_else(|| (selector.clone(), None));
         self.catalog.selected = Some(selector);
+        self.catalog.fork_identity = None;
+        self.catalog.fork_name.clear();
         self.submit_service_action(ClientAction::Catalog(
             vapor_client_protocol::CatalogAction::Inspect {
                 content_id,
@@ -331,6 +341,7 @@ impl StudioApp {
             };
         }
         let durable = &snapshot.durable_state;
+        self.catalog.library_policies = durable.library_policies.clone();
         if !durable.compositions.compositions.is_empty()
             && self.composition.service_revision != Some(durable.composition_revision)
         {
