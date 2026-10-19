@@ -187,6 +187,7 @@ impl StudioApp {
                     });
             operation.status = match &event.status {
                 ServiceOperationStatus::Running => OperationStatus::Running,
+                ServiceOperationStatus::Cancelling => OperationStatus::Cancelling,
                 ServiceOperationStatus::Succeeded => OperationStatus::Succeeded {
                     summary: event
                         .message
@@ -391,6 +392,7 @@ impl StudioApp {
             });
         active.status = match &operation.status {
             ServiceOperationStatus::Running => OperationStatus::Running,
+            ServiceOperationStatus::Cancelling => OperationStatus::Cancelling,
             ServiceOperationStatus::Succeeded => OperationStatus::Succeeded {
                 summary: "Completed".to_owned(),
             },

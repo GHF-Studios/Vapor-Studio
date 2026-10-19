@@ -1,9 +1,11 @@
 use super::StudioApp;
 use super::components::design::{StatusTone, status_text};
 use eframe::egui;
+use vapor_client_protocol::ClientAction;
 
 impl StudioApp {
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
+        let mut cancel_operation_id = None;
         ui.horizontal_wrapped(|ui| {
             if let Some(operation) = &self.operation.active_operation {
                 if self.operation.running {
@@ -13,6 +15,24 @@ impl StudioApp {
                 ui.weak(operation_phase_label(&operation.phase));
                 ui.label(compact_status(&self.status))
                     .on_hover_text(&self.status);
+                if operation.status == vapor_client_application::OperationStatus::Cancelling {
+                    ui.weak("Stopping…");
+                } else if self.operation.service_owned
+                    && matches!(
+                        &operation.status,
+                        vapor_client_application::OperationStatus::Running
+                    )
+                    && matches!(
+                        &operation.kind,
+                        vapor_client_application::OperationKind::Fmt
+                            | vapor_client_application::OperationKind::Check
+                            | vapor_client_application::OperationKind::Test
+                            | vapor_client_application::OperationKind::Build
+                    )
+                    && ui.button("Stop").clicked()
+                {
+                    cancel_operation_id = Some(operation.id.0.to_string());
+                }
                 if let Some(progress) = &operation.progress {
                     if let Some(total) = progress.total {
                         let fraction = if total == 0 {
@@ -58,6 +78,11 @@ impl StudioApp {
                     .on_hover_text(&self.status);
             }
         });
+        if let Some(operation_id) = cancel_operation_id {
+            self.submit_service_action(ClientAction::Session(
+                vapor_client_protocol::SessionAction::CancelOperation { operation_id },
+            ));
+        }
         if !self.operation.output_lines.is_empty() {
             ui.collapsing(
                 format!("Output · {} lines", self.operation.output_lines.len()),
