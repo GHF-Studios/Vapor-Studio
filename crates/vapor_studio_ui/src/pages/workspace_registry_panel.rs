@@ -54,7 +54,6 @@ impl StudioApp {
                         _ => status_text(ui, "Needs attention", StatusTone::Error),
                     };
                 }
-                ()
             });
             ui.label("One shared place for Vapor to find and acquire source projects. This stays separate from the project folder you are editing and from every playable composition.");
             if let Some(snapshot) = snapshot.as_ref() {

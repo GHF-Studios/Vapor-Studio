@@ -20,8 +20,6 @@ mod directory_picker;
 mod operation_center;
 #[path = "operation_protocol.rs"]
 mod operation_protocol;
-#[path = "operation_results.rs"]
-mod operation_results;
 #[path = "operations.rs"]
 mod operations;
 #[path = "pages/mod.rs"]
@@ -211,7 +209,7 @@ impl StudioApp {
             operation,
             service: None,
             service_error: None,
-            diagnostics: vapor_devtools::connect(None),
+            diagnostics: vapor_devtools::app::DevtoolsApp::new(),
             directory_picker: None,
             command_palette_open: false,
             command_palette_search: String::new(),
@@ -272,7 +270,7 @@ impl StudioApp {
             &service_path,
             ClientHostConfig {
                 application_executable: executable,
-                workshop_app_id: Some(vapor_sdk_core::root::types::ROOT_STEAM_APP_ID),
+                workshop_app_id: None,
                 workspace_root,
                 active_composition_id,
                 fixture_mode: false,
@@ -280,7 +278,17 @@ impl StudioApp {
                 state_directory: None,
             },
         ) {
-            Ok(client) => {
+            Ok(mut client) => {
+                if let Err(error) = client.send(
+                    ClientAction::Developer(
+                        vapor_client_protocol::DeveloperAction::SubscribeTelemetry {
+                            enabled: true,
+                        },
+                    ),
+                    None,
+                ) {
+                    self.status = format!("Live diagnostics are unavailable: {error}");
+                }
                 let initial_snapshot = client.latest_snapshot().clone();
                 self.service = Some(client);
                 self.service_error = None;
@@ -289,6 +297,9 @@ impl StudioApp {
                     initial_snapshot.durable_state.editor_drafts.clone();
                 self.operation
                     .restore_history(initial_snapshot.durable_state.operation_history.as_deref());
+                self.submit_service_action(ClientAction::Developer(
+                    vapor_client_protocol::DeveloperAction::RefreshProfileTraces,
+                ));
             }
             Err(error) => {
                 let message = match &error {

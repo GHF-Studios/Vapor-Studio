@@ -92,6 +92,7 @@ pub(super) fn operation_kind_label(kind: &vapor_client_application::OperationKin
         SaveWorkshopMetadata => "Save Workshop metadata",
         LoadRuntimeOutputs => "Load runtime output declarations",
         SaveRuntimeOutputs => "Save runtime output declarations",
+        PackageContent => "Stage content package",
         CreateWorkspaceFile => "Create project file",
         OpenWorkspace => "Open project folder",
         RememberWorkspace => "Make project folder available",

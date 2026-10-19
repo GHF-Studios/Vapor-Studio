@@ -150,6 +150,20 @@ impl StudioApp {
             AuthoringResultKind::ContentValidated { id, summary } => {
                 self.status = format!("{id}: {summary}");
             }
+            AuthoringResultKind::ContentPackaged {
+                id,
+                files,
+                bytes,
+                dry_run,
+                ..
+            } => {
+                let verb = if dry_run {
+                    "Package preview"
+                } else {
+                    "Package staged"
+                };
+                self.status = format!("{verb} for {id}: {files} files, {bytes} bytes.");
+            }
             AuthoringResultKind::ContentCreated {
                 workspace_root,
                 manifest,
@@ -175,6 +189,24 @@ impl StudioApp {
                     landing_section: Section::Workspace,
                     workspace_files: Ok(files.into_iter().map(PathBuf::from).collect()),
                 });
+            }
+            AuthoringResultKind::SourceWorkspaceCreated { root, files, .. } => {
+                self.activate_workspace(WorkspaceOpenSnapshot {
+                    root: PathBuf::from(root),
+                    landing_section: Section::Workspace,
+                    workspace_files: Ok(files.into_iter().map(PathBuf::from).collect()),
+                });
+            }
+            AuthoringResultKind::SourceMetadataRepaired {
+                write_changes,
+                actions,
+            } => {
+                self.status = format!(
+                    "{} {} source metadata repair{}.",
+                    if write_changes { "Applied" } else { "Found" },
+                    actions.len(),
+                    if actions.len() == 1 { "" } else { "s" }
+                );
             }
         }
         self.finish_service_result_operation(&result.operation_id);

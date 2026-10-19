@@ -79,7 +79,7 @@ impl StudioApp {
             .iter()
             .filter(|content| {
                 content.published_file_id.as_deref() == Some(published_file_id)
-                    && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                    && content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str()
                     && content.is_unambiguous()
             })
             .cloned()
@@ -93,8 +93,11 @@ impl StudioApp {
         if matches.len() > 1 {
             self.select_catalog_identity(catalog_content_selector(&content));
             self.catalog.source_filter = CatalogSourceFilter::Workshop;
-            self.catalog.kind_filter =
-                Some(vapor_core::ContentKind::Packagepack.as_str().to_owned());
+            self.catalog.kind_filter = Some(
+                vapor_client_protocol::ContentKind::Packagepack
+                    .as_str()
+                    .to_owned(),
+            );
             self.catalog.search_query = published_file_id.to_owned();
             self.open_discover_tab(super::catalog::DiscoverTab::Local);
             self.status = if launch_after_assignment {
@@ -317,7 +320,7 @@ impl StudioApp {
             .iter()
             .filter(|content| {
                 content.published_file_id.as_deref() == Some(published_file_id)
-                    && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                    && content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str()
                     && content.is_unambiguous()
             })
             .collect::<Vec<_>>();

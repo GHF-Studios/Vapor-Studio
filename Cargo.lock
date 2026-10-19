@@ -3980,6 +3980,7 @@ version = "0.5.0"
 dependencies = [
  "serde",
  "vapor_client_domain",
+ "vapor_telemetry",
 ]
 
 [[package]]
@@ -4024,21 +4025,10 @@ dependencies = [
 name = "vapor_devtools"
 version = "0.5.0"
 dependencies = [
- "clap",
  "eframe",
  "egui_plot",
  "serde_json",
- "vapor_core",
- "vapor_telemetry",
-]
-
-[[package]]
-name = "vapor_sdk_core"
-version = "0.5.0"
-dependencies = [
- "serde",
- "toml",
- "vapor_core",
+ "vapor_client_protocol",
 ]
 
 [[package]]
@@ -4058,10 +4048,9 @@ dependencies = [
  "toml",
  "vapor_client",
  "vapor_client_application",
+ "vapor_client_domain",
  "vapor_client_protocol",
- "vapor_core",
  "vapor_devtools",
- "vapor_sdk_core",
 ]
 
 [[package]]

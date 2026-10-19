@@ -45,7 +45,8 @@ impl StudioApp {
         let mut action = None;
         let selector = content_selector(root);
         let editable_source = self.catalog.sources.iter().any(|content| {
-            content.id == root.id && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+            content.id == root.id
+                && content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str()
         });
         if ui
             .add_enabled(

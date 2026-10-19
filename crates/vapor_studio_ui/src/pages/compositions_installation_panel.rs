@@ -163,7 +163,7 @@ impl StudioApp {
                 node.source == vapor_client_application::CompositionPreviewSource::Workspace
             }) || self.catalog.sources.iter().any(|content| {
                 content.id == root.id
-                    && content.kind == vapor_core::ContentKind::Packagepack.as_str()
+                    && content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str()
             })
         });
         let installed = matches!(

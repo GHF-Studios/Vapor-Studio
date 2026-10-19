@@ -6,6 +6,7 @@ use super::{Section, StudioApp};
 use crate::navigation::{NAVIGATION_GROUPS, NavigationArea, NavigationGroup};
 use eframe::egui;
 use vapor_client_application::{CURRENT_SCHEMA_VERSION, CompositionDocument};
+use vapor_client_protocol::ClientAction;
 
 impl StudioApp {
     pub(super) fn draw_composition_target_selector(&mut self, ui: &mut egui::Ui) {
@@ -377,8 +378,8 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.poll_operation();
         self.poll_service();
+        self.poll_workshop_download_progress();
         let command_palette_requested =
             ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::K));
         if command_palette_requested {
@@ -426,7 +427,46 @@ impl eframe::App for StudioApp {
                         Section::Create => self.draw_create(ui),
                         Section::Workspace => self.draw_workspace(ui),
                         Section::Publish => self.draw_publish(ui),
-                        Section::Diagnostics => self.diagnostics.show(ui),
+                        Section::Diagnostics => {
+                            self.diagnostics.show(ui);
+                            for action in self.diagnostics.take_profile_actions() {
+                                let status = match self.apply_service_action(
+                                    ClientAction::Developer(action.clone()),
+                                ) {
+                                    Ok(()) => match action {
+                                        vapor_client_protocol::DeveloperAction::RefreshProfileTraces => {
+                                            "Trace library refreshed.".to_owned()
+                                        }
+                                        vapor_client_protocol::DeveloperAction::ImportProfileTrace { path } => {
+                                            format!("Added {}", std::path::Path::new(&path).display())
+                                        }
+                                        vapor_client_protocol::DeveloperAction::AnalyzeProfileTrace { .. } => {
+                                            "Analyzing saved Tracy capture…".to_owned()
+                                        }
+                                        _ => String::new(),
+                                    },
+                                    Err(error) => {
+                                        if matches!(
+                                            &action,
+                                            vapor_client_protocol::DeveloperAction::AnalyzeProfileTrace { .. }
+                                        ) {
+                                            self.diagnostics.profile_action_failed(error.clone());
+                                        }
+                                        error
+                                    }
+                                };
+                                self.diagnostics.set_status(status);
+                            }
+                            if self.diagnostics.take_open_profiler_request() {
+                                let result = self.apply_service_action(ClientAction::Developer(
+                                    vapor_client_protocol::DeveloperAction::OpenProfiler,
+                                ));
+                                self.diagnostics.set_status(match result {
+                                    Ok(()) => "Opened Tracy collector.".to_owned(),
+                                    Err(error) => error,
+                                });
+                            }
+                        }
                     });
             }
         });

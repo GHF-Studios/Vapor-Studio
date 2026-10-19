@@ -7,9 +7,8 @@ use std::{
 use vapor_client_application::ContentReference;
 use vapor_client_protocol::{
     CatalogEntry as ServiceCatalogEntry, CatalogLocationKind as ServiceLocationKind, ClientAction,
-    ClientEvent, ClientResponseKind, ProtocolFrame,
+    ClientEvent, ClientResponseKind, ContentKind, ProtocolFrame,
 };
-use vapor_core::ContentKind;
 
 pub(super) struct CatalogState {
     pub(super) discover_tab: DiscoverTab,
@@ -144,7 +143,10 @@ impl StudioApp {
             match frame {
                 ProtocolFrame::Response(response) if response.request_id == request_id => {
                     self.apply_service_catalog_snapshot(&response.snapshot);
-                    return if response.kind == ClientResponseKind::Applied {
+                    return if matches!(
+                        response.kind,
+                        ClientResponseKind::Applied | ClientResponseKind::OperationAccepted
+                    ) {
                         Ok(())
                     } else {
                         Err(response.error.map_or_else(
@@ -167,6 +169,11 @@ impl StudioApp {
                 }
                 ProtocolFrame::Event(ClientEvent::AuthoringResult(result)) => {
                     self.apply_service_authoring_result(*result);
+                }
+                ProtocolFrame::Event(event @ ClientEvent::DevelopmentSessionChanged { .. })
+                | ProtocolFrame::Event(event @ ClientEvent::Telemetry(_))
+                | ProtocolFrame::Event(event @ ClientEvent::ProfileAnalysis(_)) => {
+                    self.apply_service_telemetry_event(event);
                 }
                 ProtocolFrame::Event(ClientEvent::ProtocolError(error)) => {
                     return Err(error.message);
@@ -288,6 +295,11 @@ impl StudioApp {
                 ProtocolFrame::Event(ClientEvent::AuthoringResult(result)) => {
                     self.apply_service_authoring_result(*result);
                 }
+                ProtocolFrame::Event(event @ ClientEvent::DevelopmentSessionChanged { .. })
+                | ProtocolFrame::Event(event @ ClientEvent::Telemetry(_))
+                | ProtocolFrame::Event(event @ ClientEvent::ProfileAnalysis(_)) => {
+                    self.apply_service_telemetry_event(event);
+                }
                 ProtocolFrame::Event(ClientEvent::ProtocolError(error)) => {
                     self.status = error.message.clone();
                     self.service_error = Some(error.message);
@@ -309,11 +321,42 @@ impl StudioApp {
         }
     }
 
+    fn apply_service_telemetry_event(&mut self, event: ClientEvent) {
+        match event {
+            ClientEvent::DevelopmentSessionChanged { session, status } => {
+                self.diagnostics
+                    .ingest(vapor_devtools::DevtoolsMessage::Session {
+                        session: session.map(|session| vapor_devtools::SessionInfo {
+                            id: session.id,
+                            configuration: session.configuration,
+                            workspace: session.workspace,
+                            address: session.address,
+                            profiling: session.profiling,
+                        }),
+                        status,
+                    });
+            }
+            ClientEvent::Telemetry(event) => self
+                .diagnostics
+                .ingest(vapor_devtools::DevtoolsMessage::Event(event)),
+            ClientEvent::ProfileAnalysis(result) => self
+                .diagnostics
+                .ingest(vapor_devtools::DevtoolsMessage::ProfileAnalysis(result)),
+            _ => {}
+        }
+    }
+
     pub(super) fn apply_service_catalog_snapshot(
         &mut self,
         snapshot: &vapor_client_protocol::ClientSnapshot,
     ) {
         self.workshop.steam_client_available = snapshot.host.steam_client_available;
+        self.root_publishing.identity = snapshot.root_distribution;
+        self.diagnostics
+            .set_profile_traces(snapshot.profile_traces.clone());
+        if let Some(error) = snapshot.profile_trace_error.as_ref() {
+            self.diagnostics.set_status(error.clone());
+        }
         self.apply_service_workshop_snapshot(&snapshot.workshop);
         self.root_publishing.preview = snapshot.root_publishing.clone();
         if let Some(publishing) = snapshot.root_publishing.as_ref() {
@@ -696,8 +739,8 @@ impl CatalogFilter {
         let library_matches = !self.library_only
             || (role.map_or_else(
                 || {
-                    content.kind != vapor_core::ContentKind::Packagepack.as_str()
-                        && content.kind != vapor_core::ContentKind::Crate.as_str()
+                    content.kind != vapor_client_protocol::ContentKind::Packagepack.as_str()
+                        && content.kind != vapor_client_protocol::ContentKind::Crate.as_str()
                 },
                 |role| role == vapor_client_protocol::CatalogItemRole::RuntimeContent,
             ) && content.locations.iter().any(|location| {
@@ -820,7 +863,7 @@ fn service_workspace_candidate(
     Some(vapor_client_application::UnregisteredProjectCandidate {
         path: PathBuf::from(&candidate.path),
         id: candidate.id.clone(),
-        kind: vapor_client_application::source_project_kind(&candidate.kind)?,
+        kind: candidate.kind.parse().ok()?,
     })
 }
 

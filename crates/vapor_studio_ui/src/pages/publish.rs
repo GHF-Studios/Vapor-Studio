@@ -2,7 +2,6 @@ use super::super::StudioApp;
 use super::super::components::design::{StatusTone, page_header, status_text, use_stacked_form};
 use super::super::root_publishing::{PublishTab, root_publish_confirmation};
 use eframe::egui;
-use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
 enum WorkshopPublishAction {
     Publish(
@@ -241,7 +240,9 @@ impl StudioApp {
             ui.heading("Publish a Vapor app build");
             ui.label("SteamPipe uploads a Vapor application release to the Steam app and depot shown below.");
             ui.label(format!(
-                "Steam AppID {ROOT_STEAM_APP_ID} · DepotID {ROOT_STEAM_DEPOT_ID}",
+                "Steam AppID {} · DepotID {}",
+                self.root_publishing.identity.app_id,
+                self.root_publishing.identity.depot_id,
             ));
 
             let mut settings_changed = false;

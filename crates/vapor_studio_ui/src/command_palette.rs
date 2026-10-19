@@ -1,5 +1,6 @@
 use super::catalog::DiscoverTab;
 use super::workshop::WorkshopTab;
+use super::workspace_ops::WorkspaceOperation;
 use super::{Section, StudioApp};
 use eframe::egui;
 
@@ -8,7 +9,7 @@ enum CommandPaletteAction {
     Navigate(Section),
     Workshop(WorkshopTab),
     ValidateWorkspace,
-    WorkspaceOperation(vapor_core::DevelopmentOperation),
+    WorkspaceOperation(WorkspaceOperation),
     OpenWorkspace,
     OpenWorkspaceFiles,
     RefreshLocalContent,
@@ -77,27 +78,27 @@ impl StudioApp {
             (
                 "Format workspace",
                 "fmt rust source",
-                CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Fmt),
+                CommandPaletteAction::WorkspaceOperation(WorkspaceOperation::Format),
             ),
             (
                 "Check workspace",
                 "compiler type check",
-                CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Check),
+                CommandPaletteAction::WorkspaceOperation(WorkspaceOperation::Check),
             ),
             (
                 "Test workspace",
                 "tests verification",
-                CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Test),
+                CommandPaletteAction::WorkspaceOperation(WorkspaceOperation::Test),
             ),
             (
                 "Build workspace",
                 "compile executable",
-                CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Build),
+                CommandPaletteAction::WorkspaceOperation(WorkspaceOperation::Build),
             ),
             (
                 "Clean workspace",
                 "remove derived artifacts",
-                CommandPaletteAction::WorkspaceOperation(vapor_core::DevelopmentOperation::Clean),
+                CommandPaletteAction::WorkspaceOperation(WorkspaceOperation::Clean),
             ),
             (
                 "Create content",

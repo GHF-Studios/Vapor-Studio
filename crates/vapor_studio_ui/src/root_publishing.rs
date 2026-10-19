@@ -1,9 +1,10 @@
 use super::StudioApp;
-use vapor_client_protocol::RootPublishingSnapshot;
 use vapor_client_protocol::{ClientAction, PublishingAction};
+use vapor_client_protocol::{RootDistributionIdentitySnapshot, RootPublishingSnapshot};
 
 #[derive(Default)]
 pub(super) struct RootPublishingState {
+    pub(super) identity: RootDistributionIdentitySnapshot,
     pub(super) tab: PublishTab,
     pub(super) account: String,
     pub(super) description: String,

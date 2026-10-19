@@ -118,7 +118,7 @@ impl StudioApp {
                 status.selected_as_composition_root |=
                     self.is_active_composition_root(&content.id, content.version.as_deref());
                 status.packagepack_available |= content.kind
-                    == vapor_core::ContentKind::Packagepack.as_str()
+                    == vapor_client_protocol::ContentKind::Packagepack.as_str()
                     && content.is_unambiguous();
             }
             ui.horizontal_wrapped(|ui| {

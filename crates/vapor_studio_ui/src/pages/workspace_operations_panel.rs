@@ -1,7 +1,7 @@
 use super::super::StudioApp;
 use super::super::components::design::confirmation_card;
+use super::super::workspace_ops::WorkspaceOperation;
 use eframe::egui;
-use vapor_core::DevelopmentOperation;
 
 impl StudioApp {
     pub(super) fn draw_workspace_operations_panel(&mut self, ui: &mut egui::Ui) {
@@ -17,11 +17,11 @@ impl StudioApp {
                 self.validate_workspace_source();
             }
             for (label, operation) in [
-                ("Format", DevelopmentOperation::Fmt),
-                ("Check", DevelopmentOperation::Check),
-                ("Test", DevelopmentOperation::Test),
-                ("Build", DevelopmentOperation::Build),
-                ("Clean", DevelopmentOperation::Clean),
+                ("Format", WorkspaceOperation::Format),
+                ("Check", WorkspaceOperation::Check),
+                ("Test", WorkspaceOperation::Test),
+                ("Build", WorkspaceOperation::Build),
+                ("Clean", WorkspaceOperation::Clean),
             ] {
                 if ui
                     .add_enabled(

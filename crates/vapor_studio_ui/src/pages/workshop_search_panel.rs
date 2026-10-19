@@ -307,7 +307,7 @@ impl StudioApp {
                     locally_available = true;
                     local_conflict |= !content.is_unambiguous();
                     available_packagepack |= content.kind
-                        == vapor_core::ContentKind::Packagepack.as_str()
+                        == vapor_client_protocol::ContentKind::Packagepack.as_str()
                         && content.is_unambiguous();
                     selected_as_composition_root |=
                         self.is_active_composition_root(&content.id, content.version.as_deref());

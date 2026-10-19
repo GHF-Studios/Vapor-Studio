@@ -80,7 +80,7 @@ impl StudioApp {
                         composition.manifest.display()
                     ))
                 });
-            if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
+            if composition.kind == vapor_client_protocol::ContentKind::Packagepack.as_str() {
                 ui.add_enabled_ui(!operation_running && !composition_role_change_pending, |ui| {
                     ui.group(|ui| {
                         ui.heading("Playable content");
@@ -283,9 +283,7 @@ impl StudioApp {
                     let relationship = super::super::source_content_kind(&composition.kind)
                         .and_then(|parent| {
                             super::super::source_content_kind(&content.kind).and_then(|child| {
-                                vapor_client_application::source_dependency_relationship(
-                                    parent, child,
-                                )
+                                vapor_client_domain::dependency_relationship(parent, child)
                             })
                         })
                         .unwrap_or("dependency");
@@ -341,7 +339,7 @@ impl StudioApp {
                         .clicked();
                 }
             }
-            if composition.kind == vapor_core::ContentKind::Packagepack.as_str() {
+            if composition.kind == vapor_client_protocol::ContentKind::Packagepack.as_str() {
                 ui.horizontal_wrapped(|ui| {
                     let source_selector = composition.version.as_ref()
                         .map(|version| format!("{}@{version}", composition.id))
@@ -448,8 +446,8 @@ impl StudioApp {
                     }
                     let relationship =
                         super::super::source_content_kind(&content.kind).and_then(|kind| {
-                            vapor_client_application::source_dependency_relationship(
-                                vapor_core::ContentKind::Packagepack,
+                            vapor_client_domain::dependency_relationship(
+                                vapor_client_protocol::ContentKind::Packagepack,
                                 kind,
                             )
                         });
@@ -765,10 +763,9 @@ fn is_additional_composition_dependency(
         super::super::source_content_kind(&content.kind),
     ) {
         (Some(parent), Some(child)) => {
-            vapor_client_application::source_dependency_relationship(parent, child).is_some()
-                && !(parent == vapor_core::ContentKind::Packagepack
-                    && vapor_client_application::source_dependency_choice_group(parent, child)
-                        .is_some())
+            vapor_client_domain::dependency_relationship(parent, child).is_some()
+                && !(parent == vapor_client_protocol::ContentKind::Packagepack
+                    && vapor_client_domain::dependency_choice_group(parent, child).is_some())
         }
         _ => false,
     }
@@ -828,18 +825,15 @@ fn draw_packagepack_role_slot(
         search,
         pending_change,
     } = context;
-    let packagepack = vapor_core::ContentKind::Packagepack;
+    let packagepack = vapor_client_protocol::ContentKind::Packagepack;
     let choices = sources
         .iter()
         .filter_map(|content| {
             let kind = super::super::source_content_kind(&content.kind)?;
-            if vapor_client_application::source_dependency_choice_group(packagepack, kind)
-                != Some(group)
-            {
+            if vapor_client_domain::dependency_choice_group(packagepack, kind) != Some(group) {
                 return None;
             }
-            let relationship =
-                vapor_client_application::source_dependency_relationship(packagepack, kind)?;
+            let relationship = vapor_client_domain::dependency_relationship(packagepack, kind)?;
             Some((
                 super::super::source_content_selector(content),
                 content.kind.clone(),

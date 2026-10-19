@@ -1,10 +1,30 @@
 use super::StudioApp;
-use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
+use super::operation_protocol::WorkspaceOpenSnapshot;
 use super::workspace_editor::WorkspaceEditorState;
 use crate::navigation::Section;
 use std::path::{Path, PathBuf};
 use vapor_client_application::OperationKind;
-use vapor_core::{DevelopmentOperation, VaporWorkspace};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorkspaceOperation {
+    Format,
+    Check,
+    Test,
+    Build,
+    Clean,
+}
+
+impl std::fmt::Display for WorkspaceOperation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Format => "format",
+            Self::Check => "check",
+            Self::Test => "test",
+            Self::Build => "build",
+            Self::Clean => "clean",
+        })
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum WorkspacePanel {
@@ -88,20 +108,11 @@ impl StudioApp {
         }
     }
 
-    pub(super) fn apply_workspace_loaded(&mut self, workspace: VaporWorkspace) {
-        self.status = format!(
-            "Completed for {}/{} · {} projects",
-            workspace.manifest.workspace.organization,
-            workspace.manifest.workspace.name,
-            workspace.projects.len()
-        );
-    }
-
-    pub(super) fn run_operation(&mut self, operation: DevelopmentOperation) {
+    pub(super) fn run_operation(&mut self, operation: WorkspaceOperation) {
         if self.workspace.pending_clean_confirmation.is_some() {
             return;
         }
-        if operation == DevelopmentOperation::Clean {
+        if operation == WorkspaceOperation::Clean {
             if !self.require_open_workspace("clean generated build files") {
                 return;
             }
@@ -123,28 +134,53 @@ impl StudioApp {
             self.status = "The workspace changed; review the cleanup target again.".to_owned();
             return;
         }
-        self.start_workspace_operation(DevelopmentOperation::Clean);
+        self.start_workspace_operation(WorkspaceOperation::Clean);
     }
 
-    fn start_workspace_operation(&mut self, operation: DevelopmentOperation) {
+    fn start_workspace_operation(&mut self, operation: WorkspaceOperation) {
         if !self.require_open_workspace("run a workspace operation") {
             return;
         }
         let root = PathBuf::from(self.workspace.root.trim());
         let kind = match operation {
-            DevelopmentOperation::Fmt => OperationKind::Fmt,
-            DevelopmentOperation::Check => OperationKind::Check,
-            DevelopmentOperation::Test => OperationKind::Test,
-            DevelopmentOperation::Build => OperationKind::Build,
-            DevelopmentOperation::Clean => OperationKind::Clean,
+            WorkspaceOperation::Format => OperationKind::Fmt,
+            WorkspaceOperation::Check => OperationKind::Check,
+            WorkspaceOperation::Test => OperationKind::Test,
+            WorkspaceOperation::Build => OperationKind::Build,
+            WorkspaceOperation::Clean => OperationKind::Clean,
         };
-        self.spawn(kind, move |context| {
-            OperationResult::Workspace(Box::new(
-                vapor_core::run_workspace_operation_at_with_context(&root, operation, &context)
-                    .map_err(|error| error.to_string()),
-            ))
-        });
-        self.status = format!("Running Vapor-managed {operation}…");
+        let action = match operation {
+            WorkspaceOperation::Format => vapor_client_protocol::WorkspaceAction::RunTool {
+                operation: vapor_client_protocol::WorkspaceToolOperation::Format,
+                project_selection: vapor_client_protocol::WorkspaceProjectSelection::All,
+                target_triples: Vec::new(),
+            },
+            WorkspaceOperation::Check => vapor_client_protocol::WorkspaceAction::RunTool {
+                operation: vapor_client_protocol::WorkspaceToolOperation::Check,
+                project_selection: vapor_client_protocol::WorkspaceProjectSelection::All,
+                target_triples: Vec::new(),
+            },
+            WorkspaceOperation::Test => vapor_client_protocol::WorkspaceAction::RunTool {
+                operation: vapor_client_protocol::WorkspaceToolOperation::Test,
+                project_selection: vapor_client_protocol::WorkspaceProjectSelection::All,
+                target_triples: Vec::new(),
+            },
+            WorkspaceOperation::Build => vapor_client_protocol::WorkspaceAction::RunTool {
+                operation: vapor_client_protocol::WorkspaceToolOperation::Build,
+                project_selection: vapor_client_protocol::WorkspaceProjectSelection::All,
+                target_triples: Vec::new(),
+            },
+            WorkspaceOperation::Clean => vapor_client_protocol::WorkspaceAction::Clean {
+                confirmed_workspace_root: root.to_string_lossy().into_owned(),
+            },
+        };
+        self.start_service_operation(
+            vapor_client_protocol::ClientAction::Workspace(action),
+            None,
+            kind,
+            vapor_client_application::OperationPhase::Building,
+            &format!("Running Vapor-managed {operation}…"),
+        );
     }
 
     pub(super) fn discover(&mut self) {

@@ -49,13 +49,13 @@ pub(super) struct PendingCompositionRoleChange {
 pub(super) struct CreateDraft {
     pub(super) details_open: bool,
     pub(super) discard_confirmation_open: bool,
-    pub(super) pending_template_change: Option<vapor_core::ContentKind>,
+    pub(super) pending_template_change: Option<vapor_client_protocol::ContentKind>,
     pub(super) pending_dependency_clear: bool,
     pub(super) pending_role_replacement: Option<PendingRoleReplacement>,
     pub(super) dependency_search: String,
     pub(super) content_id: String,
     pub(super) content_version: String,
-    pub(super) content_kind: vapor_core::ContentKind,
+    pub(super) content_kind: vapor_client_protocol::ContentKind,
     pub(super) dependencies: Vec<String>,
     pub(super) optional_dependencies: std::collections::BTreeSet<String>,
     pub(super) exclusive_dependency_groups: std::collections::BTreeMap<String, &'static str>,
@@ -86,7 +86,7 @@ impl Default for CreateDraft {
             dependency_search: String::new(),
             content_id: String::new(),
             content_version: "0.1.0".to_owned(),
-            content_kind: vapor_core::ContentKind::Packagepack,
+            content_kind: vapor_client_protocol::ContentKind::Packagepack,
             dependencies: Vec::new(),
             optional_dependencies: std::collections::BTreeSet::new(),
             exclusive_dependency_groups: Default::default(),
@@ -143,7 +143,7 @@ impl CreateDraft {
     pub(super) fn is_dirty(&self) -> bool {
         !self.content_id.is_empty()
             || self.content_version != "0.1.0"
-            || self.content_kind != vapor_core::ContentKind::Packagepack
+            || self.content_kind != vapor_client_protocol::ContentKind::Packagepack
             || !self.dependencies.is_empty()
             || !self.workshop_app_id.is_empty()
             || !self.workshop_published_file_id.is_empty()
@@ -259,7 +259,7 @@ impl StudioApp {
             return;
         };
         let Some(relationship) =
-            vapor_client_application::source_dependency_relationship(parent_kind, child_kind)
+            vapor_client_domain::dependency_relationship(parent_kind, child_kind)
         else {
             self.status = format!("{} cannot be added to this kind of project.", candidate.id);
             return;
@@ -593,7 +593,7 @@ impl StudioApp {
             self.status = "Load a playable composition first.".to_owned();
             return;
         };
-        if composition.kind != vapor_core::ContentKind::Packagepack.as_str() {
+        if composition.kind != vapor_client_protocol::ContentKind::Packagepack.as_str() {
             self.status = "Only a playable Packagepack can be added to a composition.".to_owned();
             return;
         }

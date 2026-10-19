@@ -1,33 +1,22 @@
 use super::StudioApp;
-use super::operation_protocol::OperationResult;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 use vapor_client_application::{
-    OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
+    OperationEvent, OperationId, OperationKind, OperationPhase, OperationStatus,
 };
 use vapor_client_protocol::{
     ClientAction, OperationEvent as ServiceOperationEvent, OperationPhase as ServiceOperationPhase,
     OperationStatus as ServiceOperationStatus, RequestId,
 };
-use vapor_core::{
-    OperationEvent as CoreOperationEvent, OperationRequest as CoreOperationRequest,
-    OperationService,
-};
 
+#[derive(Default)]
 pub(super) struct OperationState {
     pub(super) running: bool,
     pub(super) service_owned: bool,
     pub(super) service_request_id: Option<RequestId>,
-    pub(super) receiver: Option<Receiver<(OperationId, OperationResult)>>,
-    pub(super) latest_operation_event: Arc<Mutex<Option<CoreOperationEvent>>>,
     pub(super) active_operation: Option<OperationEvent>,
     pub(super) operation_history: VecDeque<HistoricalOperation>,
 }
@@ -36,20 +25,6 @@ pub(super) struct OperationState {
 pub(super) struct HistoricalOperation {
     pub(super) completed_at_unix: u64,
     pub(super) event: OperationEvent,
-}
-
-impl Default for OperationState {
-    fn default() -> Self {
-        Self {
-            running: false,
-            service_owned: false,
-            service_request_id: None,
-            receiver: None,
-            latest_operation_event: Arc::new(Mutex::new(None)),
-            active_operation: None,
-            operation_history: VecDeque::new(),
-        }
-    }
 }
 
 impl OperationState {
@@ -79,188 +54,7 @@ pub(super) fn elapsed_label(completed_at_unix: u64) -> String {
     }
 }
 
-fn apply_core_operation_event(event: &CoreOperationEvent, current: &mut OperationEvent) {
-    if event.id != current.id {
-        return;
-    }
-    current.phase = event.phase;
-    current.progress = event.progress.clone();
-    current.status = event.status.clone();
-}
-
 impl StudioApp {
-    pub(super) fn poll_operation(&mut self) {
-        if self.operation.service_owned {
-            return;
-        }
-        if !self.operation.running {
-            self.poll_workshop_download_progress();
-        }
-        let latest_event = self
-            .operation
-            .latest_operation_event
-            .lock()
-            .ok()
-            .and_then(|mut event| event.take());
-        if let (Some(event), Some(active)) = (
-            latest_event.as_ref(),
-            self.operation.active_operation.as_mut(),
-        ) {
-            apply_core_operation_event(event, active);
-        }
-        let received = self
-            .operation
-            .receiver
-            .as_ref()
-            .map(|receiver| receiver.try_recv());
-        let result = match received {
-            Some(Ok(result)) => Some(result),
-            Some(Err(TryRecvError::Disconnected)) => {
-                self.operation.active_operation.as_ref().map(|operation| {
-                    (
-                        operation.id,
-                        OperationResult::Message(Err(
-                            "The background operation stopped before returning a result."
-                                .to_owned(),
-                        )),
-                    )
-                })
-            }
-            Some(Err(TryRecvError::Empty)) | None => None,
-        };
-        if let Some((operation_id, result)) = result {
-            self.operation.receiver = None;
-            self.operation.running = false;
-            let failure = result.failure();
-            self.apply_operation_result(result);
-            if let Some(event) = self
-                .operation
-                .active_operation
-                .as_mut()
-                .filter(|event| event.id == operation_id)
-            {
-                event.phase = OperationPhase::Finalizing;
-                event.status = match failure {
-                    Some(message) => OperationStatus::Failed { message },
-                    None => OperationStatus::Succeeded {
-                        summary: self.status.clone(),
-                    },
-                };
-                let completed_at_unix = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(0, |duration| duration.as_secs());
-                self.operation
-                    .operation_history
-                    .push_front(HistoricalOperation {
-                        completed_at_unix,
-                        event: event.clone(),
-                    });
-                self.operation.operation_history.truncate(20);
-            }
-            self.operation.active_operation = None;
-            if self.service.is_some()
-                && let Err(error) = self.persist_session_state()
-            {
-                self.status = format!("Could not save recent activity: {error}");
-            }
-        }
-    }
-
-    pub(super) fn spawn(
-        &mut self,
-        kind: OperationKind,
-        operation: impl FnOnce(vapor_core::OperationContext) -> OperationResult + Send + 'static,
-    ) {
-        let request = OperationRequest {
-            id: OperationId::fresh(),
-            composition_id: self
-                .composition
-                .items
-                .get(self.composition.active_index)
-                .map(|composition| composition.id.clone()),
-            kind,
-        };
-        let phase = match &request.kind {
-            OperationKind::Resolve
-            | OperationKind::LoadComposition
-            | OperationKind::LoadWorkshopMetadata
-            | OperationKind::LoadRuntimeOutputs
-            | OperationKind::Discover
-            | OperationKind::SearchWorkshop
-            | OperationKind::LoadWorkshopSubscriptions
-            | OperationKind::ChangeWorkshopSubscription
-            | OperationKind::OpenWorkspace
-            | OperationKind::RememberWorkspace
-            | OperationKind::AdoptContentProject
-            | OperationKind::UnregisterContentProject
-            | OperationKind::DiscoverWorkspace => OperationPhase::Resolving,
-            OperationKind::CreateWorkspace => OperationPhase::Building,
-            OperationKind::CreateWorkspaceFile
-            | OperationKind::SaveComposition
-            | OperationKind::SaveWorkshopMetadata
-            | OperationKind::SaveRuntimeOutputs => OperationPhase::Building,
-            OperationKind::Acquire => OperationPhase::Acquiring,
-            OperationKind::Install | OperationKind::Update | OperationKind::Repair => {
-                OperationPhase::Installing
-            }
-            OperationKind::Verify | OperationKind::Validate => OperationPhase::Verifying,
-            OperationKind::Build
-            | OperationKind::Check
-            | OperationKind::Test
-            | OperationKind::Fmt
-            | OperationKind::Clean => OperationPhase::Building,
-            OperationKind::Run | OperationKind::RunInstalled => OperationPhase::Running,
-            OperationKind::StageWorkshop | OperationKind::StageRootDistribution => {
-                OperationPhase::Staging
-            }
-            OperationKind::PublishWorkshop => OperationPhase::Publishing,
-            OperationKind::PublishRootDistribution => OperationPhase::Publishing,
-            _ => OperationPhase::Queued,
-        };
-        self.operation.active_operation = Some(OperationEvent {
-            id: request.id,
-            composition_id: request.composition_id.clone(),
-            kind: request.kind.clone(),
-            phase,
-            progress: None,
-            status: OperationStatus::Running,
-        });
-        let operation_id = request.id;
-        let initial_phase = phase;
-        let core_request = CoreOperationRequest {
-            id: request.id,
-            domain: "studio".to_owned(),
-            action: request.kind.action().to_owned(),
-        };
-        if let Ok(mut latest) = self.operation.latest_operation_event.lock() {
-            *latest = None;
-        }
-        let latest_event = Arc::clone(&self.operation.latest_operation_event);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let sink: vapor_core::OperationEventSink = Arc::new(move |event| {
-                if let Ok(mut latest) = latest_event.lock() {
-                    *latest = Some(event);
-                }
-            });
-            let result = OperationService::run_observed(
-                core_request,
-                sink,
-                |context| {
-                    context.set_phase(initial_phase);
-                    operation(context)
-                },
-                |result| match result.failure() {
-                    Some(message) => Err(message),
-                    None => Ok("Completed".to_owned()),
-                },
-            );
-            let _ = sender.send((operation_id, result));
-        });
-        self.operation.receiver = Some(receiver);
-        self.operation.running = true;
-    }
-
     pub(super) fn start_service_composition_operation(
         &mut self,
         action: ClientAction,
@@ -360,6 +154,7 @@ impl StudioApp {
                         completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
                         total: Some(100),
                         unit: "percent".to_owned(),
+                        message: event.message.clone(),
                     });
             operation.status = match &event.status {
                 ServiceOperationStatus::Running => OperationStatus::Running,
@@ -563,6 +358,7 @@ impl StudioApp {
                 completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
                 total: Some(100),
                 unit: "percent".to_owned(),
+                message: None,
             });
         active.status = match &operation.status {
             ServiceOperationStatus::Running => OperationStatus::Running,
@@ -596,6 +392,11 @@ fn operation_kind_for_action(action: &str) -> OperationKind {
         "composition.launch" => OperationKind::RunInstalled,
         "composition.run-source" => OperationKind::Run,
         "workspace.validate" => OperationKind::Validate,
+        "workspace.fmt" => OperationKind::Fmt,
+        "workspace.check" => OperationKind::Check,
+        "workspace.test" => OperationKind::Test,
+        "workspace.build" => OperationKind::Build,
+        "workspace.clean" => OperationKind::Clean,
         "workspace.list-files" => OperationKind::DiscoverWorkspace,
         "workspace.remember" => OperationKind::RememberWorkspace,
         "workspace.adopt-project" => OperationKind::AdoptContentProject,
@@ -609,6 +410,7 @@ fn operation_kind_for_action(action: &str) -> OperationKind {
         "authoring.save-workshop-metadata" => OperationKind::SaveWorkshopMetadata,
         "authoring.load-runtime-outputs" => OperationKind::LoadRuntimeOutputs,
         "authoring.validate-content" => OperationKind::Validate,
+        "authoring.package-content" => OperationKind::PackageContent,
         "authoring.list-registered-sources" => OperationKind::Discover,
         "authoring.save-runtime-outputs" => OperationKind::SaveRuntimeOutputs,
         _ => OperationKind::Resolve,

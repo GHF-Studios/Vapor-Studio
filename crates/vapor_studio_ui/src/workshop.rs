@@ -381,7 +381,10 @@ impl StudioApp {
         self.invalidate_workshop_review();
         self.start_service_operation(
             vapor_client_protocol::ClientAction::Workshop(
-                vapor_client_protocol::WorkshopAction::Stage { selector },
+                vapor_client_protocol::WorkshopAction::Stage {
+                    selector,
+                    target_triples: Vec::new(),
+                },
             ),
             None,
             OperationKind::StageWorkshop,

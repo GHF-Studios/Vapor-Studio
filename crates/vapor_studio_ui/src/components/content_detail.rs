@@ -105,12 +105,15 @@ impl StudioApp {
                             ui.small(format!("Workshop item: {published_file_id}"));
                         }
                     });
-                let is_cached_library_item = content.kind
-                    != vapor_core::ContentKind::Packagepack.as_str()
-                    && content.kind != vapor_core::ContentKind::Crate.as_str()
-                    && content.locations.iter().any(|location| {
-                        location.kind == vapor_client_application::CatalogLocationKind::Cache
-                    });
+                let is_cached_library_item = content.locations.iter().any(|location| {
+                    location.kind == vapor_client_application::CatalogLocationKind::Cache
+                })
+                    && vapor_client_domain::can_auto_install_library_item(
+                        &content.kind,
+                        content.published_file_id.is_some(),
+                        true,
+                        content.is_unambiguous(),
+                    );
                 if is_cached_library_item {
                     let referenced = self.composition.items.iter().any(|composition| {
                         composition.resolved_graph.as_ref().is_some_and(|graph| {
@@ -162,8 +165,8 @@ impl StudioApp {
                     }
                 }
                 let acquired_runtime_content = !is_authored_here
-                    && content.kind != vapor_core::ContentKind::Packagepack.as_str()
-                    && content.kind != vapor_core::ContentKind::Crate.as_str()
+                    && content.kind != vapor_client_protocol::ContentKind::Packagepack.as_str()
+                    && content.kind != vapor_client_protocol::ContentKind::Crate.as_str()
                     && content.locations.iter().any(|location| {
                         location.kind == vapor_client_application::CatalogLocationKind::Cache
                     });
@@ -228,7 +231,7 @@ impl StudioApp {
                         }
                     });
                 }
-                if content.kind == vapor_core::ContentKind::Packagepack.as_str() {
+                if content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str() {
                     let content_workspace = content
                         .locations
                         .iter()
@@ -315,23 +318,6 @@ impl StudioApp {
                         {
                             action = Some(ContentDetailAction::ReviewComposition);
                         }
-                    } else if lifecycle_actions.contains(
-                        &vapor_client_protocol::CatalogItemAction::CreateComposition,
-                    ) && ui
-                        .add_enabled(
-                            !self.operation.running
-                                && !self.has_unsaved_workspace_edits()
-                                && !create_draft_blocks_assignment
-                                && catalog_snapshot_current
-                                && content.is_unambiguous(),
-                            egui::Button::new("Create composition"),
-                        )
-                        .clicked()
-                    {
-                        action = Some(ContentDetailAction::CreateComposition(
-                            content.identity(),
-                            content_workspace,
-                        ));
                     } else if ui
                         .add_enabled(
                             !self.operation.running
@@ -339,7 +325,13 @@ impl StudioApp {
                                 && !create_draft_blocks_assignment
                                 && catalog_snapshot_current
                                 && content.is_unambiguous(),
-                                egui::Button::new("Use as the current composition"),
+                            egui::Button::new(if lifecycle_actions.contains(
+                                &vapor_client_protocol::CatalogItemAction::CreateComposition,
+                            ) {
+                                "Create composition"
+                            } else {
+                                "Use as the current composition"
+                            }),
                         )
                         .on_disabled_hover_text(if !content.is_unambiguous() {
                             "Review the conflicting copies before selecting this content."
@@ -523,7 +515,8 @@ impl StudioApp {
                 let root_content = self.catalog.items.iter().find(|candidate| {
                     candidate.id == root.id
                         && candidate.version == root.version
-                        && candidate.kind == vapor_core::ContentKind::Packagepack.as_str()
+                        && candidate.kind
+                            == vapor_client_protocol::ContentKind::Packagepack.as_str()
                         && candidate.locations.iter().any(|location| {
                             location.kind
                                 == vapor_client_application::CatalogLocationKind::Workspace
@@ -531,7 +524,7 @@ impl StudioApp {
                         })
                 })?;
                 let parent_kind = super::super::source_content_kind(&root_content.kind)?;
-                vapor_client_application::source_dependency_allowed(parent_kind, child_kind)
+                vapor_client_domain::dependency_kind_allowed(parent_kind, child_kind)
                     .then_some(index)
             })
             .collect()

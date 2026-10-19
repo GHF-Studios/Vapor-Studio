@@ -245,7 +245,7 @@ impl StudioApp {
                                     super::super::source_content_selector(content),
                                 ));
                             }
-                            if content.kind == vapor_core::ContentKind::Packagepack.as_str() {
+                            if content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str() {
                                 let selected_as_composition_root = self.is_active_composition_root(
                                     &content.id,
                                     content.version.as_deref(),
