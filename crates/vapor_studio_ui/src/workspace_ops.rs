@@ -3,8 +3,8 @@ use super::operation_protocol::{OperationResult, WorkspaceOpenSnapshot};
 use super::workspace_editor::WorkspaceEditorState;
 use crate::navigation::Section;
 use std::path::{Path, PathBuf};
-use vapor_core::{DevelopmentOperation, VaporWorkspace};
 use vapor_client_application::OperationKind;
+use vapor_core::{DevelopmentOperation, VaporWorkspace};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum WorkspacePanel {

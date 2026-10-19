@@ -73,7 +73,9 @@ impl StudioApp {
                     .clicked();
                 let next = ui
                     .add_enabled(
-                        !self.operation.running && steam_available && self.workshop.page < page_count,
+                        !self.operation.running
+                            && steam_available
+                            && self.workshop.page < page_count,
                         egui::Button::new("Next"),
                     )
                     .clicked();
@@ -207,7 +209,11 @@ impl StudioApp {
 
         let mut action = None;
         contextual_split(ui, |list, details| {
-            section_header(list, "Workshop results", "Choose an item to see its details and actions.");
+            section_header(
+                list,
+                "Workshop results",
+                "Choose an item to see its details and actions.",
+            );
             list.set_min_width(1.0);
             egui::ScrollArea::vertical()
                 .id_salt("workshop-search-results")
@@ -235,20 +241,30 @@ impl StudioApp {
                             }
                             let focused = self.workshop.focused_result.as_deref()
                                 == Some(item.published_file_id.as_str());
-                            if ui.add_sized(
-                                [ui.available_width(), LIST_ROW_HEIGHT],
-                                egui::Button::selectable(focused, egui::RichText::new(&item.title).strong()),
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), LIST_ROW_HEIGHT],
+                                    egui::Button::selectable(
+                                        focused,
+                                        egui::RichText::new(&item.title).strong(),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 self.workshop.focused_result = Some(item.published_file_id.clone());
                             }
                         });
                         ui.separator();
                     }
                 });
-            section_header(details, "Item details", "Subscription and composition actions.");
-            let focused_item = self.workshop.results.iter().find(|item|
-                self.workshop.focused_result.as_deref() == Some(item.published_file_id.as_str())
+            section_header(
+                details,
+                "Item details",
+                "Subscription and composition actions.",
             );
+            let focused_item = self.workshop.results.iter().find(|item| {
+                self.workshop.focused_result.as_deref() == Some(item.published_file_id.as_str())
+            });
             if let Some(item) = focused_item {
                 details.strong(&item.title);
                 details.collapsing("Workshop item ID", |ui| {
@@ -258,7 +274,10 @@ impl StudioApp {
                     details.add_space(8.0);
                     details.label(&item.description);
                 }
-                let subscribed = self.workshop.subscriptions.contains(&item.published_file_id);
+                let subscribed = self
+                    .workshop
+                    .subscriptions
+                    .contains(&item.published_file_id);
                 details.weak(if self.workshop.subscriptions_stale {
                     if subscribed {
                         "Last known as subscribed through Steam · refresh status"
@@ -281,8 +300,7 @@ impl StudioApp {
                 let active_composition = &self.composition.items[self.composition.active_index];
                 let active_graph = active_composition.resolved_graph.as_ref();
                 for content in &self.catalog.items {
-                    if content.published_file_id.as_deref()
-                        != Some(item.published_file_id.as_str())
+                    if content.published_file_id.as_deref() != Some(item.published_file_id.as_str())
                     {
                         continue;
                     }
@@ -291,19 +309,16 @@ impl StudioApp {
                     available_packagepack |= content.kind
                         == vapor_core::ContentKind::Packagepack.as_str()
                         && content.is_unambiguous();
-                    selected_as_composition_root |= self.is_active_composition_root(
-                        &content.id,
-                        content.version.as_deref(),
-                    );
+                    selected_as_composition_root |=
+                        self.is_active_composition_root(&content.id, content.version.as_deref());
                     included_in_active_composition |= active_graph.is_some_and(|graph| {
                         graph.nodes.iter().any(|node| {
-                            node.content.id == content.id
-                                && node.content.version == content.version
+                            node.content.id == content.id && node.content.version == content.version
                         })
                     });
                 }
-                let create_draft_blocks_assignment = self
-                    .workshop_root_change_blocked_by_create_draft(&item.published_file_id);
+                let create_draft_blocks_assignment =
+                    self.workshop_root_change_blocked_by_create_draft(&item.published_file_id);
                 let local_catalog_current = self.catalog.local_catalog_current();
                 if local_conflict {
                     status_text(
@@ -318,14 +333,10 @@ impl StudioApp {
                     }
                 } else if !locally_available {
                     let mut clicked = false;
-                    details.add_enabled_ui(
-                        !self.operation.running && steam_available,
-                        |ui| {
-                        clicked = super::super::components::design::primary_button(
-                            ui,
-                            "Add to Library",
-                        )
-                        .clicked();
+                    details.add_enabled_ui(!self.operation.running && steam_available, |ui| {
+                        clicked =
+                            super::super::components::design::primary_button(ui, "Add to Library")
+                                .clicked();
                     });
                     if clicked {
                         action = Some(WorkshopSearchAction::Download(

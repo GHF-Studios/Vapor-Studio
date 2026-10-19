@@ -10,7 +10,10 @@ impl StudioApp {
         self.status = "Added the open workspace to this Vapor installation. It remains separate from the active source.".to_owned();
     }
 
-    pub(super) fn validate_source_project(&mut self, content: &vapor_client_application::SourceContent) {
+    pub(super) fn validate_source_project(
+        &mut self,
+        content: &vapor_client_application::SourceContent,
+    ) {
         if !self.require_open_workspace("validate this content project") {
             return;
         }

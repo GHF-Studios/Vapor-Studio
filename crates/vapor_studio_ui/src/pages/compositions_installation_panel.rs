@@ -153,10 +153,9 @@ impl StudioApp {
             })
         });
         let plan_has_refresh_source = selected_preview.is_some_and(|preview| {
-            preview
-                .nodes
-                .iter()
-                .any(|node| node.source != vapor_client_application::CompositionPreviewSource::Installed)
+            preview.nodes.iter().any(|node| {
+                node.source != vapor_client_application::CompositionPreviewSource::Installed
+            })
         });
         let root_installed = root_plan_node.is_some_and(|node| node.already_installed);
         let root_is_workspace_source = composition.root_package.as_ref().is_some_and(|root| {
@@ -330,8 +329,7 @@ impl StudioApp {
                                     saved_graph,
                                     actual_graph,
                                     &self.catalog.items,
-                                )
-                                {
+                                ) {
                                     ui.small(difference);
                                 }
                             });
@@ -422,7 +420,8 @@ impl StudioApp {
 mod graph_difference_tests {
     use super::graph_difference_lines;
     use vapor_client_application::{
-        ContentReference, ResolvedCompositionGraph, ResolvedDependencyIdentity, ResolvedNodeIdentity,
+        ContentReference, ResolvedCompositionGraph, ResolvedDependencyIdentity,
+        ResolvedNodeIdentity,
     };
 
     fn identity(id: &str, version: &str) -> ContentReference {

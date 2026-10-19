@@ -2,8 +2,8 @@ use super::StudioApp;
 use super::operation_protocol::WorkspaceOpenSnapshot;
 use crate::navigation::Section;
 use std::path::{Path, PathBuf};
-use vapor_client_protocol::{AuthoringResult, AuthoringResultKind};
 use vapor_client_application::ContentReference;
+use vapor_client_protocol::{AuthoringResult, AuthoringResultKind};
 
 impl StudioApp {
     pub(super) fn apply_service_authoring_result(&mut self, result: AuthoringResult) {

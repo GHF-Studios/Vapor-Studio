@@ -63,8 +63,7 @@ impl StudioApp {
                         .service_item_roles
                         .get(&(content.id.clone(), content.version.clone()))
                         .copied();
-                    CatalogFilter::library(None, "")
-                        .matches_catalog_with_role(content, role)
+                    CatalogFilter::library(None, "").matches_catalog_with_role(content, role)
                 })
                 .map(|content| content.kind.clone())
                 .collect::<std::collections::BTreeSet<_>>();

@@ -453,7 +453,9 @@ impl eframe::App for StudioApp {
                         );
                         self.status = match self.apply_service_action(action) {
                             Ok(()) => "Vapor's shared source folder was updated.".to_owned(),
-                            Err(error) => format!("Could not change the shared source folder: {error}"),
+                            Err(error) => {
+                                format!("Could not change the shared source folder: {error}")
+                            }
                         };
                     }
                 }

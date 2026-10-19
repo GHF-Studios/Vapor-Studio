@@ -12,9 +12,8 @@ const MIN_PRIMARY_PANEL_WIDTH: f32 = 460.0;
 const MIN_CONTEXT_PANEL_WIDTH: f32 = 300.0;
 
 pub(crate) fn use_stacked_panels(ui: &egui::Ui) -> bool {
-    let minimum_width = MIN_PRIMARY_PANEL_WIDTH
-        + MIN_CONTEXT_PANEL_WIDTH
-        + ui.spacing().item_spacing.x;
+    let minimum_width =
+        MIN_PRIMARY_PANEL_WIDTH + MIN_CONTEXT_PANEL_WIDTH + ui.spacing().item_spacing.x;
     ui.available_width() < minimum_width
 }
 
@@ -37,14 +36,14 @@ pub(crate) fn contextual_split(
             egui::Rect::from_min_size(start, egui::vec2(available, list_height)),
             egui::Rect::from_min_size(
                 egui::pos2(start.x, start.y + list_height + gap),
-                egui::vec2(available, (available_rect.height() - list_height - gap).max(1.0)),
+                egui::vec2(
+                    available,
+                    (available_rect.height() - list_height - gap).max(1.0),
+                ),
             ),
         )
     } else {
-        let context_width = (available * 0.36).clamp(
-            MIN_CONTEXT_PANEL_WIDTH,
-            CONTEXT_PANEL_WIDTH,
-        );
+        let context_width = (available * 0.36).clamp(MIN_CONTEXT_PANEL_WIDTH, CONTEXT_PANEL_WIDTH);
         let main_width = (available - context_width - gap).max(1.0);
         (
             egui::Rect::from_min_size(start, egui::vec2(main_width, available_rect.height())),

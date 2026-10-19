@@ -46,7 +46,8 @@ impl StudioApp {
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
                 .join("-");
-            self.catalog.fork_name = format!("{}-copy", if slug.is_empty() { "content" } else { &slug });
+            self.catalog.fork_name =
+                format!("{}-copy", if slug.is_empty() { "content" } else { &slug });
         }
         let mut action = None;
         if let Some(identity) = self.catalog.selected.as_ref() {
@@ -78,7 +79,10 @@ impl StudioApp {
                         ui.small(super::super::catalog::catalog_location_label(location));
                     }
                 });
-                egui::CollapsingHeader::new(format!("Requirements · {}", content.dependencies.len()))
+                egui::CollapsingHeader::new(format!(
+                    "Requirements · {}",
+                    content.dependencies.len()
+                ))
                 .default_open(false)
                 .show(ui, |ui| {
                     if content.dependencies.is_empty() {
@@ -101,7 +105,8 @@ impl StudioApp {
                             ui.small(format!("Workshop item: {published_file_id}"));
                         }
                     });
-                let is_cached_library_item = content.kind != vapor_core::ContentKind::Packagepack.as_str()
+                let is_cached_library_item = content.kind
+                    != vapor_core::ContentKind::Packagepack.as_str()
                     && content.kind != vapor_core::ContentKind::Crate.as_str()
                     && content.locations.iter().any(|location| {
                         location.kind == vapor_client_application::CatalogLocationKind::Cache
@@ -123,7 +128,9 @@ impl StudioApp {
                             .changed();
                     });
                     if !referenced && !enabled {
-                        ui.small("Add this item to a composition before enabling automatic updates.");
+                        ui.small(
+                            "Add this item to a composition before enabling automatic updates.",
+                        );
                     }
                     if policy_changed {
                         action = Some(ContentDetailAction::SetAutoInstall {
@@ -226,7 +233,8 @@ impl StudioApp {
                         .locations
                         .iter()
                         .any(|location| {
-                            location.kind == vapor_client_application::CatalogLocationKind::Workspace
+                            location.kind
+                                == vapor_client_application::CatalogLocationKind::Workspace
                         })
                         .then(|| std::path::PathBuf::from(self.workspace.root.trim()));
                     let create_draft_blocks_assignment = self
@@ -356,7 +364,8 @@ impl StudioApp {
                     .service_item_actions
                     .get(&(content.id.clone(), content.version.clone()))
                     .is_some_and(|actions| {
-                        actions.contains(&vapor_client_protocol::CatalogItemAction::AddToComposition)
+                        actions
+                            .contains(&vapor_client_protocol::CatalogItemAction::AddToComposition)
                     })
                 {
                     let eligible = self.eligible_compositions_for_content(content);
@@ -366,13 +375,16 @@ impl StudioApp {
                             .add_to_composition_target
                             .as_ref()
                             .and_then(|id| {
-                                eligible.iter().find(|index| self.composition.items[**index].id == *id)
+                                eligible
+                                    .iter()
+                                    .find(|index| self.composition.items[**index].id == *id)
                             })
                             .copied()
                             .or_else(|| {
-                                eligible.iter().copied().find(|index| {
-                                    *index == self.composition.active_index
-                                })
+                                eligible
+                                    .iter()
+                                    .copied()
+                                    .find(|index| *index == self.composition.active_index)
                             })
                             .unwrap_or(eligible[0]);
                         self.catalog.add_to_composition_target =
@@ -461,7 +473,10 @@ impl StudioApp {
             Some(ContentDetailAction::PlayComposition) => {
                 self.run_installed_selected();
             }
-            Some(ContentDetailAction::SetAutoInstall { content_id, enabled }) => {
+            Some(ContentDetailAction::SetAutoInstall {
+                content_id,
+                enabled,
+            }) => {
                 self.submit_service_action(vapor_client_protocol::ClientAction::Library(
                     vapor_client_protocol::LibraryAction::SetAutoInstall {
                         content_id,
@@ -510,7 +525,8 @@ impl StudioApp {
                         && candidate.version == root.version
                         && candidate.kind == vapor_core::ContentKind::Packagepack.as_str()
                         && candidate.locations.iter().any(|location| {
-                            location.kind == vapor_client_application::CatalogLocationKind::Workspace
+                            location.kind
+                                == vapor_client_application::CatalogLocationKind::Workspace
                                 && location.root.to_string_lossy() == workspace
                         })
                 })?;
@@ -548,7 +564,8 @@ impl StudioApp {
             return;
         };
         if association.root.to_string_lossy() != self.workspace.root.trim() {
-            self.status = "Open this composition's project folder before adding its content.".to_owned();
+            self.status =
+                "Open this composition's project folder before adding its content.".to_owned();
             return;
         }
         if index != self.composition.active_index {
@@ -575,8 +592,7 @@ impl StudioApp {
         } else {
             self.status = format!(
                 "Open the included-content editor for {} after the project list refreshes; {} will be added to the unsaved project draft.",
-                self.composition.items[index].name,
-                identity.id,
+                self.composition.items[index].name, identity.id,
             );
         }
     }

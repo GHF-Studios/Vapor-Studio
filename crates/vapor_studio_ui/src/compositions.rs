@@ -1,8 +1,8 @@
 use super::{StudioApp, catalog_content_selector, content_selector};
 use crate::navigation::{CatalogSourceFilter, Section};
 use std::path::{Path, PathBuf};
-use vapor_client_protocol::ClientAction;
 use vapor_client_application::ContentReference;
+use vapor_client_protocol::ClientAction;
 
 pub(super) struct CompositionState {
     pub(super) items: Vec<vapor_client_application::Composition>,
@@ -111,7 +111,9 @@ impl StudioApp {
         let workspace = content
             .locations
             .iter()
-            .find(|location| location.kind == vapor_client_application::CatalogLocationKind::Workspace)
+            .find(|location| {
+                location.kind == vapor_client_application::CatalogLocationKind::Workspace
+            })
             .map(|location| location.root.clone());
         let identity = ContentReference {
             id: content.id,
@@ -326,7 +328,9 @@ impl StudioApp {
         let workspace = content
             .locations
             .iter()
-            .find(|location| location.kind == vapor_client_application::CatalogLocationKind::Workspace)
+            .find(|location| {
+                location.kind == vapor_client_application::CatalogLocationKind::Workspace
+            })
             .map(|location| location.root.as_path());
         self.composition_root_change_blocked_by_create_draft(workspace)
     }

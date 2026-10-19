@@ -39,7 +39,9 @@ impl StudioApp {
                     {
                         StatusTone::Error
                     }
-                    vapor_client_application::OperationStatus::Cancelled if self.status == "Cancelled" => {
+                    vapor_client_application::OperationStatus::Cancelled
+                        if self.status == "Cancelled" =>
+                    {
                         StatusTone::Caution
                     }
                     _ => StatusTone::Neutral,

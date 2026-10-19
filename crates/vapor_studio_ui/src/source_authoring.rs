@@ -1,7 +1,7 @@
 use super::{StudioApp, source_content_kind, source_content_selector};
 use std::path::PathBuf;
-use vapor_client_protocol::{AuthoringAction, ClientAction, CompositionDependency};
 use vapor_client_application::{ContentReference, OperationKind};
+use vapor_client_protocol::{AuthoringAction, ClientAction, CompositionDependency};
 
 #[derive(Clone, Copy)]
 pub(super) enum PendingManifestDraftDiscard {
@@ -17,7 +17,8 @@ pub(super) struct AuthoringState {
     pub(super) composition_edit_selector: String,
     pub(super) composition_source_search: String,
     pub(super) composition_edit: Option<vapor_client_application::SourceComposition>,
-    pub(super) composition_original_links: Option<Vec<vapor_client_application::SourceCompositionLink>>,
+    pub(super) composition_original_links:
+        Option<Vec<vapor_client_application::SourceCompositionLink>>,
     pub(super) composition_link_candidate: String,
     pub(super) composition_link_search: String,
     pub(super) pending_composition_add: Option<ContentReference>,
@@ -233,12 +234,15 @@ impl StudioApp {
             .and_then(|active| active.root_package.as_ref())
             .is_none_or(|root| root.id != composition.id || root.version != composition.version)
         {
-            self.status = "The selected composition changed. Choose it again before adding content.".to_owned();
+            self.status =
+                "The selected composition changed. Choose it again before adding content."
+                    .to_owned();
             return;
         }
-        let candidate = self.catalog.sources.iter().find(|candidate| {
-            candidate.id == identity.id && candidate.version == identity.version
-        });
+        let candidate =
+            self.catalog.sources.iter().find(|candidate| {
+                candidate.id == identity.id && candidate.version == identity.version
+            });
         let Some(candidate) = candidate else {
             self.status = format!(
                 "{} is no longer available in this project folder. Refresh the project list and try again.",
@@ -257,27 +261,31 @@ impl StudioApp {
         let Some(relationship) =
             vapor_client_application::source_dependency_relationship(parent_kind, child_kind)
         else {
-            self.status = format!(
-                "{} cannot be added to this kind of project.",
-                candidate.id
-            );
+            self.status = format!("{} cannot be added to this kind of project.", candidate.id);
             return;
         };
-        if composition.links.iter().any(|link| {
-            link.id == candidate.id && link.relationship == relationship
-        }) {
+        if composition
+            .links
+            .iter()
+            .any(|link| link.id == candidate.id && link.relationship == relationship)
+        {
             self.authoring.composition_link_candidate = source_content_selector(candidate);
             self.status = format!("{} is already included in this project.", candidate.id);
             return;
         }
-        composition.links.push(vapor_client_application::SourceCompositionLink {
-            id: candidate.id.clone(),
-            relationship: relationship.to_owned(),
-            optional: false,
-            version: candidate.version.as_ref().map(|version| format!("={version}")),
-            workshop_id: None,
-            reason: None,
-        });
+        composition
+            .links
+            .push(vapor_client_application::SourceCompositionLink {
+                id: candidate.id.clone(),
+                relationship: relationship.to_owned(),
+                optional: false,
+                version: candidate
+                    .version
+                    .as_ref()
+                    .map(|version| format!("={version}")),
+                workshop_id: None,
+                reason: None,
+            });
         self.authoring.composition_link_candidate = source_content_selector(candidate);
         self.status = format!(
             "Added {} to the project draft. Save the content choices to apply it.",

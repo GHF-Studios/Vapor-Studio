@@ -6,8 +6,8 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-use vapor_client_protocol::{ClientAction, WorkspaceAction, WorkspaceFileResult};
 use vapor_client_application::{OperationKind, OperationPhase, workspace_file_fingerprint};
+use vapor_client_protocol::{ClientAction, WorkspaceAction, WorkspaceFileResult};
 
 const DOCUMENT_INSPECTION_DELAY: Duration = Duration::from_millis(350);
 

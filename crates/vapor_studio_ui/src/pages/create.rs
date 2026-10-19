@@ -124,9 +124,10 @@ impl StudioApp {
                 "This creates a plain Rust crate built for static linking. It has no runtime-loaded game behavior."
             }
         };
-        let required_role_groups = vapor_client_application::source_required_dependency_choice_groups(
-            self.authoring.create.content_kind,
-        );
+        let required_role_groups =
+            vapor_client_application::source_required_dependency_choice_groups(
+                self.authoring.create.content_kind,
+            );
         let selected_in_role_group = |required_group: &&str| {
             self.catalog.sources.iter().any(|content| {
                 self.authoring

@@ -4,12 +4,12 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
+use vapor_client_application::ContentReference;
 use vapor_client_protocol::{
     CatalogEntry as ServiceCatalogEntry, CatalogLocationKind as ServiceLocationKind, ClientAction,
     ClientEvent, ClientResponseKind, ProtocolFrame,
 };
 use vapor_core::ContentKind;
-use vapor_client_application::ContentReference;
 
 pub(super) struct CatalogState {
     pub(super) discover_tab: DiscoverTab,
@@ -522,7 +522,9 @@ pub(crate) fn source_content_selector_matches(
     content_selector_matches(&content.id, content.version.as_deref(), selector)
 }
 
-pub(crate) fn catalog_content_selector(content: &vapor_client_application::CatalogContent) -> String {
+pub(crate) fn catalog_content_selector(
+    content: &vapor_client_application::CatalogContent,
+) -> String {
     content_selector(&content.identity())
 }
 
@@ -617,10 +619,7 @@ fn display_content_name(id: &str, authored_name: Option<&str>) -> String {
                 .map(|word| {
                     let mut characters = word.chars();
                     characters.next().map_or_else(String::new, |first| {
-                        first
-                            .to_uppercase()
-                            .chain(characters)
-                            .collect::<String>()
+                        first.to_uppercase().chain(characters).collect::<String>()
                     })
                 })
                 .collect::<Vec<_>>();
@@ -669,7 +668,10 @@ impl CatalogFilter {
         }
     }
 
-    pub(super) fn matches_catalog(&self, content: &vapor_client_application::CatalogContent) -> bool {
+    pub(super) fn matches_catalog(
+        &self,
+        content: &vapor_client_application::CatalogContent,
+    ) -> bool {
         self.matches_catalog_with_role(content, None)
     }
 
@@ -678,21 +680,19 @@ impl CatalogFilter {
         content: &vapor_client_application::CatalogContent,
         role: Option<vapor_client_protocol::CatalogItemRole>,
     ) -> bool {
-        let source_matches =
-            match self.source {
-                CatalogSourceFilter::All => true,
-                CatalogSourceFilter::Workspace => content.locations.iter().any(|location| {
-                    location.kind == vapor_client_application::CatalogLocationKind::Workspace
-                }),
-                CatalogSourceFilter::Cache => content
-                    .locations
-                    .iter()
-                    .any(|location| location.kind == vapor_client_application::CatalogLocationKind::Cache),
-                CatalogSourceFilter::Installed => content.locations.iter().any(|location| {
-                    location.kind == vapor_client_application::CatalogLocationKind::Installed
-                }),
-                CatalogSourceFilter::Workshop => content.published_file_id.is_some(),
-            };
+        let source_matches = match self.source {
+            CatalogSourceFilter::All => true,
+            CatalogSourceFilter::Workspace => content.locations.iter().any(|location| {
+                location.kind == vapor_client_application::CatalogLocationKind::Workspace
+            }),
+            CatalogSourceFilter::Cache => content.locations.iter().any(|location| {
+                location.kind == vapor_client_application::CatalogLocationKind::Cache
+            }),
+            CatalogSourceFilter::Installed => content.locations.iter().any(|location| {
+                location.kind == vapor_client_application::CatalogLocationKind::Installed
+            }),
+            CatalogSourceFilter::Workshop => content.published_file_id.is_some(),
+        };
         let library_matches = !self.library_only
             || (role.map_or_else(
                 || {
@@ -774,7 +774,9 @@ fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_client_applicatio
                     ServiceLocationKind::Workspace => {
                         vapor_client_application::CatalogLocationKind::Workspace
                     }
-                    ServiceLocationKind::Cache => vapor_client_application::CatalogLocationKind::Cache,
+                    ServiceLocationKind::Cache => {
+                        vapor_client_application::CatalogLocationKind::Cache
+                    }
                     ServiceLocationKind::Installed => {
                         vapor_client_application::CatalogLocationKind::Installed
                     }

@@ -283,7 +283,9 @@ impl StudioApp {
                     let relationship = super::super::source_content_kind(&composition.kind)
                         .and_then(|parent| {
                             super::super::source_content_kind(&content.kind).and_then(|child| {
-                                vapor_client_application::source_dependency_relationship(parent, child)
+                                vapor_client_application::source_dependency_relationship(
+                                    parent, child,
+                                )
                             })
                         })
                         .unwrap_or("dependency");
@@ -765,13 +767,17 @@ fn is_additional_composition_dependency(
         (Some(parent), Some(child)) => {
             vapor_client_application::source_dependency_relationship(parent, child).is_some()
                 && !(parent == vapor_core::ContentKind::Packagepack
-                    && vapor_client_application::source_dependency_choice_group(parent, child).is_some())
+                    && vapor_client_application::source_dependency_choice_group(parent, child)
+                        .is_some())
         }
         _ => false,
     }
 }
 
-fn source_content_matches_query(content: &vapor_client_application::SourceContent, query: &str) -> bool {
+fn source_content_matches_query(
+    content: &vapor_client_application::SourceContent,
+    query: &str,
+) -> bool {
     query.is_empty()
         || content.id.to_lowercase().contains(query)
         || content.kind.to_lowercase().contains(query)
@@ -827,7 +833,9 @@ fn draw_packagepack_role_slot(
         .iter()
         .filter_map(|content| {
             let kind = super::super::source_content_kind(&content.kind)?;
-            if vapor_client_application::source_dependency_choice_group(packagepack, kind) != Some(group) {
+            if vapor_client_application::source_dependency_choice_group(packagepack, kind)
+                != Some(group)
+            {
                 return None;
             }
             let relationship =

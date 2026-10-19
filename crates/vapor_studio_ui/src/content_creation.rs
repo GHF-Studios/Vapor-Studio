@@ -2,8 +2,8 @@ use super::StudioApp;
 use super::workspace_editor::WorkspaceDocument;
 use crate::navigation::Section;
 use std::path::PathBuf;
-use vapor_client_protocol::{AuthoringAction, ClientAction, WorkshopMetadataDraft};
 use vapor_client_application::OperationKind;
+use vapor_client_protocol::{AuthoringAction, ClientAction, WorkshopMetadataDraft};
 
 pub(super) fn starter_workspace_slug_is_valid(value: &str) -> bool {
     !value.is_empty()

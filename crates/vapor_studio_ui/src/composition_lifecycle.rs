@@ -1,7 +1,7 @@
 use super::StudioApp;
 use std::path::PathBuf;
-use vapor_client_protocol::ClientAction;
 use vapor_client_application::OperationKind;
+use vapor_client_protocol::ClientAction;
 
 pub(super) enum RepreviewAfterCatalogRefresh {
     ActiveComposition,

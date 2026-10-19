@@ -10,6 +10,9 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+use vapor_client_application::{
+    OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
+};
 use vapor_client_protocol::{
     ClientAction, OperationEvent as ServiceOperationEvent, OperationPhase as ServiceOperationPhase,
     OperationStatus as ServiceOperationStatus, RequestId,
@@ -17,9 +20,6 @@ use vapor_client_protocol::{
 use vapor_core::{
     OperationEvent as CoreOperationEvent, OperationRequest as CoreOperationRequest,
     OperationService,
-};
-use vapor_client_application::{
-    OperationEvent, OperationId, OperationKind, OperationPhase, OperationRequest, OperationStatus,
 };
 
 pub(super) struct OperationState {
@@ -353,11 +353,14 @@ impl StudioApp {
             operation.composition_id = event.composition_id.clone();
             operation.kind = kind;
             operation.phase = service_phase(event.phase);
-            operation.progress = event.progress.map(|progress| vapor_client_application::Progress {
-                completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
-                total: Some(100),
-                unit: "percent".to_owned(),
-            });
+            operation.progress =
+                event
+                    .progress
+                    .map(|progress| vapor_client_application::Progress {
+                        completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
+                        total: Some(100),
+                        unit: "percent".to_owned(),
+                    });
             operation.status = match &event.status {
                 ServiceOperationStatus::Running => OperationStatus::Running,
                 ServiceOperationStatus::Succeeded => OperationStatus::Succeeded {

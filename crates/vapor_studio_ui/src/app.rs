@@ -43,9 +43,8 @@ use crate::navigation::Section;
 use catalog::{
     CatalogFilter, CatalogState, catalog_content_selector, catalog_content_selector_matches,
     content_kind_name, content_selector, display_catalog_identity, display_catalog_name,
-    display_content_kind,
-    source_content_kind,
-    source_content_selector, source_content_selector_matches,
+    display_content_kind, source_content_kind, source_content_selector,
+    source_content_selector_matches,
 };
 use composition_lifecycle::CompositionPreviewState;
 use compositions::CompositionState;
@@ -56,8 +55,8 @@ use root_publishing::RootPublishingState;
 use source_authoring::AuthoringState;
 use std::path::PathBuf;
 use vapor_client::{Client, ClientHostConfig, service_sibling_path};
-use vapor_client_protocol::{ClientAction, LegacyStorageSeed};
 use vapor_client_application::decode_compositions;
+use vapor_client_protocol::{ClientAction, LegacyStorageSeed};
 use workshop::WorkshopState;
 use workspace_ops::WorkspaceState;
 

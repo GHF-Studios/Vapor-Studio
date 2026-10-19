@@ -5,7 +5,10 @@ use eframe::egui;
 use vapor_sdk_core::root::types::{ROOT_STEAM_APP_ID, ROOT_STEAM_DEPOT_ID};
 
 enum WorkshopPublishAction {
-    Publish(String, Box<vapor_client_application::WorkshopPackagePreview>),
+    Publish(
+        String,
+        Box<vapor_client_application::WorkshopPackagePreview>,
+    ),
     DiscardReview,
 }
 
