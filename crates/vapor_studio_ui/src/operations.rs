@@ -8,7 +8,9 @@ use vapor_client_application::{
     OperationEvent, OperationId, OperationKind, OperationPhase, OperationStatus,
 };
 use vapor_client_protocol::{
-    ClientAction, OperationEvent as ServiceOperationEvent, OperationPhase as ServiceOperationPhase,
+    ClientAction, OperationEvent as ServiceOperationEvent,
+    OperationOutputEvent as ServiceOperationOutputEvent,
+    OperationOutputStream as ServiceOperationOutputStream, OperationPhase as ServiceOperationPhase,
     OperationStatus as ServiceOperationStatus, RequestId,
 };
 
@@ -19,7 +21,16 @@ pub(super) struct OperationState {
     pub(super) service_request_id: Option<RequestId>,
     pub(super) active_operation: Option<OperationEvent>,
     pub(super) operation_history: VecDeque<HistoricalOperation>,
+    pub(super) output_lines: VecDeque<OperationOutputLine>,
 }
+
+#[derive(Debug, Clone)]
+pub(super) struct OperationOutputLine {
+    pub(super) stream: ServiceOperationOutputStream,
+    pub(super) text: String,
+}
+
+const MAX_OPERATION_OUTPUT_LINES: usize = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct HistoricalOperation {
@@ -35,6 +46,23 @@ impl OperationState {
             return;
         };
         self.operation_history = history.into_iter().take(20).collect();
+    }
+
+    pub(super) fn apply_service_operation_output(&mut self, event: &ServiceOperationOutputEvent) {
+        if !self
+            .active_operation
+            .as_ref()
+            .is_some_and(|operation| operation.id.0.to_string() == event.id)
+        {
+            return;
+        }
+        if self.output_lines.len() == MAX_OPERATION_OUTPUT_LINES {
+            self.output_lines.pop_front();
+        }
+        self.output_lines.push_back(OperationOutputLine {
+            stream: event.stream,
+            text: event.text.clone(),
+        });
     }
 }
 
@@ -113,6 +141,7 @@ impl StudioApp {
             progress: None,
             status: OperationStatus::Running,
         });
+        self.operation.output_lines.clear();
         self.operation.running = true;
         self.operation.service_owned = true;
         self.operation.service_request_id = Some(request_id);

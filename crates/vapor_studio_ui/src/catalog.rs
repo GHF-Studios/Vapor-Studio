@@ -164,6 +164,9 @@ impl StudioApp {
                 ProtocolFrame::Event(ClientEvent::OperationChanged(event)) => {
                     self.apply_service_operation_event(&event);
                 }
+                ProtocolFrame::Event(ClientEvent::OperationOutput(event)) => {
+                    self.operation.apply_service_operation_output(&event);
+                }
                 ProtocolFrame::Event(ClientEvent::WorkspaceFileResult(result)) => {
                     self.apply_service_workspace_file_result(*result);
                 }
@@ -288,6 +291,9 @@ impl StudioApp {
                 }
                 ProtocolFrame::Event(ClientEvent::OperationChanged(event)) => {
                     self.apply_service_operation_event(&event);
+                }
+                ProtocolFrame::Event(ClientEvent::OperationOutput(event)) => {
+                    self.operation.apply_service_operation_output(&event);
                 }
                 ProtocolFrame::Event(ClientEvent::WorkspaceFileResult(result)) => {
                     self.apply_service_workspace_file_result(*result);

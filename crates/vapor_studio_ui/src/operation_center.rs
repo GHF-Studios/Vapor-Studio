@@ -58,6 +58,27 @@ impl StudioApp {
                     .on_hover_text(&self.status);
             }
         });
+        if !self.operation.output_lines.is_empty() {
+            ui.collapsing(
+                format!("Output · {} lines", self.operation.output_lines.len()),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            for line in &self.operation.output_lines {
+                                match line.stream {
+                                    vapor_client_protocol::OperationOutputStream::Stdout => {
+                                        ui.label(&line.text);
+                                    }
+                                    vapor_client_protocol::OperationOutputStream::Stderr => {
+                                        ui.colored_label(egui::Color32::LIGHT_RED, &line.text);
+                                    }
+                                }
+                            }
+                        });
+                },
+            );
+        }
     }
 }
 
