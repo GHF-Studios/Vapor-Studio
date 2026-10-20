@@ -41,6 +41,11 @@ impl StudioApp {
         }
         let selector = source_content_selector(content);
         self.workspace.last_package = None;
+        let operation_status = if dry_run {
+            format!("Building a package preview for {selector} through the Studio service…")
+        } else {
+            format!("Building and packaging {selector} through the Studio service…")
+        };
         self.start_service_operation(
             vapor_client_protocol::ClientAction::Authoring(
                 vapor_client_protocol::AuthoringAction::PackageContent {
@@ -51,11 +56,8 @@ impl StudioApp {
             ),
             None,
             OperationKind::PackageContent,
-            vapor_client_application::OperationPhase::Staging,
-            &format!(
-                "{} package for {selector} through the Studio service…",
-                if dry_run { "Previewing" } else { "Building" }
-            ),
+            vapor_client_application::OperationPhase::Building,
+            &operation_status,
         );
     }
 

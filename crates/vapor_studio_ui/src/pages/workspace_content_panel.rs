@@ -233,7 +233,7 @@ impl StudioApp {
                                     !self.operation.running && !self.has_unsaved_workspace_edits(),
                                     egui::Button::new("Build package"),
                                 )
-                                .on_hover_text("Build and stage a reusable package in this Vapor installation. This does not publish it.")
+                                .on_hover_text("Build this workspace, then stage a reusable package in this Vapor installation. This does not publish it.")
                                 .clicked()
                             {
                                 action = Some(SourceContentAction::Package(content.clone(), false));
@@ -300,7 +300,7 @@ impl StudioApp {
                                         egui::Button::new("Preview package"),
                                     )
                                     .on_hover_text(
-                                        "Validate and assemble a temporary package without keeping it in the Library.",
+                                        "Build this workspace and assemble a temporary package preview without keeping a staged copy.",
                                     )
                                     .clicked()
                                 {
@@ -454,7 +454,7 @@ impl StudioApp {
             if !result.dry_run {
                 ui.small("Package staged in this Vapor installation. This does not publish it.");
             } else {
-                ui.small("No package was kept. Build the package to stage it for sharing.");
+                ui.small("No package copy was kept. Build the package to stage a local copy.");
             }
         });
     }
