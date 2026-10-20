@@ -200,7 +200,7 @@ impl StudioApp {
             .count();
         ui.horizontal_wrapped(|ui| {
             ui.weak(format!(
-                "{matching_catalog_items} items available here · {matching_workspace_projects} project folders to add"
+                "{matching_catalog_items} content items · {matching_workspace_projects} project folders ready to add"
             ));
         });
         if matching_catalog_items == 0 && matching_workspace_projects == 0 {

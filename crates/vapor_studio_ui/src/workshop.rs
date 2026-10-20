@@ -412,7 +412,8 @@ impl StudioApp {
             return;
         }
         if self.workshop.preview.as_ref() != Some(&expected_review) {
-            self.status = "This staged review is no longer current. Stage the content again before publishing.".to_owned();
+            self.status =
+                "This upload review is out of date. Prepare it again before publishing.".to_owned();
             self.invalidate_workshop_review();
             return;
         }

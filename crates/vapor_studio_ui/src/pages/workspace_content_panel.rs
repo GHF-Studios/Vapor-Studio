@@ -206,7 +206,7 @@ impl StudioApp {
                                         if let Some(change_note) = &workshop.change_note {
                                             ui.small(format!("Default change note: {change_note}"));
                                         }
-                                        ui.weak("This is authored intent; staging performs the authoritative package and publication checks.");
+                                        ui.weak("These settings describe the package; its built files are checked before upload.");
                                     });
                                 } else {
                                     ui.small("Workshop publication: not configured");
@@ -484,7 +484,7 @@ impl StudioApp {
                 ));
             });
             if !dry_run {
-                ui.small("Package staged in this Vapor installation. This does not publish it.");
+                ui.small("Package built for this device. It has not been published.");
                 if workshop_selector.is_some() {
                     ui.horizontal_wrapped(|ui| {
                         ui.weak("Continue to sharing after reviewing the current saved source.");
@@ -508,7 +508,7 @@ impl StudioApp {
                     false
                 }
             } else {
-                ui.small("No package copy was kept. Build the package to stage a local copy.");
+                ui.small("Preview only; no package was saved.");
                 false
             }
         })
