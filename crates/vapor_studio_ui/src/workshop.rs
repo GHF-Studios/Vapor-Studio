@@ -219,7 +219,7 @@ impl StudioApp {
         self.open_discover_tab(super::catalog::DiscoverTab::Local);
     }
 
-    fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
+    pub(super) fn catalog_identity_is_conflicted(&self, selector: &str) -> bool {
         self.catalog.items.iter().any(|content| {
             super::catalog_content_selector_matches(content, selector) && !content.is_unambiguous()
         })

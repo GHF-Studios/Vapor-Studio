@@ -420,16 +420,26 @@ impl StudioApp {
         }
     }
 
-    fn draw_last_package_result(&self, ui: &mut egui::Ui) {
-        let Some(result) = self
+    fn draw_last_package_result(&mut self, ui: &mut egui::Ui) {
+        let Some((workspace_root, id, target, files, bytes, dry_run)) = self
             .workspace
             .last_package
             .as_ref()
             .filter(|result| result.workspace_root == Path::new(self.workspace.root.trim()))
+            .map(|result| {
+                (
+                    result.workspace_root.clone(),
+                    result.id.clone(),
+                    result.target.clone(),
+                    result.files,
+                    result.bytes,
+                    result.dry_run,
+                )
+            })
         else {
             return;
         };
-        let (title, color) = if result.dry_run {
+        let (title, color) = if dry_run {
             (
                 "Package preview complete",
                 egui::Color32::from_rgb(120, 190, 230),
@@ -440,23 +450,74 @@ impl StudioApp {
                 egui::Color32::from_rgb(130, 210, 150),
             )
         };
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        let workshop_selector = (!dry_run)
+            .then(|| {
+                self.catalog
+                    .sources
+                    .iter()
+                    .find(|content| {
+                        content.id == id
+                            && content.workshop.app_id.is_some()
+                            && content.root.starts_with(&workspace_root)
+                    })
+                    .map(super::super::source_content_selector)
+            })
+            .flatten();
+        let workshop_conflict = workshop_selector
+            .as_deref()
+            .is_some_and(|selector| self.catalog_identity_is_conflicted(selector));
+        let can_review_workshop = !self.operation.running
+            && !self.has_unsaved_workspace_edits()
+            && self.catalog.source_snapshot_current()
+            && self.catalog.local_catalog_current()
+            && !workshop_conflict;
+        let review_workshop = egui::Frame::group(ui.style())
+            .show(ui, |ui| {
             ui.colored_label(color, title);
             ui.horizontal_wrapped(|ui| {
-                ui.strong(&result.id);
+                ui.strong(&id);
                 ui.weak(format!(
                     "{} · {} files · {}",
-                    display_target(&result.target),
-                    result.files,
-                    format_bytes(result.bytes)
+                    display_target(&target),
+                    files,
+                    format_bytes(bytes)
                 ));
             });
-            if !result.dry_run {
+            if !dry_run {
                 ui.small("Package staged in this Vapor installation. This does not publish it.");
+                if workshop_selector.is_some() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.weak("Continue to sharing after reviewing the current saved source.");
+                        ui.add_enabled(can_review_workshop, egui::Button::new("Review Workshop upload"))
+                            .on_disabled_hover_text(if self.has_unsaved_workspace_edits() {
+                                "Save or discard project edits before preparing the review."
+                            } else if !self.catalog.source_snapshot_current()
+                                || !self.catalog.local_catalog_current()
+                            {
+                                "Refresh the project and on-device content lists before preparing the review."
+                            } else if workshop_conflict {
+                                "Resolve the conflicting on-device copies of this version first."
+                            } else {
+                                "Wait for the current operation to finish."
+                            })
+                            .on_hover_text("Rebuild and stage the latest saved source for a confirmation-bound Workshop review.")
+                            .clicked()
+                    })
+                    .inner
+                } else {
+                    false
+                }
             } else {
                 ui.small("No package copy was kept. Build the package to stage a local copy.");
+                false
             }
-        });
+        })
+            .inner;
+        if review_workshop && let Some(selector) = workshop_selector {
+            self.root_publishing.tab = super::super::root_publishing::PublishTab::WorkshopContent;
+            self.stage_workshop_content(selector);
+            self.activate_navigation_section(super::super::Section::Publish);
+        }
     }
 
     pub(super) fn draw_unregistered_projects_panel(&mut self, ui: &mut egui::Ui, query: &str) {
