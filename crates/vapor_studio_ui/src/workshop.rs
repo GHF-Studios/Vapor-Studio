@@ -426,7 +426,7 @@ impl StudioApp {
         let account = self.workshop.publisher_account.trim().to_owned();
         if account.is_empty() {
             self.status =
-                "Enter the Steam publisher account used by the local SteamCMD provider.".to_owned();
+                "Enter the Steam account authorized to publish this Workshop item.".to_owned();
             return;
         }
         let expected_confirmation = format!("PUBLISH {selector} TO {account}");

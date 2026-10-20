@@ -78,10 +78,9 @@ impl StudioApp {
             None,
             vapor_client_application::OperationKind::PublishRootDistribution,
             vapor_client_application::OperationPhase::Publishing,
-            "Uploading the service-reviewed Vapor root build through SteamCMD…",
+            "Uploading the reviewed Vapor release to Steam…",
         );
-        self.root_publishing.status =
-            "Uploading the service-reviewed Vapor root build through SteamCMD…".to_owned();
+        self.root_publishing.status = "Uploading the reviewed Vapor release to Steam…".to_owned();
         self.status = self.root_publishing.status.clone();
     }
 }

@@ -331,7 +331,7 @@ impl StudioApp {
                         ui.end_row();
                     });
             }
-            ui.weak("SteamCMD handles password and Steam Guard prompts locally. Leaving the branch empty keeps this upload from changing what players receive.");
+            ui.weak("Steam may ask for your password or Steam Guard code during upload. Leave the branch empty to keep the current live branch unchanged.");
             if settings_changed {
                 self.invalidate_root_publish_review();
             }
@@ -362,8 +362,10 @@ impl StudioApp {
                     preview.included_roots.len(),
                 ));
                 ui.label(format!("Account: {} · branch: {}", preview.account, preview.set_live.as_deref().unwrap_or("unchanged")));
-                ui.small(format!("SteamCMD: {}", preview.steamcmd));
-                ui.small(format!("Package output: {}", preview.package_root));
+                ui.collapsing("Advanced package details", |ui| {
+                    ui.small(format!("Upload command: {}", preview.steamcmd));
+                    ui.small(format!("Package location: {}", preview.package_root));
+                });
                 ui.collapsing("Included depot paths", |ui| {
                     for path in &preview.included_roots {
                         ui.small(path);
@@ -371,7 +373,7 @@ impl StudioApp {
                 });
                 if preview.planned {
                     let confirmation = root_publish_confirmation(preview.app_id, preview.set_live.as_deref());
-                    status_text(ui, "This sends the reviewed build to Steamworks. SteamCMD may prompt for your password or Steam Guard code.", StatusTone::Caution);
+                    status_text(ui, "This sends the reviewed build to Steam. Steam may ask for your password or Steam Guard code.", StatusTone::Caution);
                     if preview.set_live.is_some() {
                         status_text(ui, "The selected beta branch will be changed after upload.", StatusTone::Caution);
                     }
@@ -388,9 +390,9 @@ impl StudioApp {
                     }
                 } else if let Some(status) = preview.status.as_ref() {
                     if preview.succeeded {
-                        status_text(ui, "SteamCMD reported a successful upload.", StatusTone::Positive);
+                        status_text(ui, "Steam upload completed.", StatusTone::Positive);
                     } else {
-                        status_text(ui, &format!("SteamCMD exited with {status}."), StatusTone::Error);
+                        status_text(ui, &format!("Steam upload failed ({status})."), StatusTone::Error);
                     }
                 }
             }

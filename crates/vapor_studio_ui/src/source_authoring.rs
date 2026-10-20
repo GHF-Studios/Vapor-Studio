@@ -422,14 +422,14 @@ impl StudioApp {
     pub(super) fn save_source_runtime_outputs(&mut self) {
         if self.authoring.composition_has_unsaved_changes() {
             self.status =
-                "Save or discard dependency changes before saving runtime outputs.".to_owned();
+                "Save or discard dependency changes before saving built-file settings.".to_owned();
             return;
         }
         if !self.require_open_workspace_for_authoring_save("save runtime output declarations") {
             return;
         }
         let Some(outputs) = self.authoring.runtime_outputs_edit.clone() else {
-            self.status = "Load a source content project's runtime outputs first.".to_owned();
+            self.status = "Load this project's built-file settings first.".to_owned();
             return;
         };
         let parse_names = |text: &str| {

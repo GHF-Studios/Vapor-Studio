@@ -149,7 +149,7 @@ impl StudioApp {
                             ui.weak(content.version.as_deref().unwrap_or("project version"));
                         });
                         egui::CollapsingHeader::new(format!(
-                            "Project details · {} included items · {} runtime outputs",
+                            "Project details · {} dependencies · {} built files",
                             content.dependencies.len(),
                             content.binaries.len() + content.libraries.len(),
                         ))
@@ -163,7 +163,7 @@ impl StudioApp {
                                     if !content.libraries.is_empty() {
                                         outputs.push(format!("libraries: {}", content.libraries.join(", ")));
                                     }
-                                    ui.small(format!("Declared runtime outputs · {}", outputs.join(" · ")));
+                                    ui.small(format!("Built files · {}", outputs.join(" · ")));
                                 }
                                 if !content.dependencies.is_empty() {
                                     ui.small(format!("Includes: {}", content.dependencies.join(" · ")));
@@ -327,7 +327,7 @@ impl StudioApp {
                                 if ui
                                     .add_enabled(
                                         !self.operation.running && !self.has_unsaved_workspace_edits(),
-                                        egui::Button::new("Edit runtime outputs"),
+                                        egui::Button::new("Edit built files"),
                                     )
                                     .on_disabled_hover_text("Save or discard your open edits first; Studio reads the latest saved project details.")
                                     .clicked()

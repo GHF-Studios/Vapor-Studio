@@ -115,8 +115,8 @@ impl StudioApp {
         if let Some(outputs) = self.authoring.runtime_outputs_edit.as_ref() {
             ui.add_enabled_ui(!operation_running && !discard_pending, |ui| {
                 ui.group(|ui| {
-                ui.heading(format!("Runtime outputs · {}", outputs.id));
-                ui.label("Declare Cargo build outputs copied into the deployed artifact's bin/ and lib/ directories. Enter one file name per line; paths are not accepted.");
+                ui.heading(format!("Built files · {}", outputs.id));
+                ui.label("List the executable and library files this project builds. Enter one file name per line; paths are not accepted.");
                 if use_stacked_form(ui) {
                     ui.label("Executables");
                     let binaries_changed = ui
@@ -175,7 +175,7 @@ impl StudioApp {
                             && !discard_pending
                             && !self.workspace.editor.has_dirty_documents()
                             && self.authoring.manifest_metadata_dirty,
-                        egui::Button::new("Save runtime outputs"),
+                        egui::Button::new("Save built files"),
                     ).clicked() {
                         outputs_action = Some(RuntimeOutputsAction::Save);
                     }

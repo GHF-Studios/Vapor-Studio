@@ -53,7 +53,7 @@ impl StudioApp {
                 "Cleanup target changed"
             };
             let description = format!(
-                "Vapor removes disposable development/target folders for this workspace's projects. Source files, manifests, and installed game content are not touched. Reviewed workspace: {}{}",
+                "Remove generated build files for this project's Rust workspaces. Source files and installed game content are not touched. Reviewed project: {}{}",
                 clean_root.display(),
                 if target_matches {
                     String::new()
