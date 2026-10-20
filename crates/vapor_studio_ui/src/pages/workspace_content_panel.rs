@@ -179,11 +179,11 @@ impl StudioApp {
                                 {
                                     ui.collapsing("Workshop publication metadata", |ui| {
                                         if let Some(app_id) = workshop.app_id {
-                                            ui.small(format!("Steam AppID: {app_id}"));
+                                            ui.small(format!("Steam app: {app_id}"));
                                         } else {
                                             status_text(
                                                 ui,
-                                                "Steam AppID not configured",
+                                                "Steam app not configured",
                                                 StatusTone::Caution,
                                             );
                                         }
@@ -500,7 +500,7 @@ impl StudioApp {
                             } else {
                                 "Wait for the current operation to finish."
                             })
-                            .on_hover_text("Rebuild and stage the latest saved source for a confirmation-bound Workshop review.")
+                            .on_hover_text("Build the latest saved project and prepare a Workshop review before uploading.")
                             .clicked()
                     })
                     .inner
@@ -624,7 +624,7 @@ impl StudioApp {
     }
 }
 
-fn format_bytes(bytes: u64) -> String {
+pub(super) fn format_bytes(bytes: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = KIB * 1024;
     if bytes >= MIB {
@@ -636,7 +636,7 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn display_target(target: &str) -> String {
+pub(super) fn display_target(target: &str) -> String {
     target
         .split(',')
         .map(|target| {

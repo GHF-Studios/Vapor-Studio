@@ -389,7 +389,7 @@ impl StudioApp {
             None,
             OperationKind::StageWorkshop,
             vapor_client_application::OperationPhase::Staging,
-            "Building and staging a Workshop review package…",
+            "Building the project and preparing its Workshop upload review…",
         );
     }
 
@@ -417,7 +417,9 @@ impl StudioApp {
             return;
         }
         let Some(review_id) = self.workshop.service_review_id.clone() else {
-            self.status = "Studio no longer holds this Workshop review. Stage the content again before publishing.".to_owned();
+            self.status =
+                "This Workshop review has expired. Prepare a new review before publishing."
+                    .to_owned();
             self.invalidate_workshop_review();
             return;
         };
@@ -659,7 +661,7 @@ impl StudioApp {
         let mut normalized_ids = Vec::new();
         for id in ids {
             let Some(parsed) = id.parse::<u64>().ok().filter(|id| *id != 0) else {
-                self.status = format!("Invalid Steam PublishedFileId: {id}");
+                self.status = format!("Invalid Steam Workshop item ID: {id}");
                 return;
             };
             if unique.insert(parsed) {

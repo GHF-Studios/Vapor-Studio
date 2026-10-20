@@ -519,7 +519,7 @@ impl StudioApp {
             value => match value.parse::<u32>() {
                 Ok(value) if value > 0 => Some(value),
                 _ => {
-                    self.status = "Steam AppID must be a positive number.".to_owned();
+                    self.status = "Steam app ID must be a positive number.".to_owned();
                     return;
                 }
             },

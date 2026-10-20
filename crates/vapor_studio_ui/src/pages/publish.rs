@@ -1,6 +1,7 @@
 use super::super::StudioApp;
 use super::super::components::design::{StatusTone, page_header, status_text, use_stacked_form};
 use super::super::root_publishing::{PublishTab, root_publish_confirmation};
+use super::workspace_content_panel::{display_target, format_bytes};
 use eframe::egui;
 
 enum WorkshopPublishAction {
@@ -45,18 +46,24 @@ impl StudioApp {
             let mut action = None;
             ui.group(|ui| {
             ui.heading("Publish a Workshop item");
-            ui.label("Stage an authored item from Discover. The staged review remains available here while you inspect its identity, files, dependencies, and target.");
+            ui.label("Prepare an upload from a project you own. Review its identity, included files, dependencies, and platforms here; nothing is sent until you confirm.");
             let Some(preview) = self.workshop.preview.as_ref() else {
-                ui.weak("No Workshop artifact is staged for review.");
+                ui.weak("No Workshop upload is ready for review.");
                 if ui
                     .add_enabled(
                         !self.operation.running && !self.has_unsaved_workspace_edits(),
-                        egui::Button::new("Find content to stage"),
+                        egui::Button::new("Find a project to share"),
                     )
                     .clicked()
                 {
-                    self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
-                    self.discover();
+                    if self.workspace.root.trim().is_empty() {
+                        self.activate_navigation_section(super::super::Section::Workspace);
+                        self.status =
+                            "Open a project folder before preparing a Workshop upload.".to_owned();
+                    } else {
+                        self.open_discover_tab(super::super::catalog::DiscoverTab::Local);
+                        self.discover();
+                    }
                 }
                 return;
             };
@@ -82,36 +89,41 @@ impl StudioApp {
             ui.separator();
             ui.strong(&identity);
             ui.label(format!(
-                "Title: {} · AppID: {} · visibility: {}",
+                "Title: {} · visibility: {}",
                 preview.title.as_deref().unwrap_or(&preview.id),
-                preview.app_id.map_or_else(|| "missing".to_owned(), |id| id.to_string()),
                 preview.visibility.as_deref().unwrap_or("not set"),
             ));
             ui.label(format!(
-                "PublishedFileId: {} · target: {}",
-                preview.published_file_id.as_deref().unwrap_or("new item"),
-                preview.target,
+                "Available for {}",
+                display_target(&preview.target),
             ));
-            ui.label(format!(
-                "{} files · {} bytes · payload {}",
-                preview.files,
-                preview.bytes,
-                preview.root.display(),
-            ));
+            ui.label(format!("{} files · {}", preview.files, format_bytes(preview.bytes)));
 
-            ui.collapsing("Staged files", |ui| {
+            ui.collapsing("Files included", |ui| {
                 for path in preview.file_paths.iter().take(50) {
                     ui.small(path);
                 }
                 if self.workshop.omitted_review_file_paths > 0 {
                     ui.weak(format!(
-                        "Showing {} paths · {} more files are included in the staged artifact.",
+                        "Showing {} of {} included files.",
                         preview.file_paths.len(),
-                        self.workshop.omitted_review_file_paths
+                        preview.files,
                     ));
                 } else if preview.file_paths.len() > 50 {
                     ui.weak(format!("{} more files", preview.file_paths.len() - 50));
                 }
+            });
+            ui.collapsing("Workshop details", |ui| {
+                ui.label(format!(
+                    "Steam app: {}",
+                    preview.app_id.map_or_else(|| "not set".to_owned(), |id| id.to_string())
+                ));
+                if let Some(published_file_id) = preview.published_file_id.as_deref() {
+                    ui.label(format!("Workshop item: {published_file_id}"));
+                } else {
+                    ui.label("This will create a new Workshop item.");
+                }
+                ui.label(format!("Build target: {}", preview.target));
             });
             if preview.dependencies.is_empty() {
                 ui.weak("No declared dependencies.");
@@ -125,7 +137,7 @@ impl StudioApp {
             if !local_source {
                 status_text(
                     ui,
-                    "The authored source is no longer available in the active workspace. Restage it from Discover.",
+                    "Open the project folder where this item is authored, then prepare a new review.",
                     StatusTone::Caution,
                 );
             }
@@ -205,7 +217,7 @@ impl StudioApp {
                     } else if !catalog_snapshot_current {
                         "Refresh the on-device content list before publishing; Studio cannot check for conflicts using out-of-date information."
                     } else if !local_source {
-                        "The authored version is no longer in the project list available to Studio. Restage it first."
+                        "Open the project folder where this item is authored, then prepare a new review."
                     } else if conflicted {
                         "Review and fix the conflicting on-device copies before publishing."
                     } else if self.has_unsaved_workspace_edits() {
@@ -240,7 +252,7 @@ impl StudioApp {
             ui.heading("Publish a Vapor app build");
             ui.label("This publishes a Vapor release build to the Steam app and depot selected for this installation.");
             ui.label(format!(
-                "Steam AppID {} · DepotID {}",
+                "Steam app {} · depot {}",
                 self.root_publishing.identity.app_id,
                 self.root_publishing.identity.depot_id,
             ));

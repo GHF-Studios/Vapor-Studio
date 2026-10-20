@@ -413,7 +413,7 @@ impl StudioApp {
                         && workspace_manifest_saved
                         && self.catalog.source_snapshot_current()
                         && self.catalog.local_catalog_current(),
-                    egui::Button::new("Stage Workshop review"),
+                    egui::Button::new("Prepare Workshop upload"),
                 )
                 .on_disabled_hover_text(if !self.catalog.source_snapshot_current() {
                     "Refresh the project and content lists before preparing this upload. The saved lists are out of date."

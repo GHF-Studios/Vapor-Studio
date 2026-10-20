@@ -31,9 +31,9 @@ impl StudioApp {
                 ui.label("Edit the details for a future Workshop upload. Saving here does not publish or upload anything.");
                 let mut changed = false;
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Steam AppID");
+                    ui.label("Steam app");
                     changed |= ui.text_edit_singleline(&mut self.authoring.workshop_metadata_app_id).changed();
-                    ui.label("PublishedFileId");
+                    ui.label("Workshop item ID");
                     changed |= ui.text_edit_singleline(&mut self.authoring.workshop_metadata_published_file_id).changed();
                 });
                 ui.horizontal_wrapped(|ui| {

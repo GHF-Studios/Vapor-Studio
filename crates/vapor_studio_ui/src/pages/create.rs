@@ -735,10 +735,10 @@ impl StudioApp {
             .show(ui, |ui| {
                 ui.label("These optional settings prepare a future Workshop upload. Creating a project does not publish it.");
                 if use_stacked_form(ui) {
-                    ui.label("Steam AppID");
+                    ui.label("Steam app");
                     ui.add(egui::TextEdit::singleline(&mut self.authoring.create.workshop_app_id)
                         .desired_width(ui.available_width()));
-                    ui.label("PublishedFileId");
+                    ui.label("Workshop item ID");
                     ui.add(egui::TextEdit::singleline(&mut self.authoring.create.workshop_published_file_id)
                         .desired_width(ui.available_width()));
                 } else {
@@ -746,10 +746,10 @@ impl StudioApp {
                         .num_columns(2)
                         .spacing([12.0, 8.0])
                         .show(ui, |ui| {
-                            ui.label("Steam AppID");
+                            ui.label("Steam app");
                             ui.add(egui::TextEdit::singleline(&mut self.authoring.create.workshop_app_id).desired_width(180.0));
                             ui.end_row();
-                            ui.label("PublishedFileId");
+                            ui.label("Workshop item ID");
                             ui.add(egui::TextEdit::singleline(&mut self.authoring.create.workshop_published_file_id).desired_width(320.0));
                             ui.end_row();
                         });
