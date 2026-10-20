@@ -64,17 +64,37 @@ impl StudioApp {
             );
         }
         if !self.workshop.subscriptions_loaded {
+            let loading = self
+                .operation
+                .active_operation
+                .as_ref()
+                .is_some_and(|operation| {
+                    operation.kind
+                        == vapor_client_application::OperationKind::LoadWorkshopSubscriptions
+                });
             empty_state(
                 ui,
-                "Subscriptions have not been loaded",
-                "Connect to Steam to review the items you follow and add them to your Library.",
-                |_| {},
+                if loading {
+                    "Checking your subscriptions…"
+                } else {
+                    "Your subscriptions will appear here"
+                },
+                if loading {
+                    "Loading the items you follow on Steam Workshop."
+                } else {
+                    "Load your Steam subscriptions to see the items you follow."
+                },
+                |ui| {
+                    if loading {
+                        ui.spinner();
+                    }
+                },
             );
         } else if self.workshop.subscriptions.is_empty() {
             let mut browse_workshop = false;
             empty_state(
                 ui,
-                "No Vapor Workshop subscriptions",
+                "No Workshop subscriptions yet",
                 "Items you subscribe to in Steam Workshop will appear here.",
                 |ui| {
                     browse_workshop = ui.button("Browse Steam Workshop").clicked();
@@ -443,7 +463,9 @@ impl StudioApp {
                                     ui.label(&item.description);
                                 });
                             }
-                            ui.small(format!("Workshop item ID · {id}"));
+                            ui.collapsing("Workshop details", |ui| {
+                                ui.small(format!("Workshop item ID · {id}"));
+                            });
                             if let Some(url) = details.and_then(|item| item.preview_url.as_ref()) {
                                 ui.hyperlink_to("Open Workshop item", url);
                             }

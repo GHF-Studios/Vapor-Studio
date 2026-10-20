@@ -285,7 +285,7 @@ impl StudioApp {
                         "Last known as not subscribed through Steam · refresh status"
                     }
                 } else if !self.workshop.subscriptions_loaded {
-                    "Steam subscription status has not been loaded."
+                    "Subscription status has not been checked yet."
                 } else if subscribed {
                     "Subscribed through Steam"
                 } else {
