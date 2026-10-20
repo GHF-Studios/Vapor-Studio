@@ -1,5 +1,6 @@
 use super::super::components::design::{
-    StatusTone, installation_status, page_header, primary_button, status_text,
+    StatusTone, installation_status, page_header, primary_button, primary_button_enabled,
+    status_text,
 };
 use super::super::workshop::WorkshopTab;
 use super::super::workspace_ops::WorkspacePanel;
@@ -12,38 +13,72 @@ struct HomeCompositionSummary {
     root_package: Option<vapor_client_application::ContentReference>,
     installation_status_text: &'static str,
     installation_tone: super::super::components::design::StatusTone,
-    play_blocked_by_out_of_date: bool,
-    has_workspace_source: bool,
-    needs_review: bool,
+    workspace_source_path: Option<std::path::PathBuf>,
+    primary_action: HomePrimaryAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HomePrimaryAction {
+    Install,
+    OpenProject,
+    BuildAndLaunch,
+    Launch,
+    ReviewUpdate,
+    ReviewRepair,
+}
+
+fn home_primary_action(
+    installation: &InstallationState,
+    can_build_from_source: bool,
+    source_workspace_is_open: bool,
+) -> HomePrimaryAction {
+    match installation {
+        InstallationState::Installed { .. } => HomePrimaryAction::Launch,
+        InstallationState::OutOfDate { .. } => HomePrimaryAction::ReviewUpdate,
+        InstallationState::Partial { .. } | InstallationState::NeedsRepair { .. } => {
+            HomePrimaryAction::ReviewRepair
+        }
+        InstallationState::Unknown | InstallationState::NotInstalled
+            if can_build_from_source && source_workspace_is_open =>
+        {
+            HomePrimaryAction::BuildAndLaunch
+        }
+        InstallationState::Unknown | InstallationState::NotInstalled if can_build_from_source => {
+            HomePrimaryAction::OpenProject
+        }
+        InstallationState::Unknown | InstallationState::NotInstalled => HomePrimaryAction::Install,
+    }
 }
 impl StudioApp {
     pub(in crate::app) fn draw_home(&mut self, ui: &mut egui::Ui) {
         let composition = {
             let composition = &self.composition.items[self.composition.active_index];
             let (status, tone) = installation_status(&composition.installation);
+            let can_build_from_source = self.composition_root_is_workspace_source(composition)
+                && composition.workspace.is_some();
+            let workspace_source_path = composition
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root.clone());
+            let workspace_source_is_open = self.composition_workspace_root_is_open(composition);
             HomeCompositionSummary {
                 name: composition.name.clone(),
                 root_package: composition.root_package.clone(),
                 installation_status_text: status,
                 installation_tone: tone,
-                play_blocked_by_out_of_date: matches!(
+                workspace_source_path,
+                primary_action: home_primary_action(
                     &composition.installation,
-                    InstallationState::OutOfDate { .. }
-                ),
-                has_workspace_source: composition.workspace.is_some(),
-                needs_review: matches!(
-                    &composition.installation,
-                    InstallationState::OutOfDate { .. }
-                        | InstallationState::Partial { .. }
-                        | InstallationState::NeedsRepair { .. }
+                    can_build_from_source,
+                    workspace_source_is_open,
                 ),
             }
         };
         page_header(
             ui,
             "Play",
-            "Choose a composition and launch",
-            "Launch a complete setup, find more content, or create your own composition.",
+            "Install or launch a composition",
+            "Start a complete setup, discover more content, or create your own.",
         );
         ui.add_space(8.0);
         let card_style = ui.style().clone();
@@ -96,45 +131,72 @@ impl StudioApp {
                 composition.installation_status_text,
                 composition.installation_tone,
             );
-            let can_play = !self.operation.running
-                && self
-                    .service_action_enabled("composition.launch")
-                    .unwrap_or(!composition.play_blocked_by_out_of_date);
-            let mut play_clicked = false;
-            ui.add_enabled_ui(can_play, |ui| {
-                play_clicked = primary_button(ui, "Launch").clicked();
-            })
-            .response
-            .on_disabled_hover_text(if self.operation.running {
-                "Wait for the current operation to finish before launching."
+            let service_connected = self.service.is_some();
+            let (label, enabled) = match composition.primary_action {
+                HomePrimaryAction::Install => (
+                    "Install composition",
+                    service_connected
+                        && !self.operation.running
+                        && !self.has_unsaved_workspace_edits(),
+                ),
+                HomePrimaryAction::OpenProject => (
+                    "Open project to build and launch",
+                    service_connected
+                        && !self.operation.running
+                        && !self.has_unsaved_context_switch_edits(),
+                ),
+                HomePrimaryAction::BuildAndLaunch => (
+                    "Build and launch project",
+                    service_connected
+                        && !self.operation.running
+                        && self
+                            .service_action_enabled("composition.build-and-launch")
+                            .unwrap_or(true)
+                        && !self.has_unsaved_workspace_edits(),
+                ),
+                HomePrimaryAction::Launch => (
+                    "Launch",
+                    service_connected
+                        && !self.operation.running
+                        && self
+                            .service_action_enabled("composition.launch")
+                            .unwrap_or(true),
+                ),
+                HomePrimaryAction::ReviewUpdate => ("Review update", true),
+                HomePrimaryAction::ReviewRepair => ("Review or repair composition", true),
+            };
+            let disabled_reason = if self.service.is_none() {
+                "Reconnect to Vapor before starting this action."
+            } else if self.operation.running {
+                "Wait for the current operation to finish."
+            } else if self.has_unsaved_context_switch_edits() {
+                "Save or discard current project or composition edits before continuing."
             } else {
-                "The installed content differs from this composition. Review or update it before launching."
-            });
-            if play_clicked {
-                self.run_installed_selected();
+                "Review this composition before continuing."
+            };
+            if primary_button_enabled(ui, label, enabled)
+                .on_disabled_hover_text(disabled_reason)
+                .clicked()
+            {
+                match composition.primary_action {
+                    HomePrimaryAction::Install => self.install_selected(),
+                    HomePrimaryAction::OpenProject => {
+                        if let Some(path) = composition.workspace_source_path.as_ref() {
+                            self.open_workspace_path_to(path.clone(), Section::Home);
+                        }
+                    }
+                    HomePrimaryAction::BuildAndLaunch => self.run_selected(),
+                    HomePrimaryAction::Launch => self.run_installed_selected(),
+                    HomePrimaryAction::ReviewUpdate | HomePrimaryAction::ReviewRepair => {
+                        self.activate_navigation_section(Section::Compositions);
+                    }
+                }
             }
             ui.horizontal_wrapped(|ui| {
-                if composition.has_workspace_source
-                    && ui
-                        .add_enabled(
-                            !self.operation.running
-                                && self
-                                    .service_action_enabled("composition.build-and-launch")
-                                    .unwrap_or(true)
-                                && !self.has_unsaved_workspace_edits(),
-                            egui::Button::new("Build and launch project"),
-                        )
-                        .on_disabled_hover_text(
-                            "Save or discard project edits before building and launching the current files.",
-                        )
-                        .clicked()
+                if ui
+                    .small_button("Find more content on Steam Workshop")
+                    .clicked()
                 {
-                    self.run_selected();
-                }
-                if composition.needs_review && ui.button("Review or repair this composition").clicked() {
-                    self.activate_navigation_section(Section::Compositions);
-                }
-                if ui.small_button("Find more content on Steam Workshop").clicked() {
                     self.open_workshop_tab(WorkshopTab::Browse);
                 }
             });
@@ -292,5 +354,106 @@ impl StudioApp {
                 }
             });
         }
+    }
+}
+#[cfg(test)]
+mod home_primary_action_tests {
+    use super::{HomePrimaryAction, home_primary_action};
+    use vapor_client_application::InstallationState;
+
+    #[test]
+    fn uninstalled_composition_offers_install_or_project_build() {
+        assert_eq!(
+            home_primary_action(&InstallationState::NotInstalled, false, false),
+            HomePrimaryAction::Install
+        );
+        assert_eq!(
+            home_primary_action(&InstallationState::NotInstalled, true, false),
+            HomePrimaryAction::OpenProject
+        );
+        assert_eq!(
+            home_primary_action(&InstallationState::NotInstalled, true, true),
+            HomePrimaryAction::BuildAndLaunch
+        );
+        assert_eq!(
+            home_primary_action(&InstallationState::NotInstalled, false, true),
+            HomePrimaryAction::Install
+        );
+    }
+
+    #[test]
+    fn incomplete_or_stale_compositions_route_to_review() {
+        assert_eq!(
+            home_primary_action(
+                &InstallationState::Partial {
+                    detail: "partial".into()
+                },
+                false,
+                false,
+            ),
+            HomePrimaryAction::ReviewRepair
+        );
+        assert_eq!(
+            home_primary_action(
+                &InstallationState::NeedsRepair {
+                    detail: "repair".into(),
+                    artifacts: Vec::new(),
+                },
+                false,
+                false,
+            ),
+            HomePrimaryAction::ReviewRepair
+        );
+        assert_eq!(
+            home_primary_action(
+                &InstallationState::OutOfDate {
+                    detail: "changed".into(),
+                    actual_graph: vapor_client_application::ResolvedCompositionGraph {
+                        root: vapor_client_application::ContentReference {
+                            id: "game.pack".into(),
+                            version: Some("1.0.0".into()),
+                        },
+                        effective_engine: vapor_client_application::ContentReference {
+                            id: "engine.pack".into(),
+                            version: Some("1.0.0".into()),
+                        },
+                        effective_game: None,
+                        nodes: Vec::new(),
+                    },
+                    artifacts: Vec::new(),
+                    verified: true,
+                },
+                false,
+                false,
+            ),
+            HomePrimaryAction::ReviewUpdate
+        );
+    }
+
+    #[test]
+    fn installed_and_unchecked_compositions_offer_state_appropriate_actions() {
+        assert_eq!(
+            home_primary_action(
+                &InstallationState::Installed {
+                    artifacts: Vec::new(),
+                    graph_fingerprint: None,
+                },
+                false,
+                false,
+            ),
+            HomePrimaryAction::Launch
+        );
+        assert_eq!(
+            home_primary_action(&InstallationState::Unknown, false, false),
+            HomePrimaryAction::Install
+        );
+        assert_eq!(
+            home_primary_action(&InstallationState::Unknown, true, false),
+            HomePrimaryAction::OpenProject
+        );
+        assert_eq!(
+            home_primary_action(&InstallationState::Unknown, true, true),
+            HomePrimaryAction::BuildAndLaunch
+        );
     }
 }

@@ -6,7 +6,7 @@ use vapor_client_application::{
     ContentReference, InstallationState, ResolvedCompositionGraph, ResolvedNodeIdentity,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CompositionInstallationAction {
     Play,
     Repair,
@@ -14,11 +14,28 @@ pub(super) enum CompositionInstallationAction {
     Update,
     ReviewPlan,
     BuildAndPlay,
+    OpenProject,
     Install,
     ValidateSource,
     VerifyInstalled,
     AdoptInstalledGraph,
     DiscoverContent,
+}
+
+fn workspace_primary_action(
+    root_is_workspace_source: bool,
+    has_workspace: bool,
+    workspace_is_open: bool,
+) -> CompositionInstallationAction {
+    if root_is_workspace_source && has_workspace {
+        if workspace_is_open {
+            CompositionInstallationAction::BuildAndPlay
+        } else {
+            CompositionInstallationAction::OpenProject
+        }
+    } else {
+        CompositionInstallationAction::Install
+    }
 }
 
 fn identity_label(
@@ -128,6 +145,35 @@ fn graph_difference_lines(
 }
 
 impl StudioApp {
+    pub(super) fn composition_root_is_workspace_source(
+        &self,
+        composition: &vapor_client_application::Composition,
+    ) -> bool {
+        composition.root_package.as_ref().is_some_and(|root| {
+            let selected_preview = self.composition_preview.preview().filter(|preview| {
+                preview.selector == super::super::catalog::content_selector(root)
+            });
+            selected_preview
+                .and_then(|preview| preview.nodes.iter().find(|node| node.id == root.id))
+                .is_some_and(|node| {
+                    node.source == vapor_client_application::CompositionPreviewSource::Workspace
+                })
+                || self.catalog.sources.iter().any(|content| {
+                    content.id == root.id
+                        && content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str()
+                })
+        })
+    }
+
+    pub(super) fn composition_workspace_root_is_open(
+        &self,
+        composition: &vapor_client_application::Composition,
+    ) -> bool {
+        composition.workspace.as_ref().is_some_and(|workspace| {
+            std::path::Path::new(self.workspace.root.trim()) == workspace.root
+        })
+    }
+
     pub(super) fn draw_composition_installation_panel(
         &self,
         ui: &mut eframe::egui::Ui,
@@ -158,14 +204,7 @@ impl StudioApp {
             })
         });
         let root_installed = root_plan_node.is_some_and(|node| node.already_installed);
-        let root_is_workspace_source = composition.root_package.as_ref().is_some_and(|root| {
-            root_plan_node.is_some_and(|node| {
-                node.source == vapor_client_application::CompositionPreviewSource::Workspace
-            }) || self.catalog.sources.iter().any(|content| {
-                content.id == root.id
-                    && content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str()
-            })
-        });
+        let root_is_workspace_source = self.composition_root_is_workspace_source(composition);
         let installed = matches!(
             &composition.installation,
             InstallationState::Installed { .. }
@@ -193,35 +232,52 @@ impl StudioApp {
                 }
             } else if installed {
                 ("Launch", CompositionInstallationAction::Play)
-            } else if root_is_workspace_source && has_source {
-                (
-                    "Build and launch project",
-                    CompositionInstallationAction::BuildAndPlay,
-                )
             } else {
-                (
-                    "Install composition",
-                    CompositionInstallationAction::Install,
-                )
+                match workspace_primary_action(
+                    root_is_workspace_source,
+                    has_source,
+                    self.composition_workspace_root_is_open(composition),
+                ) {
+                    CompositionInstallationAction::BuildAndPlay => (
+                        "Build and launch project",
+                        CompositionInstallationAction::BuildAndPlay,
+                    ),
+                    CompositionInstallationAction::OpenProject => (
+                        "Open project to build and launch",
+                        CompositionInstallationAction::OpenProject,
+                    ),
+                    _ => (
+                        "Install composition",
+                        CompositionInstallationAction::Install,
+                    ),
+                }
             };
             let needs_saved_project = match action {
                 CompositionInstallationAction::Play | CompositionInstallationAction::Verify => {
                     root_is_workspace_source
                 }
-                CompositionInstallationAction::VerifyInstalled
+                CompositionInstallationAction::OpenProject
+                | CompositionInstallationAction::VerifyInstalled
                 | CompositionInstallationAction::AdoptInstalledGraph
                 | CompositionInstallationAction::ValidateSource
                 | CompositionInstallationAction::DiscoverContent => false,
                 _ => true,
             };
             let project_is_dirty = needs_saved_project && self.has_unsaved_workspace_edits();
+            let context_is_dirty = action == CompositionInstallationAction::OpenProject
+                && self.has_unsaved_context_switch_edits();
             let mut clicked = false;
-            ui.add_enabled_ui(!self.operation.running && !project_is_dirty, |ui| {
-                clicked = super::super::components::design::primary_button(ui, label).clicked();
-            })
+            ui.add_enabled_ui(
+                !self.operation.running && !project_is_dirty && !context_is_dirty,
+                |ui| {
+                    clicked = super::super::components::design::primary_button(ui, label).clicked();
+                },
+            )
             .response
             .on_disabled_hover_text(if self.operation.running {
                 "Wait for the current operation to finish."
+            } else if context_is_dirty {
+                "Save or discard the open project or composition edits before switching projects."
             } else {
                 "Save or discard project edits before changing or running this setup."
             });
@@ -418,7 +474,7 @@ impl StudioApp {
 
 #[cfg(test)]
 mod graph_difference_tests {
-    use super::graph_difference_lines;
+    use super::{CompositionInstallationAction, graph_difference_lines, workspace_primary_action};
     use vapor_client_application::{
         ContentReference, ResolvedCompositionGraph, ResolvedDependencyIdentity,
         ResolvedNodeIdentity,
@@ -474,6 +530,26 @@ mod graph_difference_tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn project_build_requires_the_selected_source_workspace_to_be_open() {
+        assert_eq!(
+            workspace_primary_action(true, true, true),
+            CompositionInstallationAction::BuildAndPlay
+        );
+        assert_eq!(
+            workspace_primary_action(true, true, false),
+            CompositionInstallationAction::OpenProject
+        );
+        assert_eq!(
+            workspace_primary_action(false, true, true),
+            CompositionInstallationAction::Install
+        );
+        assert_eq!(
+            workspace_primary_action(true, false, true),
+            CompositionInstallationAction::Install
+        );
     }
 
     #[test]

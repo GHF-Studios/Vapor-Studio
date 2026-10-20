@@ -182,11 +182,22 @@ fn status_color(tone: StatusTone) -> egui::Color32 {
 
 /// A single, wide call to action for the most likely next step on a screen.
 pub(crate) fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    primary_button_enabled(ui, label, true)
+}
+
+pub(crate) fn primary_button_enabled(
+    ui: &mut egui::Ui,
+    label: &str,
+    enabled: bool,
+) -> egui::Response {
     let width = ui.available_width().clamp(1.0, 360.0);
-    ui.add_sized(
-        [width, 38.0],
-        egui::Button::new(egui::RichText::new(label).strong()).fill(ACCENT_FILL),
-    )
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.add_sized(
+            [width, 38.0],
+            egui::Button::new(egui::RichText::new(label).strong()).fill(ACCENT_FILL),
+        )
+    })
+    .inner
 }
 
 #[derive(Clone, Copy)]

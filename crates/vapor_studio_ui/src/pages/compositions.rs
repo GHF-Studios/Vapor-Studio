@@ -141,6 +141,15 @@ impl StudioApp {
                     self.preview_selected_composition();
                 }
                 CompositionInstallationAction::BuildAndPlay => self.run_selected(),
+                CompositionInstallationAction::OpenProject => {
+                    if let Some(path) = self.composition.items[composition_index]
+                        .workspace
+                        .as_ref()
+                        .map(|workspace| workspace.root.clone())
+                    {
+                        self.open_workspace_path_to(path, super::super::Section::Compositions);
+                    }
+                }
                 CompositionInstallationAction::Install => {
                     self.install_selected();
                 }
