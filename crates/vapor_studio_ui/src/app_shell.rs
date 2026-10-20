@@ -372,6 +372,17 @@ impl StudioApp {
                 ui.spinner();
                 ui.label("Working…");
             }
+            if self.service_connection_attempt.is_some() {
+                ui.separator();
+                ui.spinner();
+                ui.label("Reconnecting to Vapor…");
+            } else if self.service.is_none() {
+                ui.separator();
+                status_text(ui, "Vapor unavailable", StatusTone::Caution);
+                if ui.small_button("Reconnect").clicked() {
+                    self.reconnect_service_in_background();
+                }
+            }
         });
     }
 }
@@ -502,7 +513,7 @@ impl eframe::App for StudioApp {
             }
         }
         self.draw_command_palette(ui);
-        if self.operation.running {
+        if self.operation.running || self.service_connection_attempt.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         } else if self

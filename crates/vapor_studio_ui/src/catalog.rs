@@ -217,6 +217,7 @@ impl StudioApp {
     }
 
     pub(super) fn poll_service(&mut self) {
+        self.poll_service_connection();
         let mut frames = Vec::new();
         let mut disconnected = None;
         if let Some(service) = self.service.as_mut() {
@@ -314,16 +315,22 @@ impl StudioApp {
             }
         }
         if let Some(error) = disconnected {
-            let message = format!("Studio service disconnected: {error}");
-            if self.operation.service_owned {
+            eprintln!("[vapor-studio] shared connection ended: {error}");
+            let operation_was_running = self.operation.service_owned;
+            if operation_was_running {
                 self.operation.running = false;
                 self.operation.service_owned = false;
                 self.operation.service_request_id = None;
                 self.operation.active_operation = None;
+                self.status =
+                    "Connection interrupted. Check whether the last action completed before retrying."
+                        .to_owned();
             }
-            self.catalog.catalog_discovery_error = Some(message.clone());
-            self.service_error = Some(message);
+            self.catalog.catalog_discovery_error =
+                Some("Connection lost. Studio is trying to reconnect.".to_owned());
+            self.service_error = Some("Vapor is reconnecting.".to_owned());
             self.service = None;
+            self.reconnect_service_in_background();
         }
     }
 

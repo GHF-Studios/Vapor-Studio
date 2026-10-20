@@ -51,7 +51,11 @@ use eframe::egui;
 use operations::OperationState;
 use root_publishing::RootPublishingState;
 use source_authoring::AuthoringState;
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, TryRecvError},
+    thread,
+};
 use vapor_client::{Client, ClientHostConfig, service_sibling_path};
 use vapor_client_application::decode_compositions;
 use vapor_client_protocol::{ClientAction, LegacyStorageSeed};
@@ -71,6 +75,8 @@ pub struct StudioApp {
     operation: OperationState,
     service: Option<Client>,
     service_error: Option<String>,
+    service_connection_config: Option<(PathBuf, ClientHostConfig)>,
+    service_connection_attempt: Option<Receiver<Result<Client, String>>>,
     diagnostics: vapor_devtools::app::DevtoolsApp,
     directory_picker: Option<DirectoryPicker>,
     command_palette_open: bool,
@@ -209,6 +215,8 @@ impl StudioApp {
             operation,
             service: None,
             service_error: None,
+            service_connection_config: None,
+            service_connection_attempt: None,
             diagnostics: vapor_devtools::app::DevtoolsApp::new(),
             directory_picker: None,
             command_palette_open: false,
@@ -266,18 +274,17 @@ impl StudioApp {
             }
         };
         let service_path = service_sibling_path(&executable);
-        match Client::connect_or_start(
-            &service_path,
-            ClientHostConfig {
-                application_executable: executable,
-                workshop_app_id: None,
-                workspace_root,
-                active_composition_id,
-                fixture_mode: false,
-                legacy_storage,
-                state_directory: None,
-            },
-        ) {
+        let bootstrap = ClientHostConfig {
+            application_executable: executable,
+            workshop_app_id: None,
+            workspace_root,
+            active_composition_id,
+            fixture_mode: false,
+            legacy_storage,
+            state_directory: None,
+        };
+        self.service_connection_config = Some((service_path.clone(), bootstrap.clone()));
+        match Client::connect_or_start(&service_path, bootstrap) {
             Ok(mut client) => {
                 if let Err(error) = client.send(
                     ClientAction::Developer(
@@ -315,6 +322,79 @@ impl StudioApp {
                 self.catalog.catalog_discovery_error = Some(message.clone());
                 self.service_error = Some(message);
             }
+        }
+    }
+
+    pub(super) fn reconnect_service_in_background(&mut self) {
+        if self.service.is_some() || self.service_connection_attempt.is_some() {
+            return;
+        }
+        let Some((service_path, bootstrap)) = self.service_connection_config.clone() else {
+            self.service_error = Some("Vapor cannot reconnect from this launch.".to_owned());
+            return;
+        };
+        let (sender, receiver) = mpsc::channel();
+        let attempt = thread::Builder::new()
+            .name("vapor-studio-service-reconnect".to_owned())
+            .spawn(move || {
+                let result = Client::connect_or_start(&service_path, bootstrap)
+                    .map_err(|error| error.to_string());
+                let _ = sender.send(result);
+            });
+        match attempt {
+            Ok(_) => {
+                self.service_connection_attempt = Some(receiver);
+                self.service_error = None;
+                self.status = "Reconnecting to Vapor…".to_owned();
+            }
+            Err(error) => {
+                eprintln!("[vapor-studio] could not start reconnect attempt: {error}");
+                let message = "Vapor is unavailable. Try reconnecting.".to_owned();
+                self.service_error = Some(message.clone());
+                self.catalog.catalog_discovery_error = Some(message);
+            }
+        }
+    }
+
+    pub(super) fn poll_service_connection(&mut self) {
+        let result = self
+            .service_connection_attempt
+            .as_ref()
+            .map(Receiver::try_recv);
+        match result {
+            Some(Ok(Ok(client))) => {
+                self.service_connection_attempt = None;
+                let snapshot = client.latest_snapshot().clone();
+                self.service = Some(client);
+                self.apply_service_catalog_snapshot(&snapshot);
+                self.service_error = None;
+                self.status =
+                    "Vapor is connected again. Check the last action before trying it again."
+                        .to_owned();
+                self.submit_service_action(ClientAction::Catalog(
+                    vapor_client_protocol::CatalogAction::Refresh,
+                ));
+                self.submit_service_action(ClientAction::Developer(
+                    vapor_client_protocol::DeveloperAction::SubscribeTelemetry { enabled: true },
+                ));
+                self.submit_service_action(ClientAction::Developer(
+                    vapor_client_protocol::DeveloperAction::RefreshProfileTraces,
+                ));
+            }
+            Some(Ok(Err(error))) => {
+                self.service_connection_attempt = None;
+                eprintln!("[vapor-studio] service reconnect failed: {error}");
+                let message = "Vapor is unavailable. Try reconnecting.".to_owned();
+                self.service_error = Some(message.clone());
+                self.catalog.catalog_discovery_error = Some(message);
+            }
+            Some(Err(TryRecvError::Disconnected)) => {
+                self.service_connection_attempt = None;
+                let message = "Vapor could not finish reconnecting. Try again.".to_owned();
+                self.service_error = Some(message.clone());
+                self.catalog.catalog_discovery_error = Some(message);
+            }
+            Some(Err(TryRecvError::Empty)) | None => {}
         }
     }
 }
