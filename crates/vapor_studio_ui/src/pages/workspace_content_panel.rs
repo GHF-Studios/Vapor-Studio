@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 enum SourceContentAction {
     Validate(vapor_client_application::SourceContent),
+    Package(vapor_client_application::SourceContent, bool),
     OpenManifest(PathBuf),
     EditDependencies(String),
     UseAsCompositionRoot(vapor_client_application::ContentReference, PathBuf),
@@ -33,6 +34,7 @@ impl StudioApp {
     }
 
     pub(super) fn draw_workspace_content_panel(&mut self, ui: &mut egui::Ui, query: &str) {
+        self.draw_last_package_result(ui);
         if let Some(error) = self.catalog.source_discovery_error.as_deref() {
             status_text(
                 ui,
@@ -226,6 +228,16 @@ impl StudioApp {
                             {
                                 action = Some(SourceContentAction::Validate(content.clone()));
                             }
+                            if ui
+                                .add_enabled(
+                                    !self.operation.running && !self.has_unsaved_workspace_edits(),
+                                    egui::Button::new("Build package"),
+                                )
+                                .on_hover_text("Build and stage a reusable package in this Vapor installation. This does not publish it.")
+                                .clicked()
+                            {
+                                action = Some(SourceContentAction::Package(content.clone(), false));
+                            }
                             if let Some(relative_manifest) = relative_manifest
                                 && ui
                                     .add_enabled(
@@ -283,6 +295,24 @@ impl StudioApp {
                             ui.menu_button("More", |ui| {
                                 if ui
                                     .add_enabled(
+                                        !self.operation.running
+                                            && !self.has_unsaved_workspace_edits(),
+                                        egui::Button::new("Preview package"),
+                                    )
+                                    .on_hover_text(
+                                        "Validate and assemble a temporary package without keeping it in the Library.",
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(SourceContentAction::Package(
+                                        content.clone(),
+                                        true,
+                                    ));
+                                    ui.close();
+                                }
+                                ui.separator();
+                                if ui
+                                    .add_enabled(
                                         !self.operation.running && !self.has_unsaved_workspace_edits(),
                                         egui::Button::new("Edit Workshop metadata"),
                                     )
@@ -333,6 +363,9 @@ impl StudioApp {
             match action {
                 Some(SourceContentAction::Validate(content)) => {
                     self.validate_source_project(&content);
+                }
+                Some(SourceContentAction::Package(content, dry_run)) => {
+                    self.package_source_project(&content, dry_run);
                 }
                 Some(SourceContentAction::OpenManifest(path)) => {
                     self.open_workspace_file(path);
@@ -385,6 +418,45 @@ impl StudioApp {
             Some(false) => self.workspace.pending_unregistration = None,
             None => {}
         }
+    }
+
+    fn draw_last_package_result(&self, ui: &mut egui::Ui) {
+        let Some(result) = self
+            .workspace
+            .last_package
+            .as_ref()
+            .filter(|result| result.workspace_root == Path::new(self.workspace.root.trim()))
+        else {
+            return;
+        };
+        let (title, color) = if result.dry_run {
+            (
+                "Package preview complete",
+                egui::Color32::from_rgb(120, 190, 230),
+            )
+        } else {
+            (
+                "Package built and staged",
+                egui::Color32::from_rgb(130, 210, 150),
+            )
+        };
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.colored_label(color, title);
+            ui.horizontal_wrapped(|ui| {
+                ui.strong(&result.id);
+                ui.weak(format!(
+                    "{} · {} files · {}",
+                    display_target(&result.target),
+                    result.files,
+                    format_bytes(result.bytes)
+                ));
+            });
+            if !result.dry_run {
+                ui.small("Package staged in this Vapor installation. This does not publish it.");
+            } else {
+                ui.small("No package was kept. Build the package to stage it for sharing.");
+            }
+        });
     }
 
     pub(super) fn draw_unregistered_projects_panel(&mut self, ui: &mut egui::Ui, query: &str) {
@@ -489,4 +561,39 @@ impl StudioApp {
             }
         }
     }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} bytes")
+    }
+}
+
+fn display_target(target: &str) -> String {
+    target
+        .split(',')
+        .map(|target| {
+            let parts = target.split('-').collect::<Vec<_>>();
+            match parts.as_slice() {
+                [architecture, _, os, ..] => {
+                    let os = match *os {
+                        "linux" => "Linux",
+                        "windows" => "Windows",
+                        "darwin" => "macOS",
+                        "freebsd" => "FreeBSD",
+                        other => other,
+                    };
+                    format!("{os} · {architecture}")
+                }
+                _ => target.to_owned(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

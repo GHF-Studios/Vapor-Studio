@@ -152,6 +152,7 @@ impl StudioApp {
             }
             AuthoringResultKind::ContentPackaged {
                 id,
+                target,
                 files,
                 bytes,
                 dry_run,
@@ -163,6 +164,14 @@ impl StudioApp {
                     "Package staged"
                 };
                 self.status = format!("{verb} for {id}: {files} files, {bytes} bytes.");
+                self.workspace.last_package = Some(super::workspace_ops::PackageOutcome {
+                    workspace_root: PathBuf::from(self.workspace.root.trim()),
+                    id,
+                    target,
+                    files,
+                    bytes,
+                    dry_run,
+                });
             }
             AuthoringResultKind::ContentCreated {
                 workspace_root,

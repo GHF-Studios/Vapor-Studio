@@ -31,6 +31,34 @@ impl StudioApp {
         );
     }
 
+    pub(super) fn package_source_project(
+        &mut self,
+        content: &vapor_client_application::SourceContent,
+        dry_run: bool,
+    ) {
+        if !self.require_open_workspace("package this content project") {
+            return;
+        }
+        let selector = source_content_selector(content);
+        self.workspace.last_package = None;
+        self.start_service_operation(
+            vapor_client_protocol::ClientAction::Authoring(
+                vapor_client_protocol::AuthoringAction::PackageContent {
+                    selector: selector.clone(),
+                    target_triples: Vec::new(),
+                    dry_run,
+                },
+            ),
+            None,
+            OperationKind::PackageContent,
+            vapor_client_application::OperationPhase::Staging,
+            &format!(
+                "{} package for {selector} through the Studio service…",
+                if dry_run { "Previewing" } else { "Building" }
+            ),
+        );
+    }
+
     pub(super) fn validate_selected_source(&mut self) {
         if !self.require_open_workspace("validate source content") {
             return;

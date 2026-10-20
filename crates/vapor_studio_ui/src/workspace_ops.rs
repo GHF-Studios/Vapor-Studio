@@ -63,6 +63,17 @@ pub(super) struct WorkspaceState {
     pub(super) content_panel: WorkspaceContentPanel,
     pub(super) content_search: String,
     pub(super) editor: WorkspaceEditorState,
+    pub(super) last_package: Option<PackageOutcome>,
+}
+
+#[derive(Clone)]
+pub(super) struct PackageOutcome {
+    pub(super) workspace_root: PathBuf,
+    pub(super) id: String,
+    pub(super) target: String,
+    pub(super) files: u64,
+    pub(super) bytes: u64,
+    pub(super) dry_run: bool,
 }
 
 impl WorkspaceState {
@@ -88,6 +99,7 @@ impl WorkspaceState {
             content_panel: WorkspaceContentPanel::default(),
             content_search: String::new(),
             editor: WorkspaceEditorState::default(),
+            last_package: None,
         }
     }
     pub(super) fn clear_file_context(&mut self) {
