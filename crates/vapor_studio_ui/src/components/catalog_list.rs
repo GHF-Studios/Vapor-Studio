@@ -60,7 +60,7 @@ impl StudioApp {
             ui.separator();
         }
         if !found_matching_item {
-            ui.weak("No catalog content matches this search and filter.");
+            ui.weak("No content matches. Try another search or clear your filters.");
             return;
         }
         if let Some(identity) = newly_selected {

@@ -446,7 +446,7 @@ impl StudioApp {
             None,
             OperationKind::PublishWorkshop,
             vapor_client_application::OperationPhase::Publishing,
-            "Uploading the reviewed Workshop artifact through Vapor Shell…",
+            "Uploading the reviewed Workshop item…",
         );
     }
 

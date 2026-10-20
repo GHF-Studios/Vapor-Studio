@@ -327,7 +327,7 @@ impl StudioApp {
             None,
             OperationKind::LoadComposition,
             vapor_client_application::OperationPhase::Resolving,
-            &format!("Loading dependencies for {selector} through the Studio service…"),
+            &format!("Loading dependencies for {selector}…"),
         );
     }
 
@@ -373,7 +373,7 @@ impl StudioApp {
             None,
             OperationKind::SaveComposition,
             vapor_client_application::OperationPhase::Building,
-            "Validating and saving composition dependencies through the Studio service…",
+            "Checking and saving composition dependencies…",
         );
     }
 
@@ -457,7 +457,7 @@ impl StudioApp {
             None,
             OperationKind::SaveRuntimeOutputs,
             vapor_client_application::OperationPhase::Building,
-            "Validating and saving runtime outputs through the Studio service…",
+            "Checking and saving runtime file declarations…",
         );
     }
 
@@ -565,7 +565,7 @@ impl StudioApp {
             None,
             OperationKind::SaveWorkshopMetadata,
             vapor_client_application::OperationPhase::Building,
-            "Validating and saving Workshop metadata through the Studio service…",
+            "Checking and saving Workshop details…",
         );
     }
 

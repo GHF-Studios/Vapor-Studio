@@ -238,7 +238,7 @@ impl StudioApp {
         } else {
             ui.group(|ui| {
             ui.heading("Publish a Vapor app build");
-            ui.label("SteamPipe uploads a Vapor application release to the Steam app and depot shown below.");
+            ui.label("This publishes a Vapor release build to the Steam app and depot selected for this installation.");
             ui.label(format!(
                 "Steam AppID {} · DepotID {}",
                 self.root_publishing.identity.app_id,
@@ -341,7 +341,7 @@ impl StudioApp {
 
             if let Some(preview) = self.root_publishing.preview.as_ref() {
                 ui.separator();
-                ui.strong(if preview.planned { "Reviewed SteamPipe upload" } else { "SteamPipe result" });
+                ui.strong(if preview.planned { "Reviewed Steam upload" } else { "Steam upload result" });
                 ui.label(format!(
                     "App {} · depot {} · {} files · {} source roots",
                     preview.app_id,

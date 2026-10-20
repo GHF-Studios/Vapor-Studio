@@ -201,7 +201,7 @@ impl StudioApp {
         }
         self.invalidate_workshop_review();
         self.refresh_content_catalog();
-        self.status = "Refreshing the local content catalog through the Studio service…".to_owned();
+        self.status = "Refreshing the content available on this device…".to_owned();
     }
 
     pub(super) fn activate_workspace(&mut self, selection: WorkspaceOpenSnapshot) {
@@ -278,7 +278,7 @@ impl StudioApp {
         self.status = format!("Opened project folder {}", self.workspace.root);
         if self.catalog.local_catalog_current() {
             self.status.push_str(&format!(
-                " · {} local catalog entries",
+                " · {} local content items",
                 self.catalog.items.len()
             ));
         }
@@ -375,7 +375,7 @@ impl StudioApp {
             None,
             OperationKind::DiscoverWorkspace,
             vapor_client_application::OperationPhase::Resolving,
-            "Loading workspace files through the Studio service…",
+            "Loading project files…",
         );
     }
 

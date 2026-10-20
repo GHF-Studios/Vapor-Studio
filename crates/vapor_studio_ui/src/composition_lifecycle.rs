@@ -137,7 +137,7 @@ impl StudioApp {
             }),
             OperationKind::Update,
             vapor_client_application::OperationPhase::Acquiring,
-            "Updating the selected composition through Vapor Shell…",
+            "Updating the selected composition…",
         );
     }
 

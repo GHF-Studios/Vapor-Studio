@@ -27,7 +27,7 @@ impl StudioApp {
             None,
             OperationKind::Validate,
             vapor_client_application::OperationPhase::Verifying,
-            &format!("Validating {selector} through the Studio service…"),
+            &format!("Checking {selector}…"),
         );
     }
 
@@ -42,9 +42,9 @@ impl StudioApp {
         let selector = source_content_selector(content);
         self.workspace.last_package = None;
         let operation_status = if dry_run {
-            format!("Building a package preview for {selector} through the Studio service…")
+            format!("Building a package preview for {selector}…")
         } else {
-            format!("Building and packaging {selector} through the Studio service…")
+            format!("Building and packaging {selector}…")
         };
         self.start_service_operation(
             vapor_client_protocol::ClientAction::Authoring(
@@ -83,7 +83,7 @@ impl StudioApp {
             None,
             OperationKind::Validate,
             vapor_client_application::OperationPhase::Verifying,
-            "Validating the selected source through the Studio service…",
+            "Checking the selected project…",
         );
     }
 
@@ -98,7 +98,7 @@ impl StudioApp {
             None,
             OperationKind::Validate,
             vapor_client_application::OperationPhase::Verifying,
-            "Validating authored content through the Studio service…",
+            "Checking project content…",
         );
     }
 
@@ -188,7 +188,7 @@ impl StudioApp {
             None,
             OperationKind::Discover,
             vapor_client_application::OperationPhase::Resolving,
-            "Loading registered workspaces through the Studio service…",
+            "Loading your project folders…",
         );
     }
 }

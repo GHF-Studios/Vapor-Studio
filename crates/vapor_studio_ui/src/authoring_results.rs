@@ -268,8 +268,7 @@ impl StudioApp {
         self.authoring.composition_original_links = Some(composition.links.clone());
         self.authoring.composition_edit = Some(composition);
         self.invalidate_compositions_for_source_content(&identity);
-        self.status =
-            "Saved the composition. Studio is refreshing its content catalog and plan.".to_owned();
+        self.status = "Saved the composition. Refreshing its content and launch plan…".to_owned();
     }
 
     pub(super) fn apply_source_workshop_loaded(
@@ -281,9 +280,7 @@ impl StudioApp {
         self.authoring.runtime_outputs_edit = None;
         self.authoring.manifest_metadata_dirty = false;
         self.authoring.pending_manifest_discard = None;
-        self.status =
-            "Loaded the source Workshop metadata. Edit the fields, then save through Vapor Shell."
-                .to_owned();
+        self.status = "Loaded the Workshop details. Edit them and save when ready.".to_owned();
     }
 
     pub(super) fn apply_source_workshop_saved(
@@ -300,7 +297,7 @@ impl StudioApp {
             version: metadata.version.clone(),
         });
         self.sync_saved_workspace_manifest(&metadata.manifest, &metadata.source);
-        self.status = "Saved Workshop metadata through Vapor Shell. Studio is refreshing the workspace catalog.".to_owned();
+        self.status = "Saved Workshop details. Refreshing project information…".to_owned();
     }
 
     pub(super) fn apply_source_runtime_outputs_loaded(
@@ -312,7 +309,9 @@ impl StudioApp {
         self.authoring.workshop_metadata_edit = None;
         self.authoring.manifest_metadata_dirty = false;
         self.authoring.pending_manifest_discard = None;
-        self.status = "Loaded runtime output declarations. Edit the executable and library lists, then save through Vapor Shell.".to_owned();
+        self.status =
+            "Loaded runtime file declarations. Edit the file lists, then save when ready."
+                .to_owned();
     }
 
     pub(super) fn apply_source_runtime_outputs_saved(
@@ -329,6 +328,7 @@ impl StudioApp {
             version: outputs.version.clone(),
         });
         self.sync_saved_workspace_manifest(&outputs.manifest, &outputs.source);
-        self.status = "Saved runtime outputs through Vapor Shell. Studio is refreshing the catalog and active composition.".to_owned();
+        self.status = "Saved runtime files. Refreshing project content and the active composition…"
+            .to_owned();
     }
 }

@@ -45,8 +45,7 @@ impl StudioApp {
         let set_live = non_empty(&self.root_publishing.set_live_branch);
         self.root_publishing.preview = None;
         self.root_publishing.confirmation.clear();
-        self.root_publishing.status =
-            "Preparing a read-only SteamPipe package and upload plan…".to_owned();
+        self.root_publishing.status = "Preparing a Steam upload review…".to_owned();
         self.start_service_operation(
             ClientAction::Publishing(PublishingAction::StageRoot {
                 account,
@@ -56,7 +55,7 @@ impl StudioApp {
             None,
             vapor_client_application::OperationKind::StageRootDistribution,
             vapor_client_application::OperationPhase::Staging,
-            "Preparing a SteamPipe review through the Studio service…",
+            "Preparing the Steam upload review…",
         );
         self.status = self.root_publishing.status.clone();
     }

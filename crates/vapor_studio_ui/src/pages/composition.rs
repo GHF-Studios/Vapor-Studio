@@ -416,7 +416,7 @@ impl StudioApp {
                     egui::Button::new("Stage Workshop review"),
                 )
                 .on_disabled_hover_text(if !self.catalog.source_snapshot_current() {
-                    "Refresh workspace sources successfully before staging from the last-known project list."
+                    "Refresh the project and content lists before preparing this upload. The saved lists are out of date."
                 } else if !self.catalog.local_catalog_current() {
                     "Refresh the on-device content list before preparing this for Steam Workshop; Studio cannot check for conflicts using out-of-date information."
                 } else if !workspace_manifest_saved {

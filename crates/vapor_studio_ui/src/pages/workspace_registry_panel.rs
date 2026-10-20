@@ -73,7 +73,7 @@ impl StudioApp {
                             .add_enabled(
                                 !self.operation.running,
                                 egui::Button::new(if snapshot.available_repositories_loaded {
-                                    "Refresh source catalog"
+                                    "Refresh project list"
                                 } else {
                                     "Find source projects"
                                 }),
