@@ -13,14 +13,12 @@ struct HomeCompositionSummary {
     root_package: Option<vapor_client_application::ContentReference>,
     installation_status_text: &'static str,
     installation_tone: super::super::components::design::StatusTone,
-    workspace_source_path: Option<std::path::PathBuf>,
     primary_action: HomePrimaryAction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HomePrimaryAction {
     Install,
-    OpenProject,
     BuildAndLaunch,
     Launch,
     ReviewUpdate,
@@ -30,7 +28,6 @@ enum HomePrimaryAction {
 fn home_primary_action(
     installation: &InstallationState,
     can_build_from_source: bool,
-    source_workspace_is_open: bool,
 ) -> HomePrimaryAction {
     match installation {
         InstallationState::Installed { .. } => HomePrimaryAction::Launch,
@@ -38,13 +35,8 @@ fn home_primary_action(
         InstallationState::Partial { .. } | InstallationState::NeedsRepair { .. } => {
             HomePrimaryAction::ReviewRepair
         }
-        InstallationState::Unknown | InstallationState::NotInstalled
-            if can_build_from_source && source_workspace_is_open =>
-        {
-            HomePrimaryAction::BuildAndLaunch
-        }
         InstallationState::Unknown | InstallationState::NotInstalled if can_build_from_source => {
-            HomePrimaryAction::OpenProject
+            HomePrimaryAction::BuildAndLaunch
         }
         InstallationState::Unknown | InstallationState::NotInstalled => HomePrimaryAction::Install,
     }
@@ -56,21 +48,14 @@ impl StudioApp {
             let (status, tone) = installation_status(&composition.installation);
             let can_build_from_source = self.composition_root_is_workspace_source(composition)
                 && composition.workspace.is_some();
-            let workspace_source_path = composition
-                .workspace
-                .as_ref()
-                .map(|workspace| workspace.root.clone());
-            let workspace_source_is_open = self.composition_workspace_root_is_open(composition);
             HomeCompositionSummary {
                 name: composition.name.clone(),
                 root_package: composition.root_package.clone(),
                 installation_status_text: status,
                 installation_tone: tone,
-                workspace_source_path,
                 primary_action: home_primary_action(
                     &composition.installation,
                     can_build_from_source,
-                    workspace_source_is_open,
                 ),
             }
         };
@@ -139,12 +124,6 @@ impl StudioApp {
                         && !self.operation.running
                         && !self.has_unsaved_workspace_edits(),
                 ),
-                HomePrimaryAction::OpenProject => (
-                    "Open project to build and launch",
-                    service_connected
-                        && !self.operation.running
-                        && !self.has_unsaved_context_switch_edits(),
-                ),
                 HomePrimaryAction::BuildAndLaunch => (
                     "Build and launch project",
                     service_connected
@@ -180,11 +159,6 @@ impl StudioApp {
             {
                 match composition.primary_action {
                     HomePrimaryAction::Install => self.install_selected(),
-                    HomePrimaryAction::OpenProject => {
-                        if let Some(path) = composition.workspace_source_path.as_ref() {
-                            self.open_workspace_path_to(path.clone(), Section::Home);
-                        }
-                    }
                     HomePrimaryAction::BuildAndLaunch => self.run_selected(),
                     HomePrimaryAction::Launch => self.run_installed_selected(),
                     HomePrimaryAction::ReviewUpdate | HomePrimaryAction::ReviewRepair => {
@@ -364,20 +338,12 @@ mod home_primary_action_tests {
     #[test]
     fn uninstalled_composition_offers_install_or_project_build() {
         assert_eq!(
-            home_primary_action(&InstallationState::NotInstalled, false, false),
+            home_primary_action(&InstallationState::NotInstalled, false),
             HomePrimaryAction::Install
         );
         assert_eq!(
-            home_primary_action(&InstallationState::NotInstalled, true, false),
-            HomePrimaryAction::OpenProject
-        );
-        assert_eq!(
-            home_primary_action(&InstallationState::NotInstalled, true, true),
+            home_primary_action(&InstallationState::NotInstalled, true),
             HomePrimaryAction::BuildAndLaunch
-        );
-        assert_eq!(
-            home_primary_action(&InstallationState::NotInstalled, false, true),
-            HomePrimaryAction::Install
         );
     }
 
@@ -389,7 +355,6 @@ mod home_primary_action_tests {
                     detail: "partial".into()
                 },
                 false,
-                false,
             ),
             HomePrimaryAction::ReviewRepair
         );
@@ -399,7 +364,6 @@ mod home_primary_action_tests {
                     detail: "repair".into(),
                     artifacts: Vec::new(),
                 },
-                false,
                 false,
             ),
             HomePrimaryAction::ReviewRepair
@@ -424,7 +388,6 @@ mod home_primary_action_tests {
                     verified: true,
                 },
                 false,
-                false,
             ),
             HomePrimaryAction::ReviewUpdate
         );
@@ -439,20 +402,15 @@ mod home_primary_action_tests {
                     graph_fingerprint: None,
                 },
                 false,
-                false,
             ),
             HomePrimaryAction::Launch
         );
         assert_eq!(
-            home_primary_action(&InstallationState::Unknown, false, false),
+            home_primary_action(&InstallationState::Unknown, false),
             HomePrimaryAction::Install
         );
         assert_eq!(
-            home_primary_action(&InstallationState::Unknown, true, false),
-            HomePrimaryAction::OpenProject
-        );
-        assert_eq!(
-            home_primary_action(&InstallationState::Unknown, true, true),
+            home_primary_action(&InstallationState::Unknown, true),
             HomePrimaryAction::BuildAndLaunch
         );
     }

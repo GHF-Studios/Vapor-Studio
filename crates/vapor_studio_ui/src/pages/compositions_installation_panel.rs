@@ -14,7 +14,6 @@ pub(super) enum CompositionInstallationAction {
     Update,
     ReviewPlan,
     BuildAndPlay,
-    OpenProject,
     Install,
     ValidateSource,
     VerifyInstalled,
@@ -25,14 +24,9 @@ pub(super) enum CompositionInstallationAction {
 fn workspace_primary_action(
     root_is_workspace_source: bool,
     has_workspace: bool,
-    workspace_is_open: bool,
 ) -> CompositionInstallationAction {
     if root_is_workspace_source && has_workspace {
-        if workspace_is_open {
-            CompositionInstallationAction::BuildAndPlay
-        } else {
-            CompositionInstallationAction::OpenProject
-        }
+        CompositionInstallationAction::BuildAndPlay
     } else {
         CompositionInstallationAction::Install
     }
@@ -165,15 +159,6 @@ impl StudioApp {
         })
     }
 
-    pub(super) fn composition_workspace_root_is_open(
-        &self,
-        composition: &vapor_client_application::Composition,
-    ) -> bool {
-        composition.workspace.as_ref().is_some_and(|workspace| {
-            std::path::Path::new(self.workspace.root.trim()) == workspace.root
-        })
-    }
-
     pub(super) fn draw_composition_installation_panel(
         &self,
         ui: &mut eframe::egui::Ui,
@@ -233,18 +218,10 @@ impl StudioApp {
             } else if installed {
                 ("Launch", CompositionInstallationAction::Play)
             } else {
-                match workspace_primary_action(
-                    root_is_workspace_source,
-                    has_source,
-                    self.composition_workspace_root_is_open(composition),
-                ) {
+                match workspace_primary_action(root_is_workspace_source, has_source) {
                     CompositionInstallationAction::BuildAndPlay => (
                         "Build and launch project",
                         CompositionInstallationAction::BuildAndPlay,
-                    ),
-                    CompositionInstallationAction::OpenProject => (
-                        "Open project to build and launch",
-                        CompositionInstallationAction::OpenProject,
                     ),
                     _ => (
                         "Install composition",
@@ -256,28 +233,20 @@ impl StudioApp {
                 CompositionInstallationAction::Play | CompositionInstallationAction::Verify => {
                     root_is_workspace_source
                 }
-                CompositionInstallationAction::OpenProject
-                | CompositionInstallationAction::VerifyInstalled
+                CompositionInstallationAction::VerifyInstalled
                 | CompositionInstallationAction::AdoptInstalledGraph
                 | CompositionInstallationAction::ValidateSource
                 | CompositionInstallationAction::DiscoverContent => false,
                 _ => true,
             };
             let project_is_dirty = needs_saved_project && self.has_unsaved_workspace_edits();
-            let context_is_dirty = action == CompositionInstallationAction::OpenProject
-                && self.has_unsaved_context_switch_edits();
             let mut clicked = false;
-            ui.add_enabled_ui(
-                !self.operation.running && !project_is_dirty && !context_is_dirty,
-                |ui| {
-                    clicked = super::super::components::design::primary_button(ui, label).clicked();
-                },
-            )
+            ui.add_enabled_ui(!self.operation.running && !project_is_dirty, |ui| {
+                clicked = super::super::components::design::primary_button(ui, label).clicked();
+            })
             .response
             .on_disabled_hover_text(if self.operation.running {
                 "Wait for the current operation to finish."
-            } else if context_is_dirty {
-                "Save or discard the open project or composition edits before switching projects."
             } else {
                 "Save or discard project edits before changing or running this setup."
             });
@@ -533,21 +502,17 @@ mod graph_difference_tests {
     }
 
     #[test]
-    fn project_build_requires_the_selected_source_workspace_to_be_open() {
+    fn project_build_uses_only_the_compositions_associated_source() {
         assert_eq!(
-            workspace_primary_action(true, true, true),
+            workspace_primary_action(true, true),
             CompositionInstallationAction::BuildAndPlay
         );
         assert_eq!(
-            workspace_primary_action(true, true, false),
-            CompositionInstallationAction::OpenProject
-        );
-        assert_eq!(
-            workspace_primary_action(false, true, true),
+            workspace_primary_action(false, true),
             CompositionInstallationAction::Install
         );
         assert_eq!(
-            workspace_primary_action(true, false, true),
+            workspace_primary_action(true, false),
             CompositionInstallationAction::Install
         );
     }

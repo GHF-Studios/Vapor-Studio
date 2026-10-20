@@ -298,7 +298,7 @@ impl StudioApp {
     }
 
     pub(super) fn run_selected(&mut self) {
-        if !self.require_open_workspace("build and play this workspace composition") {
+        if !self.require_saved_workspace("build and play this workspace composition") {
             return;
         }
         let Some(composition) = self
