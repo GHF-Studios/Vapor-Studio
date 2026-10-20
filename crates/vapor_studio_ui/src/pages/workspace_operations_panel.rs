@@ -53,7 +53,7 @@ impl StudioApp {
                 "Cleanup target changed"
             };
             let description = format!(
-                "Remove generated build files for this project's Rust workspaces. Source files and installed game content are not touched. Reviewed project: {}{}",
+                "Remove generated development builds for this project's Rust workspaces. Your next build may take longer. Source files, release builds, installed content, and Workshop downloads are kept. Reviewed project: {}{}",
                 clean_root.display(),
                 if target_matches {
                     String::new()
