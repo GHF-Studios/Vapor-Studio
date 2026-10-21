@@ -30,8 +30,7 @@ pub(super) struct WorkshopState {
     pub(super) omitted_review_file_paths: usize,
     pub(super) search_query: String,
     pub(super) kind_filter: Option<String>,
-    pub(super) pending_search:
-        Option<(String, u32, Option<vapor_client_protocol::ContentKind>)>,
+    pub(super) pending_search: Option<(String, u32, Option<vapor_client_protocol::ContentKind>)>,
     pub(super) service_search_revision: u64,
     pub(super) pending_service_search_revision: Option<u64>,
     pub(super) service_acquisition_revision: u64,

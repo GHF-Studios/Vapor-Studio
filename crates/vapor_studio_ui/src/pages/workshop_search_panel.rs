@@ -259,10 +259,10 @@ impl StudioApp {
             }
         }
         if let Some(query) = &self.workshop.results_query {
-            let type_label = self
-                .workshop
-                .results_content_kind
-                .map_or_else(|| "all content types".to_owned(), |kind| kind.as_str().to_owned());
+            let type_label = self.workshop.results_content_kind.map_or_else(
+                || "all content types".to_owned(),
+                |kind| kind.as_str().to_owned(),
+            );
             if self.workshop.results.is_empty() {
                 ui.weak(if query.is_empty() {
                     format!("No Workshop items found for {type_label}.")
