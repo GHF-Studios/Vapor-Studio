@@ -158,7 +158,7 @@ impl StudioApp {
             if conflicted {
                 status_text(
                     ui,
-                    "On-device copies of this version disagree. Review the content details before publishing.",
+                    "Local copies differ from the reviewed workspace source. Publishing uses the workspace source and does not change installed content.",
                     StatusTone::Caution,
                 );
             }
@@ -203,7 +203,6 @@ impl StudioApp {
                             && local_source
                             && source_snapshot_current
                             && catalog_snapshot_current
-                            && !conflicted
                             && !self.workshop.publisher_account.trim().is_empty()
                             && self.workshop.confirmation.trim() == publish_phrase,
                         egui::Button::new(if preview.published_file_id.is_some() {
@@ -218,8 +217,6 @@ impl StudioApp {
                         "Refresh the on-device content list before publishing; Studio cannot check for conflicts using out-of-date information."
                     } else if !local_source {
                         "Open the project folder where this item is authored, then prepare a new review."
-                    } else if conflicted {
-                        "Review and fix the conflicting on-device copies before publishing."
                     } else if self.has_unsaved_workspace_edits() {
                         "Save or discard workspace changes before publishing."
                     } else {

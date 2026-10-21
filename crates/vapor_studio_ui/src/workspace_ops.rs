@@ -70,6 +70,7 @@ pub(super) struct WorkspaceState {
 pub(super) struct PackageOutcome {
     pub(super) workspace_root: PathBuf,
     pub(super) id: String,
+    pub(super) selector: String,
     pub(super) target: String,
     pub(super) files: u64,
     pub(super) bytes: u64,

@@ -1,8 +1,38 @@
 use super::{StudioApp, content_selector, source_content_selector};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use vapor_client_application::OperationKind;
 
 impl StudioApp {
+    pub(super) fn acquire_packaged_source(&mut self, selector: String, workspace_root: PathBuf) {
+        if !self.require_saved_workspace("add this package to your Library") {
+            return;
+        }
+        if self.workspace.root.trim().is_empty()
+            || Path::new(self.workspace.root.trim()) != workspace_root
+        {
+            self.status = "Reopen the source workspace that produced this package before adding it to your Library.".to_owned();
+            return;
+        }
+        if !self.catalog.source_snapshot_current() {
+            self.status =
+                "Refresh the source project list before adding this package to your Library."
+                    .to_owned();
+            return;
+        }
+        self.start_service_operation(
+            vapor_client_protocol::ClientAction::Library(
+                vapor_client_protocol::LibraryAction::Acquire {
+                    selectors: vec![selector.clone()],
+                    workspace_root: Some(workspace_root.to_string_lossy().into_owned()),
+                },
+            ),
+            None,
+            OperationKind::Acquire,
+            vapor_client_application::OperationPhase::Acquiring,
+            &format!("Adding {selector} to your Library…"),
+        );
+    }
+
     pub(super) fn apply_remembered_sources(&mut self, known: Vec<PathBuf>) {
         self.workspace.registered_sources = known;
         self.workspace.registered_sources_loaded = true;

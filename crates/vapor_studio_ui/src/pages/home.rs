@@ -18,16 +18,27 @@ struct HomeCompositionSummary {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HomePrimaryAction {
+    Checking,
     Install,
     BuildAndLaunch,
     Launch,
+    ReviewComposition,
     ReviewUpdate,
     ReviewRepair,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootInstallationObservation {
+    Unavailable,
+    NotInstalled,
+    Installed,
+    Ambiguous,
 }
 
 fn home_primary_action(
     installation: &InstallationState,
     can_build_from_source: bool,
+    root_installation: RootInstallationObservation,
 ) -> HomePrimaryAction {
     match installation {
         InstallationState::Installed { .. } => HomePrimaryAction::Launch,
@@ -35,17 +46,47 @@ fn home_primary_action(
         InstallationState::Partial { .. } | InstallationState::NeedsRepair { .. } => {
             HomePrimaryAction::ReviewRepair
         }
-        InstallationState::Unknown | InstallationState::NotInstalled if can_build_from_source => {
+        InstallationState::Unknown
+            if root_installation == RootInstallationObservation::Installed =>
+        {
+            HomePrimaryAction::Launch
+        }
+        InstallationState::Unknown
+            if root_installation == RootInstallationObservation::Ambiguous =>
+        {
+            HomePrimaryAction::ReviewComposition
+        }
+        InstallationState::Unknown if can_build_from_source => HomePrimaryAction::BuildAndLaunch,
+        InstallationState::Unknown
+            if root_installation == RootInstallationObservation::NotInstalled =>
+        {
+            HomePrimaryAction::Install
+        }
+        InstallationState::Unknown => HomePrimaryAction::Checking,
+        InstallationState::NotInstalled if can_build_from_source => {
             HomePrimaryAction::BuildAndLaunch
         }
-        InstallationState::Unknown | InstallationState::NotInstalled => HomePrimaryAction::Install,
+        InstallationState::NotInstalled => HomePrimaryAction::Install,
     }
 }
 impl StudioApp {
     pub(in crate::app) fn draw_home(&mut self, ui: &mut egui::Ui) {
         let composition = {
             let composition = &self.composition.items[self.composition.active_index];
-            let (status, tone) = installation_status(&composition.installation);
+            let root_installation = if self.catalog.local_catalog_current() {
+                installed_packagepack_root(composition.root_package.as_ref(), &self.catalog.items)
+            } else {
+                RootInstallationObservation::Unavailable
+            };
+            let (mut status, tone) = installation_status(&composition.installation);
+            if matches!(&composition.installation, InstallationState::Unknown) {
+                status = match root_installation {
+                    RootInstallationObservation::Installed => "Status not checked",
+                    RootInstallationObservation::NotInstalled => "Not installed",
+                    RootInstallationObservation::Ambiguous => "Review composition setup",
+                    RootInstallationObservation::Unavailable => "Checking composition availability",
+                };
+            }
             let can_build_from_source = self.composition_root_is_workspace_source(composition)
                 && composition.workspace.is_some();
             HomeCompositionSummary {
@@ -56,6 +97,7 @@ impl StudioApp {
                 primary_action: home_primary_action(
                     &composition.installation,
                     can_build_from_source,
+                    root_installation,
                 ),
             }
         };
@@ -118,6 +160,7 @@ impl StudioApp {
             );
             let service_connected = self.service.is_some();
             let (label, enabled) = match composition.primary_action {
+                HomePrimaryAction::Checking => ("Checking composition…", false),
                 HomePrimaryAction::Install => (
                     "Install composition",
                     service_connected
@@ -141,6 +184,7 @@ impl StudioApp {
                             .service_action_enabled("composition.launch")
                             .unwrap_or(true),
                 ),
+                HomePrimaryAction::ReviewComposition => ("Review composition", true),
                 HomePrimaryAction::ReviewUpdate => ("Review update", true),
                 HomePrimaryAction::ReviewRepair => ("Review or repair composition", true),
             };
@@ -148,6 +192,8 @@ impl StudioApp {
                 "Reconnect to Vapor before starting this action."
             } else if self.operation.running {
                 "Wait for the current operation to finish."
+            } else if matches!(composition.primary_action, HomePrimaryAction::Checking) {
+                "Wait for local installation information to finish refreshing."
             } else if self.has_unsaved_context_switch_edits() {
                 "Save or discard current project or composition edits before continuing."
             } else {
@@ -159,9 +205,12 @@ impl StudioApp {
             {
                 match composition.primary_action {
                     HomePrimaryAction::Install => self.install_selected(),
+                    HomePrimaryAction::Checking => {}
                     HomePrimaryAction::BuildAndLaunch => self.run_selected(),
                     HomePrimaryAction::Launch => self.run_installed_selected(),
-                    HomePrimaryAction::ReviewUpdate | HomePrimaryAction::ReviewRepair => {
+                    HomePrimaryAction::ReviewComposition
+                    | HomePrimaryAction::ReviewUpdate
+                    | HomePrimaryAction::ReviewRepair => {
                         self.activate_navigation_section(Section::Compositions);
                     }
                 }
@@ -330,19 +379,88 @@ impl StudioApp {
         }
     }
 }
+
+fn installed_packagepack_root(
+    root: Option<&vapor_client_application::ContentReference>,
+    catalog: &[vapor_client_application::CatalogContent],
+) -> RootInstallationObservation {
+    let Some(root) = root else {
+        return RootInstallationObservation::Unavailable;
+    };
+    let mut matches = catalog.iter().filter(|content| {
+        content.id == root.id
+            && content.kind == vapor_client_protocol::ContentKind::Packagepack.as_str()
+            && root
+                .version
+                .as_ref()
+                .is_none_or(|version| content.version.as_ref() == Some(version))
+    });
+    let Some(content) = matches.next() else {
+        return RootInstallationObservation::NotInstalled;
+    };
+    if matches.next().is_some() {
+        return RootInstallationObservation::Ambiguous;
+    }
+    if !content.is_unambiguous() {
+        return RootInstallationObservation::Ambiguous;
+    }
+    if content.locations.iter().any(|location| {
+        location.kind == vapor_client_application::CatalogLocationKind::Installed
+            && location.enabled
+    }) {
+        RootInstallationObservation::Installed
+    } else {
+        RootInstallationObservation::NotInstalled
+    }
+}
 #[cfg(test)]
 mod home_primary_action_tests {
-    use super::{HomePrimaryAction, home_primary_action};
-    use vapor_client_application::InstallationState;
+    use super::{
+        HomePrimaryAction, RootInstallationObservation, home_primary_action,
+        installed_packagepack_root,
+    };
+    use std::path::PathBuf;
+    use vapor_client_application::{
+        CatalogContent, CatalogLocation, CatalogLocationKind, ContentReference, InstallationState,
+    };
+
+    fn packagepack(location: CatalogLocationKind) -> CatalogContent {
+        CatalogContent {
+            id: "studio.example/setup".to_owned(),
+            name: Some("Example setup".to_owned()),
+            version: Some("1.0.0".to_owned()),
+            kind: vapor_client_protocol::ContentKind::Packagepack
+                .as_str()
+                .to_owned(),
+            published_file_id: None,
+            dependencies: Vec::new(),
+            locations: vec![CatalogLocation {
+                kind: location,
+                root: PathBuf::from("/content/example"),
+                enabled: true,
+                fingerprint: None,
+                install_source: None,
+            }],
+            conflicts: Vec::new(),
+        }
+    }
 
     #[test]
     fn uninstalled_composition_offers_install_or_project_build() {
         assert_eq!(
-            home_primary_action(&InstallationState::NotInstalled, false),
+            home_primary_action(
+                &InstallationState::NotInstalled,
+                false,
+                RootInstallationObservation::Unavailable,
+            ),
             HomePrimaryAction::Install
         );
         assert_eq!(
-            home_primary_action(&InstallationState::NotInstalled, true),
+            home_primary_action(
+                &InstallationState::NotInstalled,
+                true,
+                RootInstallationObservation::Unavailable,
+            ),
             HomePrimaryAction::BuildAndLaunch
         );
     }
@@ -355,6 +473,7 @@ mod home_primary_action_tests {
                     detail: "partial".into()
                 },
                 false,
+                RootInstallationObservation::Unavailable,
             ),
             HomePrimaryAction::ReviewRepair
         );
@@ -365,6 +484,7 @@ mod home_primary_action_tests {
                     artifacts: Vec::new(),
                 },
                 false,
+                RootInstallationObservation::Unavailable,
             ),
             HomePrimaryAction::ReviewRepair
         );
@@ -388,6 +508,7 @@ mod home_primary_action_tests {
                     verified: true,
                 },
                 false,
+                RootInstallationObservation::Unavailable,
             ),
             HomePrimaryAction::ReviewUpdate
         );
@@ -402,16 +523,84 @@ mod home_primary_action_tests {
                     graph_fingerprint: None,
                 },
                 false,
+                RootInstallationObservation::Unavailable,
             ),
             HomePrimaryAction::Launch
         );
         assert_eq!(
-            home_primary_action(&InstallationState::Unknown, false),
+            home_primary_action(
+                &InstallationState::Unknown,
+                false,
+                RootInstallationObservation::NotInstalled,
+            ),
             HomePrimaryAction::Install
         );
         assert_eq!(
-            home_primary_action(&InstallationState::Unknown, true),
+            home_primary_action(
+                &InstallationState::Unknown,
+                true,
+                RootInstallationObservation::NotInstalled,
+            ),
             HomePrimaryAction::BuildAndLaunch
+        );
+        assert_eq!(
+            home_primary_action(
+                &InstallationState::Unknown,
+                false,
+                RootInstallationObservation::Installed,
+            ),
+            HomePrimaryAction::Launch
+        );
+        assert_eq!(
+            home_primary_action(
+                &InstallationState::Unknown,
+                false,
+                RootInstallationObservation::Unavailable,
+            ),
+            HomePrimaryAction::Checking
+        );
+    }
+
+    #[test]
+    fn a_fresh_catalog_restores_launch_for_an_installed_composition_root() {
+        let root = ContentReference {
+            id: "studio.example/setup".to_owned(),
+            version: Some("1.0.0".to_owned()),
+        };
+        let catalog = vec![packagepack(CatalogLocationKind::Installed)];
+
+        let installed = installed_packagepack_root(Some(&root), &catalog);
+
+        assert_eq!(installed, RootInstallationObservation::Installed);
+        assert_eq!(
+            home_primary_action(&InstallationState::Unknown, false, installed),
+            HomePrimaryAction::Launch
+        );
+    }
+
+    #[test]
+    fn a_local_library_copy_does_not_masquerade_as_an_installed_composition() {
+        let root = ContentReference {
+            id: "studio.example/setup".to_owned(),
+            version: Some("1.0.0".to_owned()),
+        };
+        let catalog = vec![packagepack(CatalogLocationKind::Cache)];
+
+        assert_eq!(
+            installed_packagepack_root(Some(&root), &catalog),
+            RootInstallationObservation::NotInstalled
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_root_routes_to_composition_review() {
+        assert_eq!(
+            home_primary_action(
+                &InstallationState::Unknown,
+                false,
+                RootInstallationObservation::Ambiguous,
+            ),
+            HomePrimaryAction::ReviewComposition
         );
     }
 }

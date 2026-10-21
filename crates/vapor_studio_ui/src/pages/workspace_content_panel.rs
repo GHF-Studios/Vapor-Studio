@@ -421,7 +421,7 @@ impl StudioApp {
     }
 
     fn draw_last_package_result(&mut self, ui: &mut egui::Ui) {
-        let Some((workspace_root, id, target, files, bytes, dry_run)) = self
+        let Some((workspace_root, id, selector, target, files, bytes, dry_run)) = self
             .workspace
             .last_package
             .as_ref()
@@ -430,6 +430,7 @@ impl StudioApp {
                 (
                     result.workspace_root.clone(),
                     result.id.clone(),
+                    result.selector.clone(),
                     result.target.clone(),
                     result.files,
                     result.bytes,
@@ -456,22 +457,24 @@ impl StudioApp {
                     .sources
                     .iter()
                     .find(|content| {
-                        content.id == id
+                        super::super::source_content_selector(content) == selector
                             && content.workshop.app_id.is_some()
                             && content.root.starts_with(&workspace_root)
                     })
                     .map(super::super::source_content_selector)
             })
             .flatten();
-        let workshop_conflict = workshop_selector
-            .as_deref()
-            .is_some_and(|selector| self.catalog_identity_is_conflicted(selector));
         let can_review_workshop = !self.operation.running
             && !self.has_unsaved_workspace_edits()
             && self.catalog.source_snapshot_current()
-            && self.catalog.local_catalog_current()
-            && !workshop_conflict;
-        let review_workshop = egui::Frame::group(ui.style())
+            && self.catalog.local_catalog_current();
+        let already_in_library = is_cached_exact_version(&self.catalog.items, &selector);
+        let can_add_to_library = !dry_run
+            && !already_in_library
+            && !self.operation.running
+            && !self.has_unsaved_workspace_edits()
+            && self.catalog.source_snapshot_current();
+        let (review_workshop, acquire_to_library) = egui::Frame::group(ui.style())
             .show(ui, |ui| {
             ui.colored_label(color, title);
             ui.horizontal_wrapped(|ui| {
@@ -485,8 +488,23 @@ impl StudioApp {
             });
             if !dry_run {
                 ui.small("Package built for this device. It has not been published.");
-                if workshop_selector.is_some() {
-                    ui.horizontal_wrapped(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let acquire = if already_in_library {
+                        ui.strong("Available in Library");
+                        false
+                    } else {
+                        ui.add_enabled(can_add_to_library, egui::Button::new("Add to Library"))
+                            .on_disabled_hover_text(if self.has_unsaved_workspace_edits() {
+                                "Save the source edits before adding this package."
+                            } else if !self.catalog.source_snapshot_current() {
+                                "Refresh the source project list before adding this package."
+                            } else {
+                                "Wait for the current operation to finish."
+                            })
+                            .on_hover_text("Make this built version available to add to a composition.")
+                            .clicked()
+                    };
+                    let review = if workshop_selector.is_some() {
                         ui.weak("Continue to sharing after reviewing the current saved source.");
                         ui.add_enabled(can_review_workshop, egui::Button::new("Review Workshop upload"))
                             .on_disabled_hover_text(if self.has_unsaved_workspace_edits() {
@@ -495,21 +513,19 @@ impl StudioApp {
                                 || !self.catalog.local_catalog_current()
                             {
                                 "Refresh the project and on-device content lists before preparing the review."
-                            } else if workshop_conflict {
-                                "Resolve the conflicting on-device copies of this version first."
                             } else {
                                 "Wait for the current operation to finish."
                             })
                             .on_hover_text("Build the latest saved project and prepare a Workshop review before uploading.")
                             .clicked()
-                    })
-                    .inner
-                } else {
-                    false
-                }
+                    } else {
+                        false
+                    };
+                    (review, acquire)
+                }).inner
             } else {
                 ui.small("Preview only; no package was saved.");
-                false
+                (false, false)
             }
         })
             .inner;
@@ -517,6 +533,9 @@ impl StudioApp {
             self.root_publishing.tab = super::super::root_publishing::PublishTab::WorkshopContent;
             self.stage_workshop_content(selector);
             self.activate_navigation_section(super::super::Section::Publish);
+        }
+        if acquire_to_library {
+            self.acquire_packaged_source(selector, workspace_root);
         }
     }
 
@@ -657,4 +676,51 @@ pub(super) fn display_target(target: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn is_cached_exact_version(
+    items: &[vapor_client_application::CatalogContent],
+    selector: &str,
+) -> bool {
+    let (id, version) = selector
+        .rsplit_once('@')
+        .map(|(id, version)| (id, Some(version)))
+        .unwrap_or((selector, None));
+    items.iter().any(|item| {
+        item.id == id
+            && item.version.as_deref() == version
+            && item.locations.iter().any(|location| {
+                location.kind == vapor_client_application::CatalogLocationKind::Cache
+            })
+    })
+}
+
+#[cfg(test)]
+mod package_library_tests {
+    use super::is_cached_exact_version;
+    use vapor_client_application::{CatalogContent, CatalogLocation, CatalogLocationKind};
+
+    #[test]
+    fn library_presence_matches_the_exact_content_version() {
+        let items = [CatalogContent {
+            id: "ghf.example.mod".to_owned(),
+            name: Some("Example".to_owned()),
+            version: Some("1.2.3".to_owned()),
+            kind: "extension".to_owned(),
+            published_file_id: None,
+            dependencies: Vec::new(),
+            locations: vec![CatalogLocation {
+                kind: CatalogLocationKind::Cache,
+                root: "/vapor/cache/example".into(),
+                enabled: true,
+                fingerprint: None,
+                install_source: None,
+            }],
+            conflicts: Vec::new(),
+        }];
+
+        assert!(is_cached_exact_version(&items, "ghf.example.mod@1.2.3"));
+        assert!(!is_cached_exact_version(&items, "ghf.example.mod@1.2.4"));
+        assert!(!is_cached_exact_version(&items, "ghf.example.mod"));
+    }
 }

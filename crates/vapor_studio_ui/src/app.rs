@@ -83,6 +83,7 @@ pub struct StudioApp {
     command_palette_search: String,
     command_palette_focus_search: bool,
     command_palette_selected_index: usize,
+    console_open: bool,
 }
 
 impl StudioApp {
@@ -96,11 +97,7 @@ impl StudioApp {
             .map(|action| action.enabled)
     }
 
-    pub fn new(
-        creation: &eframe::CreationContext<'_>,
-        workspace: Option<PathBuf>,
-        play_mode: bool,
-    ) -> Self {
+    pub fn new(creation: &eframe::CreationContext<'_>, workspace: Option<PathBuf>) -> Self {
         configure_studio_visuals(&creation.egui_ctx);
         let saved_workspace = creation
             .storage
@@ -108,20 +105,17 @@ impl StudioApp {
         let saved_editor_drafts = creation
             .storage
             .and_then(|storage| storage.get_string("workspace_editor_drafts"));
-        let current_directory = std::env::current_dir().ok();
         let explicit_workspace = workspace.clone();
         let requested_workspace = workspace
             .or_else(|| saved_workspace.clone().map(PathBuf::from))
             .or_else(|| {
-                current_directory
+                std::env::current_dir()
+                    .ok()
                     .as_ref()
                     .filter(|root| root.join("Workspace.vapor.toml").is_file())
                     .cloned()
             });
-        let root = requested_workspace
-            .clone()
-            .or(current_directory)
-            .unwrap_or_default();
+        let fallback_root = home_directory().join("Vapor");
         let saved_compositions = creation.storage.and_then(|storage| {
             storage
                 .get_string("profiles")
@@ -176,22 +170,15 @@ impl StudioApp {
             .as_ref()
             .map(|workspace| workspace.display().to_string())
             .unwrap_or_default();
-        let workspace_root_draft = if workspace_root.is_empty() {
-            root.display().to_string()
-        } else {
-            workspace_root.clone()
-        };
+        let workspace_root_draft = workspace_root.clone();
         let composition_name_draft = compositions[active_composition].name.clone();
-        let mut workspace_state = WorkspaceState::new(workspace_root, workspace_root_draft, root);
+        let mut workspace_state =
+            WorkspaceState::new(workspace_root, workspace_root_draft, fallback_root);
         workspace_state.editor.draft_recovery = saved_editor_drafts;
         let mut operation = OperationState::default();
         operation.restore_history(saved_operation_history.as_deref());
         let mut app = Self {
-            section: if play_mode {
-                Section::Compositions
-            } else {
-                Section::Home
-            },
+            section: Section::Home,
             workspace: workspace_state,
             composition: CompositionState::new(
                 compositions,
@@ -211,7 +198,7 @@ impl StudioApp {
             root_publishing: RootPublishingState::default(),
             authoring: AuthoringState::default(),
             composition_preview: CompositionPreviewState::default(),
-            status: "Choose a workspace or discover content in this folder.".to_owned(),
+            status: "Choose a workspace to manage authored content. Use Vapor Launcher to play compositions.".to_owned(),
             operation,
             service: None,
             service_error: None,
@@ -223,6 +210,7 @@ impl StudioApp {
             command_palette_search: String::new(),
             command_palette_focus_search: false,
             command_palette_selected_index: 0,
+            console_open: false,
         };
         app.start_service(
             explicit_workspace,
@@ -234,8 +222,7 @@ impl StudioApp {
             legacy_storage,
         );
         app.refresh_registered_sources();
-        if !play_mode
-            && app.composition.items[app.composition.active_index].id == "default"
+        if app.composition.items[app.composition.active_index].id == "default"
             && app.composition.items[app.composition.active_index]
                 .root_package
                 .is_none()
@@ -245,12 +232,7 @@ impl StudioApp {
         {
             app.ensure_default_composition_root();
         }
-        if play_mode {
-            app.submit_service_action(ClientAction::Catalog(
-                vapor_client_protocol::CatalogAction::Refresh,
-            ));
-            app.launch_default_composition();
-        } else if let Some(workspace) = requested_workspace {
+        if let Some(workspace) = requested_workspace {
             app.open_workspace_path_to(workspace, Section::Home);
         } else {
             app.discover();
@@ -307,6 +289,7 @@ impl StudioApp {
                 self.submit_service_action(ClientAction::Developer(
                     vapor_client_protocol::DeveloperAction::RefreshProfileTraces,
                 ));
+                self.discover_superworkspace_projects_if_ready();
             }
             Err(error) => {
                 let message = match &error {
@@ -380,6 +363,7 @@ impl StudioApp {
                 self.submit_service_action(ClientAction::Developer(
                     vapor_client_protocol::DeveloperAction::RefreshProfileTraces,
                 ));
+                self.discover_superworkspace_projects_if_ready();
             }
             Some(Ok(Err(error))) => {
                 self.service_connection_attempt = None;
@@ -397,11 +381,44 @@ impl StudioApp {
             Some(Err(TryRecvError::Empty)) | None => {}
         }
     }
+
+    pub(super) fn discover_superworkspace_projects_if_ready(&mut self) {
+        let is_ready = self.service.as_ref().is_some_and(|service| {
+            let snapshot = service.latest_snapshot();
+            snapshot.superworkspace.status == "ready" && snapshot.active_operation.is_none()
+        });
+        if is_ready && !self.operation.running {
+            self.start_service_operation(
+                ClientAction::Workspace(
+                    vapor_client_protocol::WorkspaceAction::DiscoverSuperworkspaceRepositories,
+                ),
+                None,
+                vapor_client_application::OperationKind::Discover,
+                vapor_client_application::OperationPhase::Resolving,
+                "Finding available Vapor source projects…",
+            );
+        }
+    }
+}
+
+fn home_directory() -> PathBuf {
+    #[cfg(windows)]
+    let variable = "USERPROFILE";
+    #[cfg(not(windows))]
+    let variable = "HOME";
+
+    std::env::var_os(variable)
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 fn configure_studio_visuals(context: &egui::Context) {
     use components::design::{ACCENT, ACCENT_FILL};
 
+    // Keep Studio's authored palette consistent across platforms. The system
+    // theme is often light on Windows, which otherwise selects egui's default
+    // light visuals even though the Studio palette is designed for dark mode.
+    context.set_theme(egui::ThemePreference::Dark);
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = egui::Color32::from_rgb(15, 20, 28);
     visuals.window_fill = egui::Color32::from_rgb(20, 27, 36);
@@ -437,5 +454,5 @@ fn configure_studio_visuals(context: &egui::Context) {
         .text_styles
         .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
     context.set_style_of(egui::Theme::Dark, style);
-    context.set_visuals(visuals);
+    context.set_visuals_of(egui::Theme::Dark, visuals);
 }

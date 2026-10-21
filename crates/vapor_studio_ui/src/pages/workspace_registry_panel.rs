@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 impl StudioApp {
     pub(super) fn draw_workspace_registry_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label("Choose the project folder you are currently authoring. A composition can keep a separate source folder for local runs.");
+        ui.label("A project folder is where you edit source. Vapor keeps it separate from the playable compositions you launch.");
         self.draw_superworkspace_card(ui);
         ui.add_space(8.0);
         let card_style = ui.style().clone();
@@ -55,50 +55,43 @@ impl StudioApp {
                     };
                 }
             });
-            ui.label("One shared place for Vapor to find and acquire source projects. This stays separate from the project folder you are editing and from every playable composition.");
+            ui.label("Your shared source collection. Open one of its projects to edit it; playable compositions stay separate.");
             if let Some(snapshot) = snapshot.as_ref() {
-                if let Some(root) = snapshot.root.as_deref() {
-                    ui.small(root);
-                }
                 if let Some(error) = snapshot.error.as_deref() {
                     status_text(ui, error, StatusTone::Caution);
                 }
                 if snapshot.status == "ready" {
-                    ui.weak(format!("{} source repositories found", snapshot.repositories.len()));
+                    ui.weak("Choose a project already in your Vapor source folder, or get another one.");
                     if let Some(error) = snapshot.available_repositories_error.as_deref() {
                         status_text(ui, error, StatusTone::Caution);
                     }
-                    ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .add_enabled(
-                                !self.operation.running,
-                                egui::Button::new(if snapshot.available_repositories_loaded {
-                                    "Refresh project list"
-                                } else {
-                                    "Find source projects"
-                                }),
-                            )
-                            .clicked()
-                        {
-                            let action = vapor_client_protocol::ClientAction::Workspace(
-                                vapor_client_protocol::WorkspaceAction::DiscoverSuperworkspaceRepositories,
-                            );
-                            self.status = match self.apply_service_action(action) {
-                                Ok(()) => "Finding Vapor source projects…".to_owned(),
-                                Err(error) => format!("Could not find source projects: {error}"),
-                            };
+                    if snapshot.available_repositories_loaded {
+                        if ui.small_button("Refresh project choices").clicked() {
+                            self.discover_superworkspace_projects_if_ready();
                         }
-                    });
-                    if !snapshot.available_repositories_loaded {
-                        ui.weak("Find the source projects available to this Vapor installation.");
+                    } else if snapshot.available_repositories_error.is_some() {
+                        if ui.button("Try finding projects again").clicked() {
+                            self.discover_superworkspace_projects_if_ready();
+                        }
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.weak("Finding available projects…");
+                        });
+                    }
+                    if snapshot.available_repositories_loaded
+                        && snapshot.available_repositories.is_empty()
+                        && snapshot.available_repositories_error.is_none()
+                    {
+                        ui.weak("No source projects are available yet. You can still open a folder below.");
                     }
                     for repository in &snapshot.available_repositories {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(&repository.name);
                             ui.weak(match repository.kind.as_str() {
-                                "workspace" => "Vapor Workspace",
-                                "container-repo" => "Container Repo",
-                                kind => kind,
+                                "workspace" => "Project",
+                                "container-repo" => "Project group",
+                                _ => "Source",
                             });
                             let local = snapshot
                                 .repositories
@@ -111,7 +104,7 @@ impl StudioApp {
                                     && ui
                                         .add_enabled(
                                             !self.operation.running,
-                                            egui::Button::new("Open for authoring"),
+                                            egui::Button::new("Open project"),
                                         )
                                         .clicked()
                                 {
@@ -120,7 +113,7 @@ impl StudioApp {
                             } else if ui
                                 .add_enabled(
                                     !self.operation.running,
-                                    egui::Button::new("Get"),
+                                    egui::Button::new("Download"),
                                 )
                                 .clicked()
                             {
@@ -132,19 +125,28 @@ impl StudioApp {
                 ui.horizontal_wrapped(|ui| {
                     if snapshot.status != "ready"
                         && ui
-                            .add_enabled(!self.operation.running, egui::Button::new("Set up default folder"))
+                            .add_enabled(!self.operation.running, egui::Button::new("Set up my source folder"))
                             .clicked()
                     {
                         let action = vapor_client_protocol::ClientAction::Workspace(
                             vapor_client_protocol::WorkspaceAction::InitializeSuperworkspace,
                         );
                         self.status = match self.apply_service_action(action) {
-                            Ok(()) => "Vapor's shared source folder is ready.".to_owned(),
+                            Ok(()) => {
+                                self.discover_superworkspace_projects_if_ready();
+                                "Vapor's shared source folder is ready. Finding available projects…".to_owned()
+                            }
                             Err(error) => format!("Could not set up Vapor's shared source folder: {error}"),
                         };
                     }
+                });
+                ui.collapsing("Source folder details and advanced tools", |ui| {
+                    if let Some(root) = snapshot.root.as_deref() {
+                        ui.label("Vapor source folder");
+                        ui.small(root);
+                    }
                     if ui
-                        .add_enabled(!self.operation.running, egui::Button::new("Change location…"))
+                        .add_enabled(!self.operation.running, egui::Button::new("Change source folder…"))
                         .clicked()
                     {
                         self.open_superworkspace_picker();
@@ -171,9 +173,9 @@ impl StudioApp {
     }
 
     fn draw_current_workspace_card(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Current project folder");
+        ui.heading("Project you’re editing");
         if self.workspace.root.trim().is_empty() {
-            ui.weak("No project folder is open for this composition.");
+            ui.weak("No project is open. Choose one from your Vapor source folder or open an existing folder.");
         } else {
             ui.label(
                 std::path::Path::new(self.workspace.root.trim())
@@ -181,36 +183,50 @@ impl StudioApp {
                     .and_then(|name| name.to_str())
                     .unwrap_or(&self.workspace.root),
             );
-            ui.small(&self.workspace.root);
-            ui.weak("Studio uses this folder when you create projects, choose game content, and prepare a local launch.");
+            ui.weak("This is your authoring source. Your playable compositions keep their own launch settings.");
         }
         ui.add_space(8.0);
-        ui.label("Open a project folder");
-        ui.weak("Studio can open a folder even if a project needs repair. Some actions become available after you fix it.");
         ui.horizontal_wrapped(|ui| {
-            let path_width = ui.available_width().min(420.0);
-            ui.add_enabled(
-                !self.operation.running,
-                egui::TextEdit::singleline(&mut self.workspace.root_draft)
-                    .desired_width(path_width)
-                    .hint_text("Choose or enter a folder path"),
-            );
             if ui
-                .add_enabled(!self.operation.running, egui::Button::new("Browse…"))
+                .add_enabled(
+                    !self.operation.running,
+                    egui::Button::new("Open an existing project folder…"),
+                )
                 .clicked()
             {
                 self.open_workspace_picker();
             }
-            if ui
-                .add_enabled(
-                    !self.operation.running && !self.workspace.root_draft.trim().is_empty(),
-                    egui::Button::new("Open"),
-                )
-                .clicked()
-            {
-                self.open_workspace_path(PathBuf::from(self.workspace.root_draft.trim()));
-            }
         });
+        ui.collapsing("Folder details and additional tools", |ui| {
+            if !self.workspace.root.trim().is_empty() {
+                ui.label("Current folder");
+                ui.small(&self.workspace.root);
+            }
+            ui.label("Open a folder by location");
+            ui.horizontal_wrapped(|ui| {
+                let path_width = ui.available_width().min(420.0);
+                ui.add_enabled(
+                    !self.operation.running,
+                    egui::TextEdit::singleline(&mut self.workspace.root_draft)
+                        .desired_width(path_width)
+                        .hint_text("Folder path"),
+                );
+                if ui
+                    .add_enabled(
+                        !self.operation.running && !self.workspace.root_draft.trim().is_empty(),
+                        egui::Button::new("Open"),
+                    )
+                    .clicked()
+                {
+                    self.open_workspace_path(PathBuf::from(self.workspace.root_draft.trim()));
+                }
+            });
+            ui.weak("Opening a folder directly is useful for local or unpublished projects.");
+            self.draw_workspace_registration_tools(ui);
+        });
+    }
+
+    fn draw_workspace_registration_tools(&mut self, ui: &mut egui::Ui) {
         if !self.workspace.root.trim().is_empty() {
             let current = Path::new(self.workspace.root.trim());
             let registered = self

@@ -3950,6 +3950,7 @@ dependencies = [
  "vapor_client_domain",
  "vapor_client_protocol",
  "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -152,6 +152,7 @@ impl StudioApp {
             }
             AuthoringResultKind::ContentPackaged {
                 id,
+                selector,
                 target,
                 files,
                 bytes,
@@ -167,6 +168,7 @@ impl StudioApp {
                 self.workspace.last_package = Some(super::workspace_ops::PackageOutcome {
                     workspace_root: PathBuf::from(self.workspace.root.trim()),
                     id,
+                    selector,
                     target,
                     files,
                     bytes,

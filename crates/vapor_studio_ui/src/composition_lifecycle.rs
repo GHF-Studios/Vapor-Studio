@@ -291,12 +291,6 @@ impl StudioApp {
         }
     }
 
-    pub(super) fn launch_default_composition(&mut self) {
-        if self.ensure_default_composition_root() {
-            self.run_installed_selected();
-        }
-    }
-
     pub(super) fn run_selected(&mut self) {
         if !self.require_saved_workspace("build and play this workspace composition") {
             return;

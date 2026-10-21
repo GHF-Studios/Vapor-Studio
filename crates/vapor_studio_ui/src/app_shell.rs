@@ -340,6 +340,8 @@ impl StudioApp {
                     self.activate_navigation_section(Section::Compositions);
                 }
             }
+            ui.toggle_value(&mut self.console_open, "Console")
+                .on_hover_text("Open the live operation log in a separate window.");
             if show_composition_create
                 && ui
                     .add_enabled(
@@ -418,6 +420,7 @@ impl eframe::App for StudioApp {
                 .show(ui, |ui| self.draw_navigation(ui));
         }
         egui::Panel::top("studio-header").show(ui, |ui| self.draw_header(ui));
+        self.show_console_viewport(ui.ctx());
         egui::Panel::bottom("studio-operation-center")
             .show(ui, |ui| self.draw_operation_center(ui));
         egui::CentralPanel::default().show(ui, |ui| {
@@ -502,12 +505,16 @@ impl eframe::App for StudioApp {
                                 root: path.display().to_string(),
                             },
                         );
-                        self.status = match self.apply_service_action(action) {
+                        let result = self.apply_service_action(action);
+                        self.status = match &result {
                             Ok(()) => "Vapor's shared source folder was updated.".to_owned(),
                             Err(error) => {
                                 format!("Could not change the shared source folder: {error}")
                             }
                         };
+                        if result.is_ok() {
+                            self.discover_superworkspace_projects_if_ready();
+                        }
                     }
                 }
             }

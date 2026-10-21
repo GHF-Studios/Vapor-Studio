@@ -22,6 +22,7 @@ pub(super) struct OperationState {
     pub(super) active_operation: Option<OperationEvent>,
     pub(super) operation_history: VecDeque<HistoricalOperation>,
     pub(super) output_lines: VecDeque<OperationOutputLine>,
+    pub(super) dropped_output_lines: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +59,7 @@ impl OperationState {
         }
         if self.output_lines.len() == MAX_OPERATION_OUTPUT_LINES {
             self.output_lines.pop_front();
+            self.dropped_output_lines = self.dropped_output_lines.saturating_add(1);
         }
         self.output_lines.push_back(OperationOutputLine {
             stream: event.stream,
@@ -142,6 +144,7 @@ impl StudioApp {
             status: OperationStatus::Running,
         });
         self.operation.output_lines.clear();
+        self.operation.dropped_output_lines = 0;
         self.operation.running = true;
         self.operation.service_owned = true;
         self.operation.service_request_id = Some(request_id);
@@ -462,5 +465,42 @@ fn service_phase(phase: ServiceOperationPhase) -> OperationPhase {
         ServiceOperationPhase::Finalizing | ServiceOperationPhase::Complete => {
             OperationPhase::Finalizing
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_OPERATION_OUTPUT_LINES, OperationState};
+    use vapor_client_application::{OperationEvent, OperationId, OperationKind, OperationPhase};
+    use vapor_client_protocol::{OperationOutputEvent, OperationOutputStream};
+
+    #[test]
+    fn output_retention_reports_lines_that_roll_off_the_bounded_buffer() {
+        let mut state = OperationState {
+            active_operation: Some(OperationEvent {
+                id: OperationId(7),
+                composition_id: None,
+                kind: OperationKind::Check,
+                phase: OperationPhase::Running,
+                progress: None,
+                status: super::OperationStatus::Running,
+            }),
+            ..OperationState::default()
+        };
+
+        for index in 0..=MAX_OPERATION_OUTPUT_LINES {
+            state.apply_service_operation_output(&OperationOutputEvent {
+                id: "7".to_owned(),
+                stream: OperationOutputStream::Stdout,
+                text: format!("line {index}"),
+            });
+        }
+
+        assert_eq!(state.output_lines.len(), MAX_OPERATION_OUTPUT_LINES);
+        assert_eq!(state.dropped_output_lines, 1);
+        assert_eq!(
+            state.output_lines.front().map(|line| line.text.as_str()),
+            Some("line 1")
+        );
     }
 }

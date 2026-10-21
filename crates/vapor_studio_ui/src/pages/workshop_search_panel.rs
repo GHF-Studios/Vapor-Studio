@@ -35,12 +35,39 @@ impl StudioApp {
                     egui::Button::new("Search Workshop"),
                 )
                 .clicked();
+            let selected = self
+                .workshop
+                .kind_filter
+                .as_deref()
+                .and_then(|kind| kind.parse::<vapor_client_protocol::ContentKind>().ok());
+            egui::ComboBox::from_id_salt("workshop-content-kind")
+                .selected_text(selected.map_or("All content types", |kind| kind.as_str()))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_value(&mut self.workshop.kind_filter, None, "All content types")
+                        .clicked()
+                    {
+                        run_search = true;
+                    }
+                    for kind in vapor_client_protocol::ContentKind::ALL {
+                        if ui
+                            .selectable_value(
+                                &mut self.workshop.kind_filter,
+                                Some(kind.as_str().to_owned()),
+                                kind.as_str(),
+                            )
+                            .clicked()
+                        {
+                            run_search = true;
+                        }
+                    }
+                });
         });
-        ui.weak("Subscribe to follow updates, or add an item to your Library when you want to use it. Neither action changes a composition.");
+        ui.weak("Filter by Vapor content type. Subscribe to follow updates, or add an item to your Library when you want to use it. Neither action changes a composition.");
         if run_search && !self.operation.running && steam_available {
             self.search_workshop();
         }
-        if let Some((query, page)) = self.workshop.pending_search.as_ref() {
+        if let Some((query, page, _tags)) = self.workshop.pending_search.as_ref() {
             ui.horizontal_wrapped(|ui| {
                 ui.spinner();
                 ui.label(if query.is_empty() {
@@ -173,14 +200,19 @@ impl StudioApp {
             }
         }
         if let Some(query) = &self.workshop.results_query {
+            let type_label = self
+                .workshop
+                .results_tags
+                .first()
+                .map_or_else(|| "all content types".to_owned(), |tag| tag.to_owned());
             if self.workshop.results.is_empty() {
-                if query.is_empty() {
-                    ui.weak("Workshop search returned no items.");
+                ui.weak(if query.is_empty() {
+                    format!("No Workshop items found for {type_label}.")
                 } else {
-                    ui.weak(format!("No Workshop items matched ‘{query}’."));
-                }
+                    format!("No {type_label} Workshop items matched ‘{query}’.")
+                });
             } else {
-                ui.small(format!("Results for ‘{query}’"));
+                ui.small(format!("Results · {type_label} · {query}"));
             }
         }
         if self.workshop.results.is_empty() {
@@ -254,6 +286,13 @@ impl StudioApp {
                                 self.workshop.focused_result = Some(item.published_file_id.clone());
                             }
                         });
+                        if !item.tags.is_empty() {
+                            ui.horizontal_wrapped(|ui| {
+                                for tag in item.tags.iter().take(5) {
+                                    ui.small(tag);
+                                }
+                            });
+                        }
                         ui.separator();
                     }
                 });
@@ -267,6 +306,13 @@ impl StudioApp {
             });
             if let Some(item) = focused_item {
                 details.strong(&item.title);
+                if !item.tags.is_empty() {
+                    details.horizontal_wrapped(|ui| {
+                        for tag in &item.tags {
+                            ui.small(tag);
+                        }
+                    });
+                }
                 details.collapsing("Workshop item ID", |ui| {
                     ui.monospace(&item.published_file_id);
                 });

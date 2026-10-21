@@ -4,6 +4,53 @@ use eframe::egui;
 use vapor_client_protocol::ClientAction;
 
 impl StudioApp {
+    pub(super) fn show_console_viewport(&mut self, context: &egui::Context) {
+        if !self.console_open {
+            return;
+        }
+
+        let viewport_id = egui::ViewportId::from_hash_of("vapor-studio-console");
+        let close_requested = context.show_viewport_immediate(
+            viewport_id,
+            egui::ViewportBuilder::default()
+                .with_title("Vapor Studio — Console")
+                .with_inner_size([820.0, 560.0])
+                .with_min_inner_size([480.0, 260.0])
+                .with_resizable(true),
+            |ui, _class| {
+                let close_requested = ui.input(|input| input.viewport().close_requested());
+                egui::CentralPanel::default().show(ui, |ui| self.draw_operation_console(ui));
+                close_requested || !self.console_open
+            },
+        );
+        if close_requested {
+            self.console_open = false;
+        }
+    }
+
+    pub(super) fn has_failed_operation(&self) -> bool {
+        self.operation
+            .active_operation
+            .as_ref()
+            .is_some_and(|operation| {
+                matches!(
+                    &operation.status,
+                    vapor_client_application::OperationStatus::Failed { .. }
+                )
+            })
+            || (!self.operation.running
+                && self
+                    .operation
+                    .operation_history
+                    .front()
+                    .is_some_and(|operation| {
+                        matches!(
+                            &operation.event.status,
+                            vapor_client_application::OperationStatus::Failed { .. }
+                        )
+                    }))
+    }
+
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
         let mut cancel_operation_id = None;
         ui.horizontal_wrapped(|ui| {
@@ -83,27 +130,69 @@ impl StudioApp {
                 vapor_client_protocol::SessionAction::CancelOperation { operation_id },
             ));
         }
-        if !self.operation.output_lines.is_empty() {
-            ui.collapsing(
-                format!("Output · {} lines", self.operation.output_lines.len()),
-                |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(180.0)
-                        .show(ui, |ui| {
-                            for line in &self.operation.output_lines {
-                                match line.stream {
-                                    vapor_client_protocol::OperationOutputStream::Stdout => {
-                                        ui.label(&line.text);
-                                    }
-                                    vapor_client_protocol::OperationOutputStream::Stderr => {
-                                        ui.colored_label(egui::Color32::LIGHT_RED, &line.text);
-                                    }
-                                }
-                            }
-                        });
-                },
+    }
+
+    pub(super) fn draw_operation_console(&mut self, ui: &mut egui::Ui) {
+        let mut close_console = false;
+        ui.horizontal(|ui| {
+            ui.strong("Console");
+            if self.operation.dropped_output_lines == 0 {
+                ui.weak(format!("{} lines", self.operation.output_lines.len()));
+            } else {
+                ui.weak(format!(
+                    "Showing latest {} lines · {} earlier lines omitted",
+                    self.operation.output_lines.len(),
+                    self.operation.dropped_output_lines
+                ));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                close_console = ui.small_button("Close").clicked();
+            });
+        });
+        if close_console {
+            self.console_open = false;
+        }
+        ui.separator();
+        if self.operation.dropped_output_lines > 0 {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!(
+                    "Earlier output was omitted to keep memory bounded ({} lines).",
+                    self.operation.dropped_output_lines
+                ),
             );
         }
+        let available_height = ui.available_height();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .max_height(available_height)
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                if self.status.chars().count() > 120 || self.has_failed_operation() {
+                    ui.strong("Latest message");
+                    ui.add(egui::Label::new(&self.status).wrap_mode(egui::TextWrapMode::Wrap));
+                    if !self.operation.output_lines.is_empty() {
+                        ui.separator();
+                    }
+                }
+                for line in &self.operation.output_lines {
+                    match line.stream {
+                        vapor_client_protocol::OperationOutputStream::Stdout => {
+                            ui.add(
+                                egui::Label::new(&line.text).wrap_mode(egui::TextWrapMode::Wrap),
+                            );
+                        }
+                        vapor_client_protocol::OperationOutputStream::Stderr => {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&line.text).color(egui::Color32::LIGHT_RED),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            );
+                        }
+                    }
+                }
+            });
     }
 }
 
