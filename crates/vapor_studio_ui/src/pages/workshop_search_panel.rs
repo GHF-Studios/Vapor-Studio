@@ -67,7 +67,7 @@ impl StudioApp {
         if run_search && !self.operation.running && steam_available {
             self.search_workshop();
         }
-        if let Some((query, page, _tags)) = self.workshop.pending_search.as_ref() {
+        if let Some((query, page, _content_kind)) = self.workshop.pending_search.as_ref() {
             ui.horizontal_wrapped(|ui| {
                 ui.spinner();
                 ui.label(if query.is_empty() {
@@ -84,18 +84,45 @@ impl StudioApp {
         }
         if !self.workshop.results.is_empty() {
             let page_count = self.workshop.total_results.div_ceil(50).max(1);
+            if ![10, 20, 50].contains(&self.workshop.page_size) {
+                self.workshop.page_size = 20;
+            }
+            let result_page_count = self
+                .workshop
+                .results
+                .len()
+                .div_ceil(self.workshop.page_size)
+                .max(1);
             ui.horizontal_wrapped(|ui| {
                 ui.weak(format!(
-                    "Showing {} of {} results · page {} of {}",
-                    self.workshop.results.len(),
-                    self.workshop.total_results,
+                    "Steam page {} of {} · results page {} of {} · {} total",
                     self.workshop.page,
-                    page_count
+                    page_count,
+                    self.workshop.results_offset / self.workshop.page_size + 1,
+                    result_page_count,
+                    self.workshop.total_results,
                 ));
+                egui::ComboBox::from_label("Rows shown")
+                    .selected_text(self.workshop.page_size.to_string())
+                    .show_ui(ui, |ui| {
+                        for size in [10, 20, 50] {
+                            if ui
+                                .selectable_value(
+                                    &mut self.workshop.page_size,
+                                    size,
+                                    size.to_string(),
+                                )
+                                .changed()
+                            {
+                                self.workshop.results_offset = 0;
+                                self.workshop.selected_items.clear();
+                            }
+                        }
+                    });
                 let previous = ui
                     .add_enabled(
                         !self.operation.running && steam_available && self.workshop.page > 1,
-                        egui::Button::new("Previous"),
+                        egui::Button::new("Previous Steam page"),
                     )
                     .clicked();
                 let next = ui
@@ -103,7 +130,7 @@ impl StudioApp {
                         !self.operation.running
                             && steam_available
                             && self.workshop.page < page_count,
-                        egui::Button::new("Next"),
+                        egui::Button::new("Next Steam page"),
                     )
                     .clicked();
                 if previous {
@@ -112,24 +139,56 @@ impl StudioApp {
                     self.search_workshop_page(self.workshop.page.saturating_add(1));
                 }
             });
+            if result_page_count > 1 {
+                ui.horizontal_wrapped(|ui| {
+                    let previous = ui
+                        .add_enabled(
+                            self.workshop.results_offset > 0,
+                            egui::Button::new("← Previous results"),
+                        )
+                        .clicked();
+                    let next = ui
+                        .add_enabled(
+                            self.workshop.results_offset + self.workshop.page_size
+                                < self.workshop.results.len(),
+                            egui::Button::new("More results →"),
+                        )
+                        .clicked();
+                    if previous {
+                        self.workshop.results_offset = self
+                            .workshop
+                            .results_offset
+                            .saturating_sub(self.workshop.page_size);
+                    } else if next {
+                        self.workshop.results_offset += self.workshop.page_size;
+                    }
+                });
+            }
+            let visible_results: Vec<_> = self
+                .workshop
+                .results
+                .iter()
+                .skip(self.workshop.results_offset)
+                .take(self.workshop.page_size)
+                .collect();
             ui.horizontal_wrapped(|ui| {
-                let page_is_selected = self.workshop.results.iter().all(|item| {
+                let page_is_selected = visible_results.iter().all(|item| {
                     self.workshop
                         .selected_items
                         .contains(&item.published_file_id)
                 });
                 if ui
                     .add_enabled(
-                        !self.operation.running,
+                        !self.operation.running && !visible_results.is_empty(),
                         egui::Button::new(if page_is_selected {
-                            "Clear this page"
+                            "Clear visible"
                         } else {
-                            "Select this page"
+                            "Select visible"
                         }),
                     )
                     .clicked()
                 {
-                    for item in &self.workshop.results {
+                    for item in visible_results {
                         if page_is_selected {
                             self.workshop.selected_items.remove(&item.published_file_id);
                         } else {
@@ -202,9 +261,8 @@ impl StudioApp {
         if let Some(query) = &self.workshop.results_query {
             let type_label = self
                 .workshop
-                .results_tags
-                .first()
-                .map_or_else(|| "all content types".to_owned(), |tag| tag.to_owned());
+                .results_content_kind
+                .map_or_else(|| "all content types".to_owned(), |kind| kind.as_str().to_owned());
             if self.workshop.results.is_empty() {
                 ui.weak(if query.is_empty() {
                     format!("No Workshop items found for {type_label}.")
@@ -250,7 +308,13 @@ impl StudioApp {
             egui::ScrollArea::vertical()
                 .id_salt("workshop-search-results")
                 .show(list, |ui| {
-                    for item in &self.workshop.results {
+                    for item in self
+                        .workshop
+                        .results
+                        .iter()
+                        .skip(self.workshop.results_offset)
+                        .take(self.workshop.page_size)
+                    {
                         ui.horizontal_wrapped(|ui| {
                             let mut selected = self
                                 .workshop

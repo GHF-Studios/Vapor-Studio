@@ -4038,6 +4038,14 @@ dependencies = [
  "egui_plot",
  "serde_json",
  "vapor_client_protocol",
+ "vapor_console_core",
+]
+
+[[package]]
+name = "vapor_console_core"
+version = "0.5.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -4046,6 +4054,7 @@ version = "0.5.0"
 dependencies = [
  "eframe",
  "egui_code_editor",
+ "vapor_console_core",
 ]
 
 [[package]]
@@ -4077,6 +4086,7 @@ version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
+ "vapor_console_core",
 ]
 
 [[package]]

@@ -30,14 +30,17 @@ pub(super) struct WorkshopState {
     pub(super) omitted_review_file_paths: usize,
     pub(super) search_query: String,
     pub(super) kind_filter: Option<String>,
-    pub(super) pending_search: Option<(String, u32, Vec<String>)>,
+    pub(super) pending_search:
+        Option<(String, u32, Option<vapor_client_protocol::ContentKind>)>,
     pub(super) service_search_revision: u64,
     pub(super) pending_service_search_revision: Option<u64>,
     pub(super) service_acquisition_revision: u64,
     pub(super) results: Vec<vapor_client_application::WorkshopItem>,
     pub(super) focused_result: Option<String>,
     pub(super) results_query: Option<String>,
-    pub(super) results_tags: Vec<String>,
+    pub(super) results_content_kind: Option<vapor_client_protocol::ContentKind>,
+    pub(super) page_size: usize,
+    pub(super) results_offset: usize,
     pub(super) subscriptions: std::collections::BTreeSet<String>,
     pub(super) subscriptions_loaded: bool,
     pub(super) subscriptions_stale: bool,
@@ -74,7 +77,9 @@ impl Default for WorkshopState {
             results: Vec::new(),
             focused_result: None,
             results_query: None,
-            results_tags: Vec::new(),
+            results_content_kind: None,
+            page_size: 20,
+            results_offset: 0,
             subscriptions: Default::default(),
             subscriptions_loaded: false,
             subscriptions_stale: false,
@@ -107,10 +112,10 @@ impl StudioApp {
                 self.workshop
                     .pending_search
                     .as_ref()
-                    .is_some_and(|(query, page, tags)| {
+                    .is_some_and(|(query, page, content_kind)| {
                         query == &search.query
                             && *page == search.page
-                            && tags == &search.required_tags
+                            && *content_kind == search.content_kind
                     });
             if pending_matches
                 && self
@@ -138,7 +143,7 @@ impl StudioApp {
                         total_results: search.total_results,
                     },
                     search.query.clone(),
-                    search.required_tags.clone(),
+                    search.content_kind,
                 );
             } else {
                 self.workshop.service_search_revision =
@@ -251,7 +256,7 @@ impl StudioApp {
     }
 
     pub(super) fn apply_workshop_error(&mut self, error: String) {
-        if let Some((query, page, _tags)) = self.workshop.pending_search.take() {
+        if let Some((query, page, _content_kind)) = self.workshop.pending_search.take() {
             self.workshop.pending_service_search_revision = None;
             self.status = format!(
                 "Workshop search for ‘{}’ (page {page}) failed: {error}. Previous results remain available.",
@@ -331,13 +336,14 @@ impl StudioApp {
         &mut self,
         page: vapor_client_application::WorkshopPage,
         query: String,
-        required_tags: Vec<String>,
+        content_kind: Option<vapor_client_protocol::ContentKind>,
     ) {
         self.workshop.pending_search = None;
         self.workshop.pending_service_search_revision = None;
         self.workshop.page = page.page;
         self.workshop.total_results = page.total_results;
         self.workshop.results = page.items;
+        self.workshop.results_offset = 0;
         if self.workshop.focused_result.as_ref().is_none_or(|focused| {
             !self
                 .workshop
@@ -352,7 +358,7 @@ impl StudioApp {
                 .map(|item| item.published_file_id.clone());
         }
         self.workshop.results_query = Some(query);
-        self.workshop.results_tags = required_tags;
+        self.workshop.results_content_kind = content_kind;
         self.status = format!(
             "Steam Workshop returned {} items on page {} of {}.",
             self.workshop.results.len(),
@@ -595,25 +601,25 @@ impl StudioApp {
             return;
         }
         let query = self.workshop.search_query.trim().to_owned();
-        let required_tags = self
+        let content_kind = self
             .workshop
             .kind_filter
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+            .as_deref()
+            .and_then(|kind| kind.parse::<vapor_client_protocol::ContentKind>().ok());
         let status = if query.is_empty() {
             format!("Searching Steam Workshop · page {page}…")
         } else {
             format!("Searching Workshop for ‘{query}’ · page {page}…")
         };
-        self.workshop.pending_search = Some((query.clone(), page, required_tags.clone()));
+        self.workshop.pending_search = Some((query.clone(), page, content_kind));
         self.workshop.pending_service_search_revision = Some(self.workshop.service_search_revision);
         self.start_service_operation(
             vapor_client_protocol::ClientAction::Workshop(
                 vapor_client_protocol::WorkshopAction::Search {
                     query,
                     page,
-                    required_tags,
+                    content_kind,
+                    required_tags: Vec::new(),
                 },
             ),
             None,
