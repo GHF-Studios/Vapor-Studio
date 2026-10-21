@@ -16,10 +16,13 @@ impl StudioApp {
                 .with_title("Vapor Studio — Console")
                 .with_inner_size([820.0, 560.0])
                 .with_min_inner_size([480.0, 260.0])
-                .with_resizable(true),
+                .with_resizable(true)
+                .with_transparent(false),
             |ui, _class| {
                 let close_requested = ui.input(|input| input.viewport().close_requested());
-                egui::CentralPanel::default().show(ui, |ui| self.draw_operation_console(ui));
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::new().fill(egui::Color32::BLACK))
+                    .show(ui, |ui| self.draw_operation_console(ui));
                 close_requested || !self.console_open
             },
         );
@@ -135,7 +138,11 @@ impl StudioApp {
     pub(super) fn draw_operation_console(&mut self, ui: &mut egui::Ui) {
         let mut close_console = false;
         ui.horizontal(|ui| {
-            ui.strong("Console");
+            ui.label(
+                egui::RichText::new("Vapor Console")
+                    .strong()
+                    .color(egui::Color32::WHITE),
+            );
             if self.operation.dropped_output_lines == 0 {
                 ui.weak(format!("{} lines", self.operation.output_lines.len()));
             } else {
@@ -163,34 +170,49 @@ impl StudioApp {
             );
         }
         let available_height = ui.available_height();
-        egui::ScrollArea::vertical()
+        egui::ScrollArea::both()
             .auto_shrink([false, false])
             .max_height(available_height)
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 if self.status.chars().count() > 120 || self.has_failed_operation() {
-                    ui.strong("Latest message");
-                    ui.add(egui::Label::new(&self.status).wrap_mode(egui::TextWrapMode::Wrap));
+                    ui.label(
+                        egui::RichText::new("Latest message")
+                            .strong()
+                            .color(egui::Color32::WHITE),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.status)
+                                .monospace()
+                                .color(egui::Color32::LIGHT_GRAY),
+                        )
+                        .wrap_mode(egui::TextWrapMode::Extend),
+                    );
                     if !self.operation.output_lines.is_empty() {
                         ui.separator();
                     }
                 }
                 for line in &self.operation.output_lines {
-                    match line.stream {
+                    let (label, color) = match line.stream {
                         vapor_client_protocol::OperationOutputStream::Stdout => {
-                            ui.add(
-                                egui::Label::new(&line.text).wrap_mode(egui::TextWrapMode::Wrap),
-                            );
+                            ("OUT", egui::Color32::from_rgb(130, 205, 150))
                         }
                         vapor_client_protocol::OperationOutputStream::Stderr => {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&line.text).color(egui::Color32::LIGHT_RED),
-                                )
-                                .wrap_mode(egui::TextWrapMode::Wrap),
-                            );
+                            ("ERR", egui::Color32::from_rgb(255, 130, 130))
                         }
-                    }
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(label).monospace().color(color));
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&line.text)
+                                    .monospace()
+                                    .color(egui::Color32::from_rgb(230, 233, 238)),
+                            )
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                        );
+                    });
                 }
             });
     }

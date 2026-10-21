@@ -1,11 +1,11 @@
 use super::super::StudioApp;
 use super::super::components::design::{StatusTone, confirmation_card, status_text};
-use super::super::workspace_editor::{WorkspaceTreeChild, WorkspaceTreeNode};
 use eframe::egui;
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+use vapor_gui_core::workspace_tree::{WorkspaceFileTree, WorkspaceTreeEntry};
 
 impl StudioApp {
     pub(super) fn draw_workspace_files_panel(&mut self, ui: &mut egui::Ui) {
@@ -262,7 +262,6 @@ impl StudioApp {
                         } else {
                             let mut tree_context = WorkspaceTreeDrawContext {
                                 files: &self.workspace.editor.files,
-                                search_keys: self.workspace.editor.file_search_keys(),
                                 filter: &filter,
                                 selected: self.workspace.editor.selected_file.as_ref(),
                                 enabled: !self.operation.running
@@ -284,10 +283,11 @@ impl StudioApp {
                             .editor
                             .files
                             .iter()
-                            .zip(self.workspace.editor.file_search_keys())
-                            .find_map(|(path, key)| {
-                                (filter.is_empty() || key.contains(&filter)).then(|| path.clone())
-                            });
+                            .find(|path| {
+                                filter.is_empty()
+                                    || path.to_string_lossy().to_lowercase().contains(&filter)
+                            })
+                            .cloned();
                     }
                 });
         }
@@ -333,6 +333,11 @@ impl StudioApp {
                         ui.small(path.display().to_string());
                         ui.label(format!("{} file", workspace_file_kind(path)));
                         ui.label(format!(
+                            "Language: {}",
+                            vapor_gui_core::code_editor::language_for_path(path)
+                                .unwrap_or("Plain text")
+                        ));
+                        ui.label(format!(
                             "{} lines · {} characters",
                             active_line_count, active_character_count
                         ));
@@ -376,12 +381,13 @@ impl StudioApp {
                 let can_edit = !self.operation.running && !self.authoring.manifest_metadata_dirty;
                 ui.push_id(selected_path.as_deref(), |ui| {
                     ui.add_enabled_ui(can_edit, |ui| {
-                        let response = egui::TextEdit::multiline(&mut document.contents)
-                            .code_editor()
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(24)
-                            .show(ui);
-                        if response.response.changed()
+                        let response = vapor_gui_core::code_editor::show(
+                            ui,
+                            selected_path.as_deref().unwrap_or_else(|| Path::new("")),
+                            &mut document.contents,
+                            ui.available_size(),
+                        );
+                        if response.changed()
                             && let Some(path) = selected_path.as_deref()
                         {
                             document.schedule_inspection(path);
@@ -399,7 +405,6 @@ impl StudioApp {
 
 struct WorkspaceTreeDrawContext<'a> {
     files: &'a [PathBuf],
-    search_keys: &'a [String],
     filter: &'a str,
     selected: Option<&'a PathBuf>,
     enabled: bool,
@@ -408,17 +413,15 @@ struct WorkspaceTreeDrawContext<'a> {
 
 fn draw_workspace_tree(
     ui: &mut egui::Ui,
-    node: &WorkspaceTreeNode,
+    node: &WorkspaceFileTree,
     context: &mut WorkspaceTreeDrawContext<'_>,
     parent_path: &std::path::Path,
     depth: usize,
 ) {
-    for (name, child) in &node.entries {
+    for (name, child) in node.entries() {
         match child {
-            WorkspaceTreeChild::Directory(directory) => {
-                if !context.filter.is_empty()
-                    && !directory.contains_matching_file(context.search_keys, context.filter)
-                {
+            WorkspaceTreeEntry::Directory(directory) => {
+                if !context.filter.is_empty() && !directory.contains_matching_file(context.filter) {
                     continue;
                 }
                 let directory_path = parent_path.join(name);
@@ -433,16 +436,11 @@ fn draw_workspace_tree(
                         draw_workspace_tree(ui, directory, context, &directory_path, depth + 1)
                     });
             }
-            WorkspaceTreeChild::File(index) => {
+            WorkspaceTreeEntry::File { index, .. } => {
                 let Some(path) = context.files.get(*index) else {
                     continue;
                 };
-                if !context.filter.is_empty()
-                    && !context
-                        .search_keys
-                        .get(*index)
-                        .is_some_and(|key| key.contains(context.filter))
-                {
+                if !context.filter.is_empty() && !child.matches_filter(context.filter) {
                     continue;
                 }
                 let response = ui.add_enabled(

@@ -8,6 +8,7 @@ use std::{
 };
 use vapor_client_application::{OperationKind, OperationPhase, workspace_file_fingerprint};
 use vapor_client_protocol::{ClientAction, WorkspaceAction, WorkspaceFileResult};
+use vapor_gui_core::workspace_tree::WorkspaceFileTree;
 
 const DOCUMENT_INSPECTION_DELAY: Duration = Duration::from_millis(350);
 
@@ -17,8 +18,7 @@ pub(super) struct WorkspaceEditorState {
     pub(super) files: Vec<PathBuf>,
     pub(super) files_loaded: bool,
     pub(super) files_refresh_error: Option<String>,
-    file_search_keys: Vec<String>,
-    pub(super) file_tree: WorkspaceTreeNode,
+    pub(super) file_tree: WorkspaceFileTree,
     pub(super) file_filter: String,
     pub(super) selected_file: Option<PathBuf>,
     pub(super) pending_reload_confirmation: Option<PathBuf>,
@@ -63,102 +63,13 @@ impl WorkspaceEditorState {
     }
 }
 
-#[derive(Default)]
-pub(super) struct WorkspaceTreeNode {
-    pub(super) entries: BTreeMap<String, WorkspaceTreeChild>,
-}
-
-pub(super) enum WorkspaceTreeChild {
-    Directory(WorkspaceTreeNode),
-    File(usize),
-}
-
-impl WorkspaceTreeNode {
-    fn insert(&mut self, path: &Path, index: usize) {
-        let parts = path
-            .components()
-            .filter_map(|component| match component {
-                std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        self.insert_parts(&parts, index);
-    }
-
-    fn insert_parts(&mut self, parts: &[String], index: usize) {
-        let Some((name, rest)) = parts.split_first() else {
-            return;
-        };
-        if rest.is_empty() {
-            self.entries
-                .insert(name.clone(), WorkspaceTreeChild::File(index));
-            return;
-        }
-        let entry = self
-            .entries
-            .entry(name.clone())
-            .or_insert_with(|| WorkspaceTreeChild::Directory(Self::default()));
-        if let WorkspaceTreeChild::Directory(child) = entry {
-            child.insert_parts(rest, index);
-        }
-    }
-
-    pub(super) fn rebuild(files: &[PathBuf]) -> (Self, Vec<String>) {
-        let mut tree = Self::default();
-        let mut search_keys = Vec::with_capacity(files.len());
-        for (index, path) in files.iter().enumerate() {
-            search_keys.push(path.to_string_lossy().to_lowercase());
-            tree.insert(path, index);
-        }
-        (tree, search_keys)
-    }
-
-    pub(super) fn matching_file_count(&self, search_keys: &[String], filter: &str) -> usize {
-        self.entries
-            .values()
-            .map(|entry| match entry {
-                WorkspaceTreeChild::Directory(directory) => {
-                    directory.matching_file_count(search_keys, filter)
-                }
-                WorkspaceTreeChild::File(index) => usize::from(
-                    filter.is_empty()
-                        || search_keys
-                            .get(*index)
-                            .is_some_and(|key| key.contains(filter)),
-                ),
-            })
-            .sum()
-    }
-
-    pub(super) fn contains_matching_file(&self, search_keys: &[String], filter: &str) -> bool {
-        self.entries.values().any(|entry| match entry {
-            WorkspaceTreeChild::Directory(directory) => {
-                directory.contains_matching_file(search_keys, filter)
-            }
-            WorkspaceTreeChild::File(index) => {
-                filter.is_empty()
-                    || search_keys
-                        .get(*index)
-                        .is_some_and(|key| key.contains(filter))
-            }
-        })
-    }
-}
-
 impl WorkspaceEditorState {
     pub(super) fn rebuild_file_index(&mut self) {
-        let (tree, search_keys) = WorkspaceTreeNode::rebuild(&self.files);
-        self.file_tree = tree;
-        self.file_search_keys = search_keys;
-    }
-
-    pub(super) fn file_search_keys(&self) -> &[String] {
-        &self.file_search_keys
+        self.file_tree = WorkspaceFileTree::new(&self.files);
     }
 
     pub(super) fn matching_file_count(&self, filter: &str) -> usize {
-        self.file_tree
-            .matching_file_count(&self.file_search_keys, filter)
+        self.file_tree.matching_file_count(filter)
     }
 }
 
@@ -362,8 +273,7 @@ impl WorkspaceEditorState {
         self.files.clear();
         self.files_loaded = false;
         self.files_refresh_error = None;
-        self.file_search_keys.clear();
-        self.file_tree = WorkspaceTreeNode::default();
+        self.file_tree = WorkspaceFileTree::default();
         self.file_filter.clear();
         self.selected_file = None;
         self.pending_reload_confirmation = None;

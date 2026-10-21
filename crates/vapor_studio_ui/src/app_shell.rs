@@ -8,6 +8,9 @@ use eframe::egui;
 use vapor_client_application::{CURRENT_SCHEMA_VERSION, CompositionDocument};
 use vapor_client_protocol::ClientAction;
 
+const NAVIGATION_PANEL_WIDTH: f32 = 160.0;
+const NAVIGATION_ROW_HEIGHT: f32 = 26.0;
+
 impl StudioApp {
     pub(super) fn draw_composition_target_selector(&mut self, ui: &mut egui::Ui) {
         let active_composition = self.composition.active_index;
@@ -115,7 +118,7 @@ impl StudioApp {
         };
         let response = ui
             .add_sized(
-                [ui.available_width(), 28.0],
+                [ui.available_width(), NAVIGATION_ROW_HEIGHT],
                 egui::Button::selectable(
                     self.section == section,
                     self.navigation_section_label(section),
@@ -416,7 +419,7 @@ impl eframe::App for StudioApp {
         } else {
             egui::Panel::left("studio-navigation")
                 .resizable(false)
-                .default_size(178.0)
+                .default_size(NAVIGATION_PANEL_WIDTH)
                 .show(ui, |ui| self.draw_navigation(ui));
         }
         egui::Panel::top("studio-header").show(ui, |ui| self.draw_header(ui));

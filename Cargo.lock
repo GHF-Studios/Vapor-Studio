@@ -1025,6 +1025,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_code_editor"
+version = "0.2.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3633490f8dd567bba6daad40d8e33c69fab4c00bdc075cd19bd0028543c888c2"
+
+[[package]]
 name = "egui_glow"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3980,6 +3986,7 @@ name = "vapor_client_protocol"
 version = "0.5.0"
 dependencies = [
  "serde",
+ "serde_json",
  "vapor_client_domain",
  "vapor_telemetry",
 ]
@@ -4034,6 +4041,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vapor_gui_core"
+version = "0.5.0"
+dependencies = [
+ "eframe",
+ "egui_code_editor",
+]
+
+[[package]]
 name = "vapor_steam"
 version = "0.5.0"
 dependencies = [
@@ -4053,6 +4068,7 @@ dependencies = [
  "vapor_client_domain",
  "vapor_client_protocol",
  "vapor_devtools",
+ "vapor_gui_core",
 ]
 
 [[package]]
