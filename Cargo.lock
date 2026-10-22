@@ -3978,6 +3978,7 @@ version = "0.5.0"
 dependencies = [
  "semver",
  "serde",
+ "vapor_console_core",
  "vapor_content",
 ]
 
@@ -3988,6 +3989,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vapor_client_domain",
+ "vapor_console_core",
  "vapor_telemetry",
 ]
 
@@ -4033,6 +4035,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "vapor_console_core",
  "vapor_content",
  "vapor_telemetry",
 ]
@@ -4076,6 +4079,7 @@ dependencies = [
  "vapor_client_application",
  "vapor_client_domain",
  "vapor_client_protocol",
+ "vapor_console_core",
  "vapor_devtools",
  "vapor_gui_core",
 ]

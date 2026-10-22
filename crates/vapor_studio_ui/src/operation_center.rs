@@ -4,55 +4,6 @@ use eframe::egui;
 use vapor_client_protocol::ClientAction;
 
 impl StudioApp {
-    pub(super) fn show_console_viewport(&mut self, context: &egui::Context) {
-        if !self.console_open {
-            return;
-        }
-
-        let viewport_id = egui::ViewportId::from_hash_of("vapor-studio-console");
-        let close_requested = context.show_viewport_immediate(
-            viewport_id,
-            egui::ViewportBuilder::default()
-                .with_title("Vapor Studio — Console")
-                .with_inner_size([820.0, 560.0])
-                .with_min_inner_size([480.0, 260.0])
-                .with_resizable(true)
-                .with_transparent(false),
-            |ui, _class| {
-                let close_requested = ui.input(|input| input.viewport().close_requested());
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::new().fill(egui::Color32::BLACK))
-                    .show(ui, |ui| self.draw_operation_console(ui));
-                close_requested || !self.console_open
-            },
-        );
-        if close_requested {
-            self.console_open = false;
-        }
-    }
-
-    pub(super) fn has_failed_operation(&self) -> bool {
-        self.operation
-            .active_operation
-            .as_ref()
-            .is_some_and(|operation| {
-                matches!(
-                    &operation.status,
-                    vapor_client_application::OperationStatus::Failed { .. }
-                )
-            })
-            || self
-                .operation
-                .operation_history
-                .front()
-                .is_some_and(|operation| {
-                    matches!(
-                        &operation.event.status,
-                        vapor_client_application::OperationStatus::Failed { .. }
-                    )
-                })
-    }
-
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
         let mut cancel_operation_id = None;
         ui.horizontal_wrapped(|ui| {
@@ -89,6 +40,9 @@ impl StudioApp {
                     cancel_operation_id = Some(operation.id.0.to_string());
                 }
                 if let Some(progress) = &operation.progress {
+                    if let Some(message) = &progress.message {
+                        ui.weak(message);
+                    }
                     if let Some(total) = progress.total {
                         let fraction = if total == 0 {
                             0.0
@@ -150,94 +104,66 @@ impl StudioApp {
                 vapor_client_protocol::SessionAction::CancelOperation { operation_id },
             ));
         }
+        if self.console_open {
+            ui.separator();
+            self.draw_operation_console(ui);
+        }
     }
 
     pub(super) fn draw_operation_console(&mut self, ui: &mut egui::Ui) {
-        let mut close_console = false;
         ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Vapor Console")
-                    .strong()
-                    .color(egui::Color32::WHITE),
-            );
-            if self.operation.dropped_output_lines == 0 {
-                ui.weak(format!("{} lines", self.operation.output_lines.len()));
-            } else {
-                ui.weak(format!(
-                    "Showing latest {} lines · {} earlier lines omitted",
-                    self.operation.output_lines.len(),
-                    self.operation.dropped_output_lines
-                ));
+            ui.strong("Vapor Console");
+            ui.weak(format!("{} records", self.operation.console.history.len()));
+            if ui.small_button("Hide").clicked() {
+                self.console_open = false;
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close_console = ui.small_button("Close").clicked();
-            });
         });
-        if close_console {
-            self.console_open = false;
+        if self.operation.console.history.dropped_count() > 0 {
+            ui.weak(format!(
+                "{} oldest lines omitted to keep memory bounded",
+                self.operation.console.history.dropped_count()
+            ));
         }
-        ui.separator();
-        if self.operation.dropped_output_lines > 0 {
-            ui.colored_label(
-                egui::Color32::YELLOW,
-                format!(
-                    "Earlier output was omitted to keep memory bounded ({} lines).",
-                    self.operation.dropped_output_lines
-                ),
-            );
+        if let Some(command) = self.operation.console.show(ui, true) {
+            self.submit_console_command(&command);
         }
-        let available_height = ui.available_height();
-        egui::ScrollArea::both()
-            .auto_shrink([false, false])
-            .max_height(available_height)
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                if self.status.chars().count() > 120 || self.has_failed_operation() {
-                    ui.label(
-                        egui::RichText::new("Latest message")
-                            .strong()
-                            .color(egui::Color32::WHITE),
+    }
+
+    fn submit_console_command(&mut self, line: &str) {
+        use vapor_client_domain::{
+            ConsoleCommand, ConsoleCommandOutcome, ConsoleCommandScope,
+            console_command_catalog,
+        };
+        use vapor_console_core::{ConsoleLevel, ConsoleRecord};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+            .unwrap_or_default();
+        self.operation.console.history.push(
+            ConsoleRecord::new(now, ConsoleLevel::Input, "console", line),
+        );
+        match ConsoleCommand::parse(line) {
+            Ok(ConsoleCommand::Help) => {
+                for command in console_command_catalog(ConsoleCommandScope::Workspace) {
+                    self.operation.console.history.push(
+                        ConsoleRecord::new(now, ConsoleLevel::Info, "help", command.path)
+                            .field("description", command.summary),
                     );
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&self.status)
-                                .monospace()
-                                .color(egui::Color32::LIGHT_GRAY),
-                        )
-                        .wrap_mode(egui::TextWrapMode::Extend),
-                    );
-                    if !self.operation.output_lines.is_empty() {
-                        ui.separator();
-                    }
                 }
-                for line in &self.operation.output_lines {
-                    let (label, color) = match line.stream {
-                        vapor_client_protocol::OperationOutputStream::Stdout => {
-                            ("OUT", egui::Color32::from_rgb(130, 205, 150))
-                        }
-                        vapor_client_protocol::OperationOutputStream::Stderr => {
-                            ("ERR", egui::Color32::from_rgb(255, 130, 130))
-                        }
-                    };
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(label).monospace().color(color));
-                        ui.label(
-                            egui::RichText::new(format!("#{}", line.operation_id))
-                                .small()
-                                .monospace()
-                                .color(egui::Color32::DARK_GRAY),
-                        );
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&line.text)
-                                    .monospace()
-                                    .color(egui::Color32::from_rgb(230, 233, 238)),
-                            )
-                            .wrap_mode(egui::TextWrapMode::Extend),
-                        );
-                    });
-                }
-            });
+            }
+            Ok(ConsoleCommand::Status) => {
+                self.operation.console.history.push(
+                    ConsoleRecord::new(now, ConsoleLevel::Info, "vapor", self.status.clone()),
+                );
+            }
+            Ok(command) => match command.outcome() {
+                ConsoleCommandOutcome::Action(action) => self.submit_service_action(action),
+                ConsoleCommandOutcome::Help | ConsoleCommandOutcome::Status => unreachable!(),
+            },
+            Err(error) => self.operation.console.history.push(
+                ConsoleRecord::new(now, ConsoleLevel::Error, "console", format!("{error:?}")),
+            ),
+        }
     }
 }
 

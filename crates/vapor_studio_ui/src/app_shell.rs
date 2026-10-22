@@ -333,7 +333,7 @@ impl StudioApp {
                 }
             }
             ui.toggle_value(&mut self.console_open, "Console")
-                .on_hover_text("Open the live operation log in a separate window.");
+                .on_hover_text("Show the docked command console · F2");
             if show_composition_create
                 && ui
                     .add_enabled(
@@ -385,6 +385,9 @@ impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_service();
         self.poll_workshop_download_progress();
+        if ui.input(|input| input.key_pressed(egui::Key::F2)) {
+            self.console_open = !self.console_open;
+        }
         let command_palette_requested =
             ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::K));
         if command_palette_requested {
@@ -412,8 +415,9 @@ impl eframe::App for StudioApp {
                 .show(ui, |ui| self.draw_navigation(ui));
         }
         egui::Panel::top("studio-header").show(ui, |ui| self.draw_header(ui));
-        self.show_console_viewport(ui.ctx());
         egui::Panel::bottom("studio-operation-center")
+            .resizable(self.console_open)
+            .default_size(if self.console_open { 320.0 } else { 54.0 })
             .show(ui, |ui| self.draw_operation_center(ui));
         egui::CentralPanel::default().show(ui, |ui| {
             let workspace_editor =

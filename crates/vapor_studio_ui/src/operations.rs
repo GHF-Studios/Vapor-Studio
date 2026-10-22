@@ -10,9 +10,11 @@ use vapor_client_application::{
 use vapor_client_protocol::{
     ClientAction, OperationEvent as ServiceOperationEvent,
     OperationOutputEvent as ServiceOperationOutputEvent,
-    OperationOutputStream as ServiceOperationOutputStream, OperationPhase as ServiceOperationPhase,
+    OperationPhase as ServiceOperationPhase,
     OperationStatus as ServiceOperationStatus, RequestId,
 };
+use vapor_console_core::{ConsoleRecord};
+use vapor_gui_core::console::ConsolePanelState;
 
 #[derive(Default)]
 pub(super) struct OperationState {
@@ -23,8 +25,7 @@ pub(super) struct OperationState {
     pub(super) active_operations: VecDeque<OperationEvent>,
     active_service_action_ids: HashMap<String, String>,
     pub(super) operation_history: VecDeque<HistoricalOperation>,
-    pub(super) output_lines: VecDeque<OperationOutputLine>,
-    pub(super) dropped_output_lines: usize,
+    pub(super) console: ConsolePanelState,
     queued_service_operations: VecDeque<QueuedServiceOperation>,
     pub(super) pending_service_requests: HashMap<RequestId, QueuedServiceOperation>,
 }
@@ -38,15 +39,6 @@ pub(super) struct QueuedServiceOperation {
     pub(super) phase: OperationPhase,
     pub(super) status: String,
 }
-
-#[derive(Debug, Clone)]
-pub(super) struct OperationOutputLine {
-    pub(super) operation_id: String,
-    pub(super) stream: ServiceOperationOutputStream,
-    pub(super) text: String,
-}
-
-const MAX_OPERATION_OUTPUT_LINES: usize = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct HistoricalOperation {
@@ -99,15 +91,17 @@ impl OperationState {
         {
             return;
         }
-        if self.output_lines.len() == MAX_OPERATION_OUTPUT_LINES {
-            self.output_lines.pop_front();
-            self.dropped_output_lines = self.dropped_output_lines.saturating_add(1);
+        for line in event.text.lines().filter(|line| !line.trim().is_empty()) {
+            let source = if event.source.is_empty() { "command" } else { &event.source };
+            let mut record = ConsoleRecord::new(event.timestamp_unix_ms, event.level, source, line)
+                .target(event.action.clone())
+                .field("operation", event.id.clone())
+                .field("stream", format!("{:?}", event.stream).to_ascii_lowercase());
+            if let Some(process) = &event.process {
+                record = record.field("process", process.clone());
+            }
+            self.console.history.push(record);
         }
-        self.output_lines.push_back(OperationOutputLine {
-            operation_id: event.id.clone(),
-            stream: event.stream,
-            text: event.text.clone(),
-        });
     }
 
     fn apply_service_operation_snapshots(
@@ -607,10 +601,7 @@ fn service_phase(phase: ServiceOperationPhase) -> OperationPhase {
 mod tests {
     use std::collections::VecDeque;
 
-    use super::{
-        MAX_OPERATION_OUTPUT_LINES, MAX_QUEUED_SERVICE_OPERATIONS, OperationState,
-        QueuedServiceOperation,
-    };
+    use super::{MAX_QUEUED_SERVICE_OPERATIONS, OperationState, QueuedServiceOperation};
     use vapor_client_application::{OperationEvent, OperationId, OperationKind, OperationPhase};
     use vapor_client_protocol::{
         ClientAction, OperationOutputEvent, OperationOutputStream, OperationPhase as ServicePhase,
@@ -618,7 +609,7 @@ mod tests {
     };
 
     #[test]
-    fn output_retention_reports_lines_that_roll_off_the_bounded_buffer() {
+    fn output_is_retained_as_a_structured_shared_console_record() {
         let mut state = OperationState {
             active_operation: Some(OperationEvent {
                 id: OperationId(7),
@@ -639,20 +630,22 @@ mod tests {
             ..OperationState::default()
         };
 
-        for index in 0..=MAX_OPERATION_OUTPUT_LINES {
-            state.apply_service_operation_output(&OperationOutputEvent {
-                id: "7".to_owned(),
-                stream: OperationOutputStream::Stdout,
-                text: format!("line {index}"),
-            });
-        }
-
-        assert_eq!(state.output_lines.len(), MAX_OPERATION_OUTPUT_LINES);
-        assert_eq!(state.dropped_output_lines, 1);
-        assert_eq!(
-            state.output_lines.front().map(|line| line.text.as_str()),
-            Some("line 1")
-        );
+        state.apply_service_operation_output(&OperationOutputEvent {
+            id: "7".to_owned(),
+            stream: OperationOutputStream::Stderr,
+            timestamp_unix_ms: 123,
+            level: vapor_client_protocol::ConsoleLevel::Error,
+            source: "workspace".to_owned(),
+            action: "workspace.test".to_owned(),
+            process: Some("cargo".to_owned()),
+            text: "compiler stopped".to_owned(),
+        });
+        let record = state.console.history.records().next().unwrap();
+        assert_eq!(record.timestamp_unix_ms, 123);
+        assert_eq!(record.level, vapor_client_protocol::ConsoleLevel::Error);
+        assert_eq!(record.source.0, "workspace");
+        assert_eq!(record.target.as_deref(), Some("workspace.test"));
+        assert!(record.fields.iter().any(|field| field.key == "process" && field.value == "cargo"));
     }
 
     #[test]
