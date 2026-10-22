@@ -286,6 +286,9 @@ impl StudioApp {
                         }
                         None => {}
                     }
+                    if operation_request && response.kind != ClientResponseKind::OperationAccepted {
+                        self.start_next_service_operation();
+                    }
                 }
                 ProtocolFrame::Event(ClientEvent::Snapshot(snapshot)) => {
                     self.apply_service_catalog_snapshot(&snapshot);
@@ -322,8 +325,9 @@ impl StudioApp {
                 self.operation.service_owned = false;
                 self.operation.service_request_id = None;
                 self.operation.active_operation = None;
+                self.operation.clear_queued_service_operations();
                 self.status =
-                    "Connection interrupted. Check whether the last action completed before retrying."
+                    "Connection interrupted. The active action may have completed; queued actions were cleared. Check its result before retrying."
                         .to_owned();
             }
             self.catalog.catalog_discovery_error =

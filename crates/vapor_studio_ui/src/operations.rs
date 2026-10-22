@@ -23,6 +23,17 @@ pub(super) struct OperationState {
     pub(super) operation_history: VecDeque<HistoricalOperation>,
     pub(super) output_lines: VecDeque<OperationOutputLine>,
     pub(super) dropped_output_lines: usize,
+    queued_service_operations: VecDeque<QueuedServiceOperation>,
+}
+
+const MAX_QUEUED_SERVICE_OPERATIONS: usize = 64;
+
+struct QueuedServiceOperation {
+    action: ClientAction,
+    composition_id: Option<String>,
+    kind: OperationKind,
+    phase: OperationPhase,
+    status: String,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +51,21 @@ pub(super) struct HistoricalOperation {
 }
 
 impl OperationState {
+    pub(super) fn clear_queued_service_operations(&mut self) {
+        self.queued_service_operations.clear();
+    }
+
+    fn enqueue_service_operation(
+        &mut self,
+        operation: QueuedServiceOperation,
+    ) -> Result<usize, ()> {
+        if self.queued_service_operations.len() >= MAX_QUEUED_SERVICE_OPERATIONS {
+            return Err(());
+        }
+        self.queued_service_operations.push_back(operation);
+        Ok(self.queued_service_operations.len())
+    }
+
     pub(super) fn restore_history(&mut self, encoded: Option<&str>) {
         let Some(history) = encoded
             .and_then(|value| serde_json::from_str::<VecDeque<HistoricalOperation>>(value).ok())
@@ -65,6 +91,69 @@ impl OperationState {
             stream: event.stream,
             text: event.text.clone(),
         });
+    }
+
+    fn apply_service_operation_snapshot(
+        &mut self,
+        operation: &vapor_client_protocol::OperationSummary,
+    ) {
+        let id = operation
+            .id
+            .parse::<u64>()
+            .map(OperationId)
+            .unwrap_or_else(|_| {
+                self.active_operation
+                    .as_ref()
+                    .map_or_else(OperationId::fresh, |active| active.id)
+            });
+        let status = match &operation.status {
+            ServiceOperationStatus::Running => OperationStatus::Running,
+            ServiceOperationStatus::Cancelling => OperationStatus::Cancelling,
+            ServiceOperationStatus::Succeeded => OperationStatus::Succeeded {
+                summary: "Completed".to_owned(),
+            },
+            ServiceOperationStatus::Failed { message } => OperationStatus::Failed {
+                message: message.clone(),
+            },
+            ServiceOperationStatus::Cancelled => OperationStatus::Cancelled,
+        };
+        let event = OperationEvent {
+            id,
+            composition_id: operation.composition_id.clone(),
+            kind: operation_kind_for_action(&operation.action),
+            phase: service_phase(operation.phase),
+            progress: operation
+                .progress
+                .map(|progress| vapor_client_application::Progress {
+                    completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
+                    total: Some(100),
+                    unit: "percent".to_owned(),
+                    message: None,
+                }),
+            status,
+        };
+        if matches!(
+            &event.status,
+            OperationStatus::Succeeded { .. }
+                | OperationStatus::Failed { .. }
+                | OperationStatus::Cancelled
+        ) {
+            self.operation_history.push_front(HistoricalOperation {
+                completed_at_unix: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_secs()),
+                event,
+            });
+            self.operation_history.truncate(20);
+            self.active_operation = None;
+            self.running = false;
+            self.service_owned = false;
+            self.service_request_id = None;
+            return;
+        }
+
+        self.active_operation = Some(event);
+        self.running = true;
     }
 }
 
@@ -92,10 +181,6 @@ impl StudioApp {
         phase: OperationPhase,
         status: &str,
     ) {
-        if self.operation.running {
-            self.status = "Wait for the current operation to finish.".to_owned();
-            return;
-        }
         let composition_id = self
             .composition
             .items
@@ -117,7 +202,24 @@ impl StudioApp {
         status: &str,
     ) {
         if self.operation.running {
-            self.status = "Wait for the current operation to finish.".to_owned();
+            let queued = self
+                .operation
+                .enqueue_service_operation(QueuedServiceOperation {
+                    action,
+                    composition_id,
+                    kind,
+                    phase,
+                    status: status.to_owned(),
+                });
+            let Ok(queued_count) = queued else {
+                self.status = "The operation queue is full. Wait for an operation to finish before adding more.".to_owned();
+                return;
+            };
+            self.status = format!(
+                "Queued {} operation{}.",
+                queued_count,
+                if queued_count == 1 { "" } else { "s" }
+            );
             return;
         }
         let Some(service) = self.service.as_mut() else {
@@ -152,6 +254,14 @@ impl StudioApp {
     }
 
     pub(super) fn apply_service_operation_event(&mut self, event: &ServiceOperationEvent) {
+        if self
+            .operation
+            .operation_history
+            .iter()
+            .any(|record| record.event.id.0.to_string() == event.id)
+        {
+            return;
+        }
         let kind = operation_kind_for_action(&event.action);
         let id = event
             .id
@@ -313,6 +423,7 @@ impl StudioApp {
             }
             if !awaiting_result {
                 self.checkpoint_service_local_state();
+                self.start_next_service_operation();
             }
         } else {
             self.operation.running = true;
@@ -334,6 +445,7 @@ impl StudioApp {
         self.operation.service_owned = false;
         self.operation.service_request_id = None;
         self.checkpoint_service_local_state();
+        self.start_next_service_operation();
     }
 
     fn checkpoint_service_local_state(&mut self) {
@@ -360,51 +472,26 @@ impl StudioApp {
         let Some(operation) = operation else {
             return;
         };
-        let id = operation
-            .id
-            .parse::<u64>()
-            .map(OperationId)
-            .unwrap_or_else(|_| {
-                self.operation
-                    .active_operation
-                    .as_ref()
-                    .map_or_else(OperationId::fresh, |active| active.id)
-            });
-        let active = self
-            .operation
-            .active_operation
-            .get_or_insert_with(|| OperationEvent {
-                id,
-                composition_id: operation.composition_id.clone(),
-                kind: operation_kind_for_action(&operation.action),
-                phase: service_phase(operation.phase),
-                progress: None,
-                status: OperationStatus::Running,
-            });
-        active.id = id;
-        active.composition_id = operation.composition_id.clone();
-        active.kind = operation_kind_for_action(&operation.action);
-        active.phase = service_phase(operation.phase);
-        active.progress = operation
-            .progress
-            .map(|progress| vapor_client_application::Progress {
-                completed: (progress.clamp(0.0, 1.0) * 100.0).round() as u64,
-                total: Some(100),
-                unit: "percent".to_owned(),
-                message: None,
-            });
-        active.status = match &operation.status {
-            ServiceOperationStatus::Running => OperationStatus::Running,
-            ServiceOperationStatus::Cancelling => OperationStatus::Cancelling,
-            ServiceOperationStatus::Succeeded => OperationStatus::Succeeded {
-                summary: "Completed".to_owned(),
-            },
-            ServiceOperationStatus::Failed { message } => OperationStatus::Failed {
-                message: message.clone(),
-            },
-            ServiceOperationStatus::Cancelled => OperationStatus::Cancelled,
+        self.operation.apply_service_operation_snapshot(operation);
+        if !self.operation.running {
+            self.start_next_service_operation();
+        }
+    }
+
+    pub(super) fn start_next_service_operation(&mut self) {
+        if self.operation.running {
+            return;
+        }
+        let Some(next) = self.operation.queued_service_operations.pop_front() else {
+            return;
         };
-        self.operation.running = true;
+        self.start_service_operation(
+            next.action,
+            next.composition_id,
+            next.kind,
+            next.phase,
+            &next.status,
+        );
     }
 }
 
@@ -418,6 +505,7 @@ fn operation_kind_for_action(action: &str) -> OperationKind {
         "publishing.publish-root" => OperationKind::PublishRootDistribution,
         "workshop.load-subscriptions" => OperationKind::LoadWorkshopSubscriptions,
         "workshop.subscribe" | "workshop.unsubscribe" => OperationKind::ChangeWorkshopSubscription,
+        "library.set-auto-install" => OperationKind::ChangeWorkshopSubscription,
         "composition.preview" => OperationKind::Resolve,
         "composition.install" => OperationKind::Install,
         "composition.verify" => OperationKind::Verify,
@@ -470,9 +558,15 @@ fn service_phase(phase: ServiceOperationPhase) -> OperationPhase {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_OPERATION_OUTPUT_LINES, OperationState};
+    use super::{
+        MAX_OPERATION_OUTPUT_LINES, MAX_QUEUED_SERVICE_OPERATIONS, OperationState,
+        QueuedServiceOperation,
+    };
     use vapor_client_application::{OperationEvent, OperationId, OperationKind, OperationPhase};
-    use vapor_client_protocol::{OperationOutputEvent, OperationOutputStream};
+    use vapor_client_protocol::{
+        OperationOutputEvent, OperationOutputStream, OperationPhase as ServicePhase,
+        OperationStatus as ServiceStatus,
+    };
 
     #[test]
     fn output_retention_reports_lines_that_roll_off_the_bounded_buffer() {
@@ -501,6 +595,80 @@ mod tests {
         assert_eq!(
             state.output_lines.front().map(|line| line.text.as_str()),
             Some("line 1")
+        );
+    }
+
+    #[test]
+    fn terminal_service_snapshot_does_not_restore_a_completed_operation_as_running() {
+        let mut state = OperationState {
+            running: true,
+            service_owned: true,
+            active_operation: Some(OperationEvent {
+                id: OperationId(7),
+                composition_id: Some("default".to_owned()),
+                kind: OperationKind::Resolve,
+                phase: OperationPhase::Resolving,
+                progress: None,
+                status: super::OperationStatus::Running,
+            }),
+            ..OperationState::default()
+        };
+
+        state.apply_service_operation_snapshot(&vapor_client_protocol::OperationSummary {
+            id: "7".to_owned(),
+            composition_id: Some("default".to_owned()),
+            action: "composition.preview".to_owned(),
+            phase: ServicePhase::Complete,
+            status: ServiceStatus::Succeeded,
+            progress: Some(1.0),
+        });
+
+        assert!(!state.running);
+        assert!(!state.service_owned);
+        assert!(state.active_operation.is_none());
+        assert!(matches!(
+            state
+                .operation_history
+                .front()
+                .map(|record| &record.event.status),
+            Some(super::OperationStatus::Succeeded { .. })
+        ));
+    }
+
+    #[test]
+    fn queued_service_operations_are_bounded_and_fifo() {
+        let mut state = OperationState::default();
+        for index in 0..MAX_QUEUED_SERVICE_OPERATIONS {
+            let queued = state.enqueue_service_operation(QueuedServiceOperation {
+                action: vapor_client_protocol::ClientAction::Catalog(
+                    vapor_client_protocol::CatalogAction::Refresh,
+                ),
+                composition_id: None,
+                kind: OperationKind::SearchWorkshop,
+                phase: OperationPhase::Queued,
+                status: format!("operation {index}"),
+            });
+            assert!(matches!(queued, Ok(count) if count == index + 1));
+        }
+        assert!(
+            state
+                .enqueue_service_operation(QueuedServiceOperation {
+                    action: vapor_client_protocol::ClientAction::Catalog(
+                        vapor_client_protocol::CatalogAction::Refresh,
+                    ),
+                    composition_id: None,
+                    kind: OperationKind::SearchWorkshop,
+                    phase: OperationPhase::Queued,
+                    status: "overflow".to_owned(),
+                })
+                .is_err()
+        );
+        assert_eq!(
+            state
+                .queued_service_operations
+                .pop_front()
+                .map(|operation| operation.status),
+            Some("operation 0".to_owned())
         );
     }
 }
