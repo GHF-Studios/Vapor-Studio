@@ -259,13 +259,11 @@ impl StudioApp {
             })
             .response
             .on_disabled_hover_text(
-                if let Some(reason) =
-                    service_action_id.and_then(|action_id| self.service_action_reason(action_id))
-                {
-                    reason
-                } else {
-                    "Save or discard project edits before changing or running this setup."
-                },
+                service_action_id
+                    .and_then(|action_id| self.service_action_reason(action_id))
+                    .unwrap_or(
+                        "Save or discard project edits before changing or running this setup.",
+                    ),
             );
             if clicked {
                 action_to_run = Some(action);

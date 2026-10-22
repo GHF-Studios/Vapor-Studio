@@ -67,15 +67,9 @@ impl StudioApp {
             );
         }
         if !self.workshop.subscriptions_loaded {
-            let loading = self
-                .operation
-                .active_operations
-                .iter()
-                .any(|operation| {
-                    operation.kind
-                        == vapor_client_application::OperationKind::LoadWorkshopSubscriptions
-                })
-                || subscriptions_loading;
+            let loading = self.operation.active_operations.iter().any(|operation| {
+                operation.kind == vapor_client_application::OperationKind::LoadWorkshopSubscriptions
+            }) || subscriptions_loading;
             empty_state(
                 ui,
                 if loading {

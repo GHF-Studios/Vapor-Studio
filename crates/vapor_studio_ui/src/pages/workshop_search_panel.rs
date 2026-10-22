@@ -131,9 +131,7 @@ impl StudioApp {
                     .clicked();
                 let next = ui
                     .add_enabled(
-                        !search_pending
-                            && steam_available
-                            && self.workshop.page < page_count,
+                        !search_pending && steam_available && self.workshop.page < page_count,
                         egui::Button::new("Next Steam page"),
                     )
                     .clicked();
@@ -214,8 +212,7 @@ impl StudioApp {
                     "Selected across pages and searches · {count} item{}",
                     if count == 1 { "" } else { "s" }
                 ));
-                if ui.button("Clear selection").clicked()
-                {
+                if ui.button("Clear selection").clicked() {
                     self.workshop.selected_items.clear();
                 }
                 if ui
@@ -319,8 +316,7 @@ impl StudioApp {
                                 .workshop
                                 .selected_items
                                 .contains(&item.published_file_id);
-                            if ui.checkbox(&mut selected, "").changed()
-                            {
+                            if ui.checkbox(&mut selected, "").changed() {
                                 if selected {
                                     self.workshop
                                         .selected_items
@@ -450,16 +446,13 @@ impl StudioApp {
                 } else if selected_as_composition_root {
                     details.strong("Used by this composition");
                     let mut clicked = false;
-                    details.add_enabled_ui(
-                        !self.has_unsaved_workspace_edits(),
-                        |ui| {
-                            clicked = super::super::components::design::primary_button(
-                                ui,
-                                "Review composition",
-                            )
-                            .clicked();
-                        },
-                    );
+                    details.add_enabled_ui(!self.has_unsaved_workspace_edits(), |ui| {
+                        clicked = super::super::components::design::primary_button(
+                            ui,
+                            "Review composition",
+                        )
+                        .clicked();
+                    });
                     if clicked {
                         action = Some(WorkshopSearchAction::ReviewComposition);
                     }
@@ -527,16 +520,13 @@ impl StudioApp {
                 } else if included_in_active_composition {
                     details.label("Available in Library");
                     let mut clicked = false;
-                    details.add_enabled_ui(
-                        !self.has_unsaved_workspace_edits(),
-                        |ui| {
-                            clicked = super::super::components::design::primary_button(
-                                ui,
-                                "Review composition",
-                            )
-                            .clicked();
-                        },
-                    );
+                    details.add_enabled_ui(!self.has_unsaved_workspace_edits(), |ui| {
+                        clicked = super::super::components::design::primary_button(
+                            ui,
+                            "Review composition",
+                        )
+                        .clicked();
+                    });
                     if clicked {
                         action = Some(WorkshopSearchAction::ReviewComposition);
                     }

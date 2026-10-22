@@ -605,6 +605,8 @@ fn service_phase(phase: ServiceOperationPhase) -> OperationPhase {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::{
         MAX_OPERATION_OUTPUT_LINES, MAX_QUEUED_SERVICE_OPERATIONS, OperationState,
         QueuedServiceOperation,
