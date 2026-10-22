@@ -9,11 +9,10 @@ use vapor_client_application::{
 };
 use vapor_client_protocol::{
     ClientAction, OperationEvent as ServiceOperationEvent,
-    OperationOutputEvent as ServiceOperationOutputEvent,
-    OperationPhase as ServiceOperationPhase,
+    OperationOutputEvent as ServiceOperationOutputEvent, OperationPhase as ServiceOperationPhase,
     OperationStatus as ServiceOperationStatus, RequestId,
 };
-use vapor_console_core::{ConsoleRecord};
+use vapor_console_core::ConsoleRecord;
 use vapor_gui_core::console::ConsolePanelState;
 
 #[derive(Default)]
@@ -92,7 +91,11 @@ impl OperationState {
             return;
         }
         for line in event.text.lines().filter(|line| !line.trim().is_empty()) {
-            let source = if event.source.is_empty() { "command" } else { &event.source };
+            let source = if event.source.is_empty() {
+                "command"
+            } else {
+                &event.source
+            };
             let mut record = ConsoleRecord::new(event.timestamp_unix_ms, event.level, source, line)
                 .target(event.action.clone())
                 .field("operation", event.id.clone())
@@ -645,7 +648,12 @@ mod tests {
         assert_eq!(record.level, vapor_client_protocol::ConsoleLevel::Error);
         assert_eq!(record.source.0, "workspace");
         assert_eq!(record.target.as_deref(), Some("workspace.test"));
-        assert!(record.fields.iter().any(|field| field.key == "process" && field.value == "cargo"));
+        assert!(
+            record
+                .fields
+                .iter()
+                .any(|field| field.key == "process" && field.value == "cargo")
+        );
     }
 
     #[test]

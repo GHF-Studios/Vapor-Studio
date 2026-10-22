@@ -131,17 +131,19 @@ impl StudioApp {
 
     fn submit_console_command(&mut self, line: &str) {
         use vapor_client_domain::{
-            ConsoleCommand, ConsoleCommandOutcome, ConsoleCommandScope,
-            console_command_catalog,
+            ConsoleCommand, ConsoleCommandOutcome, ConsoleCommandScope, console_command_catalog,
         };
         use vapor_console_core::{ConsoleLevel, ConsoleRecord};
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
             .unwrap_or_default();
-        self.operation.console.history.push(
-            ConsoleRecord::new(now, ConsoleLevel::Input, "console", line),
-        );
+        self.operation.console.history.push(ConsoleRecord::new(
+            now,
+            ConsoleLevel::Input,
+            "console",
+            line,
+        ));
         match ConsoleCommand::parse(line) {
             Ok(ConsoleCommand::Help) => {
                 for command in console_command_catalog(ConsoleCommandScope::Workspace) {
@@ -152,17 +154,23 @@ impl StudioApp {
                 }
             }
             Ok(ConsoleCommand::Status) => {
-                self.operation.console.history.push(
-                    ConsoleRecord::new(now, ConsoleLevel::Info, "vapor", self.status.clone()),
-                );
+                self.operation.console.history.push(ConsoleRecord::new(
+                    now,
+                    ConsoleLevel::Info,
+                    "vapor",
+                    self.status.clone(),
+                ));
             }
             Ok(command) => match command.outcome() {
-                ConsoleCommandOutcome::Action(action) => self.submit_service_action(action),
+                ConsoleCommandOutcome::Action(action) => self.submit_service_action(*action),
                 ConsoleCommandOutcome::Help | ConsoleCommandOutcome::Status => unreachable!(),
             },
-            Err(error) => self.operation.console.history.push(
-                ConsoleRecord::new(now, ConsoleLevel::Error, "console", format!("{error:?}")),
-            ),
+            Err(error) => self.operation.console.history.push(ConsoleRecord::new(
+                now,
+                ConsoleLevel::Error,
+                "console",
+                format!("{error:?}"),
+            )),
         }
     }
 }
