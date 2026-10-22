@@ -810,7 +810,7 @@ fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_client_applicatio
         version: entry.version.clone(),
         kind: entry.kind.clone(),
         published_file_id: entry.published_file_id.clone(),
-        dependencies: entry.dependencies.clone(),
+        dependencies: service_catalog_dependencies(entry),
         conflicts: entry
             .conflicts
             .iter()
@@ -844,6 +844,32 @@ fn service_catalog_entry(entry: &ServiceCatalogEntry) -> vapor_client_applicatio
             })
             .collect(),
     }
+}
+
+fn service_catalog_dependencies(
+    entry: &ServiceCatalogEntry,
+) -> Vec<vapor_client_application::CatalogDependency> {
+    if !entry.dependency_details.is_empty() || entry.dependencies.is_empty() {
+        return entry.dependency_details.clone();
+    }
+    entry
+        .dependencies
+        .iter()
+        .map(|label| {
+            let (relationship, id) = label
+                .split_once(" · ")
+                .or_else(|| label.split_once(": "))
+                .unwrap_or(("required", label.as_str()));
+            vapor_client_application::CatalogDependency {
+                id: id.to_owned(),
+                version: None,
+                relationship: relationship.to_owned(),
+                optional: false,
+                workshop_id: None,
+                reason: None,
+            }
+        })
+        .collect()
 }
 
 fn service_source_project(
@@ -966,6 +992,40 @@ mod selector_tests {
 #[cfg(test)]
 mod catalog_view_tests {
     use super::*;
+
+    #[test]
+    fn service_catalog_prefers_typed_dependency_facts_and_reads_legacy_labels() {
+        let mut entry = ServiceCatalogEntry {
+            id: "studio/game/main".into(),
+            name: None,
+            version: Some("0.5.0".into()),
+            kind: "game".into(),
+            published_file_id: None,
+            dependencies: vec!["legacy: wrong/content".into()],
+            dependency_details: vec![vapor_client_protocol::CatalogDependency {
+                id: "studio/engine/main".into(),
+                version: Some("^0.5".into()),
+                relationship: "engine".into(),
+                optional: false,
+                workshop_id: Some("123".into()),
+                reason: None,
+            }],
+            conflicts: Vec::new(),
+            locations: Vec::new(),
+            role: vapor_client_protocol::CatalogItemRole::Other,
+            actions: Vec::new(),
+        };
+
+        let typed = service_catalog_entry(&entry);
+        assert_eq!(typed.dependencies[0].id, "studio/engine/main");
+        assert_eq!(typed.dependencies[0].version.as_deref(), Some("^0.5"));
+
+        entry.dependency_details.clear();
+        entry.dependencies = vec!["required · studio/engine/main".into()];
+        let legacy = service_catalog_entry(&entry);
+        assert_eq!(legacy.dependencies[0].relationship, "required");
+        assert_eq!(legacy.dependencies[0].id, "studio/engine/main");
+    }
 
     #[test]
     fn browse_and_library_queries_do_not_filter_each_others_facts() {

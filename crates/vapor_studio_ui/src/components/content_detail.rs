@@ -89,7 +89,7 @@ impl StudioApp {
                         ui.weak("No other content is required.");
                     } else {
                         for dependency in &content.dependencies {
-                            ui.small(dependency);
+                            ui.small(dependency.to_string());
                         }
                     }
                 });
