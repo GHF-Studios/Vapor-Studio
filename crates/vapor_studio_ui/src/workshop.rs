@@ -162,6 +162,7 @@ impl StudioApp {
                     description: item.description.clone(),
                     preview_url: item.preview_url.clone(),
                     updated_at_unix: item.updated_at_unix,
+                    tags: item.tags.clone(),
                     installed: item.installed,
                     needs_update: item.needs_update,
                     downloading: item.downloading,
