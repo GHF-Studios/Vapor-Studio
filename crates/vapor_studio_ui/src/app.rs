@@ -84,6 +84,7 @@ pub struct StudioApp {
     command_palette_focus_search: bool,
     command_palette_selected_index: usize,
     console_open: bool,
+    console_problems_active: bool,
 }
 
 impl StudioApp {
@@ -222,6 +223,7 @@ impl StudioApp {
             command_palette_focus_search: false,
             command_palette_selected_index: 0,
             console_open: false,
+            console_problems_active: false,
         };
         app.start_service(
             explicit_workspace,

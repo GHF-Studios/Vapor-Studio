@@ -386,6 +386,9 @@ impl eframe::App for StudioApp {
         self.poll_service();
         self.poll_workshop_download_progress();
         if ui.input(|input| input.key_pressed(egui::Key::F2)) {
+            if !self.console_open {
+                self.console_problems_active = false;
+            }
             self.console_open = !self.console_open;
         }
         let command_palette_requested =

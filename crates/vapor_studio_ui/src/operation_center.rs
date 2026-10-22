@@ -111,21 +111,78 @@ impl StudioApp {
     }
 
     pub(super) fn draw_operation_console(&mut self, ui: &mut egui::Ui) {
+        use vapor_console_core::ConsoleLevel;
+
+        let problem_count = self
+            .operation
+            .console
+            .history
+            .records()
+            .filter(|record| matches!(record.level, ConsoleLevel::Warn | ConsoleLevel::Error))
+            .count();
         ui.horizontal(|ui| {
-            ui.strong("Vapor Console");
-            ui.weak(format!("{} records", self.operation.console.history.len()));
+            if ui
+                .selectable_label(
+                    !self.console_problems_active,
+                    format!("Console ({})", self.operation.console.history.len()),
+                )
+                .clicked()
+            {
+                self.console_problems_active = false;
+            }
+            if ui
+                .selectable_label(
+                    self.console_problems_active,
+                    format!("Problems ({problem_count})"),
+                )
+                .clicked()
+            {
+                self.console_problems_active = true;
+            }
             if ui.small_button("Hide").clicked() {
                 self.console_open = false;
             }
         });
-        if self.operation.console.history.dropped_count() > 0 {
-            ui.weak(format!(
-                "{} oldest lines omitted to keep memory bounded",
-                self.operation.console.history.dropped_count()
-            ));
-        }
-        if let Some(command) = self.operation.console.show(ui, true) {
-            self.submit_console_command(&command);
+        ui.separator();
+        if self.console_problems_active {
+            if problem_count == 0 {
+                ui.weak("Warnings and errors from Vapor operations appear here.");
+            } else {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for record in self.operation.console.history.records().filter(|record| {
+                            matches!(record.level, ConsoleLevel::Warn | ConsoleLevel::Error)
+                        }) {
+                            let color = if record.level == ConsoleLevel::Error {
+                                egui::Color32::LIGHT_RED
+                            } else {
+                                egui::Color32::YELLOW
+                            };
+                            ui.horizontal_wrapped(|ui| {
+                                ui.colored_label(color, record.level.label());
+                                ui.weak(&record.source.0);
+                                if let Some(target) = &record.target {
+                                    ui.weak(target);
+                                }
+                                ui.label(&record.message);
+                                for field in &record.fields {
+                                    ui.weak(format!("{}={}", field.key, field.value));
+                                }
+                            });
+                        }
+                    });
+            }
+        } else {
+            if self.operation.console.history.dropped_count() > 0 {
+                ui.weak(format!(
+                    "{} oldest lines omitted to keep memory bounded",
+                    self.operation.console.history.dropped_count()
+                ));
+            }
+            if let Some(command) = self.operation.console.show(ui, true) {
+                self.submit_console_command(&command);
+            }
         }
     }
 
