@@ -316,11 +316,11 @@ impl StudioApp {
                         });
                         ui.collapsing("Actions and details", |ui| {
                             if let Some(item) = details {
-                                let state = if item.downloading {
+                                let state = if item.steam_downloading {
                                     "Waiting for Steam to finish its download"
-                                } else if item.needs_update {
+                                } else if item.steam_needs_update {
                                     "An update is available from Steam"
-                                } else if item.installed {
+                                } else if item.steam_installed {
                                     "Available through Steam"
                                 } else {
                                     "Following on Steam"
@@ -328,7 +328,7 @@ impl StudioApp {
                                 ui.weak(state);
                             }
                             if let Some((current, total)) = details
-                                .and_then(|item| item.download_progress.filter(|(_, total)| *total > 0))
+                                .and_then(|item| item.steam_download_progress.filter(|(_, total)| *total > 0))
                             {
                                 ui.weak(format!(
                                     "Steam transfer · {:.1} / {:.1} MiB",
@@ -536,9 +536,9 @@ fn subscription_matches_query(
         .or_else(|| results.get(id).copied())
         .unwrap_or_default();
     let status = match detail {
-        Some(item) if item.downloading => "downloading in steam",
-        Some(item) if item.needs_update => "steam update available",
-        Some(item) if item.installed => "downloaded in steam",
+        Some(item) if item.steam_downloading => "downloading in steam",
+        Some(item) if item.steam_needs_update => "steam update available",
+        Some(item) if item.steam_installed => "downloaded in steam",
         Some(_) => "subscribed",
         None => "",
     };

@@ -163,10 +163,10 @@ impl StudioApp {
                     preview_url: item.preview_url.clone(),
                     updated_at_unix: item.updated_at_unix,
                     tags: item.tags.clone(),
-                    installed: item.installed,
-                    needs_update: item.needs_update,
-                    downloading: item.downloading,
-                    download_progress: item.download_progress,
+                    steam_installed: item.steam_installed,
+                    steam_needs_update: item.steam_needs_update,
+                    steam_downloading: item.steam_downloading,
+                    steam_download_progress: item.steam_download_progress,
                 })
                 .collect();
             self.apply_workshop_subscriptions(subscriptions);
@@ -278,7 +278,7 @@ impl StudioApp {
             .workshop
             .subscription_details
             .values()
-            .any(|item| item.downloading);
+            .any(|item| item.steam_downloading);
         if downloading {
             let interval = self
                 .workshop
@@ -373,7 +373,7 @@ impl StudioApp {
     ) {
         self.workshop.subscriptions_loaded = true;
         self.workshop.subscriptions_stale = false;
-        let downloading = subscriptions.iter().any(|item| item.downloading);
+        let downloading = subscriptions.iter().any(|item| item.steam_downloading);
         self.workshop.subscriptions = subscriptions
             .iter()
             .map(|item| item.published_file_id.clone())
@@ -653,7 +653,7 @@ impl StudioApp {
             .workshop
             .subscription_details
             .values()
-            .any(|item| item.downloading);
+            .any(|item| item.steam_downloading);
         let due = self
             .workshop
             .next_subscription_poll
