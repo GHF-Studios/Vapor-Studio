@@ -164,34 +164,40 @@ impl StudioApp {
                 HomePrimaryAction::Install => (
                     "Install composition",
                     service_connected
-                        && !self.operation.running
+                        && self
+                            .service_action_enabled("composition.install")
+                            .unwrap_or(false)
                         && !self.has_unsaved_workspace_edits(),
                 ),
                 HomePrimaryAction::BuildAndLaunch => (
                     "Build and launch project",
                     service_connected
-                        && !self.operation.running
                         && self
                             .service_action_enabled("composition.build-and-launch")
-                            .unwrap_or(true)
+                            .unwrap_or(false)
                         && !self.has_unsaved_workspace_edits(),
                 ),
                 HomePrimaryAction::Launch => (
                     "Launch",
                     service_connected
-                        && !self.operation.running
                         && self
                             .service_action_enabled("composition.launch")
-                            .unwrap_or(true),
+                            .unwrap_or(false),
                 ),
                 HomePrimaryAction::ReviewComposition => ("Review composition", true),
                 HomePrimaryAction::ReviewUpdate => ("Review update", true),
                 HomePrimaryAction::ReviewRepair => ("Review or repair composition", true),
             };
+            let action_id = match composition.primary_action {
+                HomePrimaryAction::Install => Some("composition.install"),
+                HomePrimaryAction::BuildAndLaunch => Some("composition.build-and-launch"),
+                HomePrimaryAction::Launch => Some("composition.launch"),
+                _ => None,
+            };
             let disabled_reason = if self.service.is_none() {
                 "Reconnect to Vapor before starting this action."
-            } else if self.operation.running {
-                "Wait for the current operation to finish."
+            } else if let Some(reason) = action_id.and_then(|id| self.service_action_reason(id)) {
+                reason
             } else if matches!(composition.primary_action, HomePrimaryAction::Checking) {
                 "Wait for local installation information to finish refreshing."
             } else if self.has_unsaved_context_switch_edits() {

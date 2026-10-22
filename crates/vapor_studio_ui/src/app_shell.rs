@@ -298,16 +298,7 @@ impl StudioApp {
             .composition
             .items
             .get(self.composition.active_index)
-            .map(|composition| {
-                (
-                    composition.root_package.is_some(),
-                    matches!(
-                        &composition.installation,
-                        vapor_client_application::InstallationState::OutOfDate { .. }
-                    ),
-                )
-            })
-            .unwrap_or_default();
+            .is_some_and(|composition| composition.root_package.is_some());
         let show_launch_button = self.section != Section::Home;
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("VAPOR STUDIO").small().strong().color(MUTED_TEXT));
@@ -320,21 +311,19 @@ impl StudioApp {
                 self.draw_composition_target_selector(ui);
             }
             if show_launch_button {
-                if active_composition_launch_state.0 {
-                    let launch_enabled = !self.operation.running
-                        && self
-                            .service_action_enabled("composition.launch")
-                            .unwrap_or(!active_composition_launch_state.1);
+                if active_composition_launch_state {
+                    let launch_enabled = self
+                        .service_action_enabled("composition.launch")
+                        .unwrap_or(false);
                     if ui
                         .add_enabled(
                             launch_enabled,
                             egui::Button::new(egui::RichText::new("Launch").strong()),
                         )
-                        .on_disabled_hover_text(if self.operation.running {
-                            "Wait for the current operation to finish."
-                        } else {
-                            "Review or update this composition before launching."
-                        })
+                        .on_disabled_hover_text(
+                            self.service_action_reason("composition.launch")
+                                .unwrap_or("Review or update this composition before launching."),
+                        )
                         .clicked()
                     {
                         self.run_installed_selected();

@@ -240,16 +240,33 @@ impl StudioApp {
                 _ => true,
             };
             let project_is_dirty = needs_saved_project && self.has_unsaved_workspace_edits();
+            let service_action_id = match action {
+                CompositionInstallationAction::Play => Some("composition.launch"),
+                CompositionInstallationAction::Repair => Some("composition.repair"),
+                CompositionInstallationAction::Verify => Some("composition.verify"),
+                CompositionInstallationAction::Update => Some("composition.update"),
+                CompositionInstallationAction::BuildAndPlay => Some("composition.build-and-launch"),
+                CompositionInstallationAction::Install => Some("composition.install"),
+                _ => None,
+            };
+            let operation_allowed = service_action_id
+                .map_or(!self.operation.running, |action_id| {
+                    self.service_action_enabled(action_id).unwrap_or(false)
+                });
             let mut clicked = false;
-            ui.add_enabled_ui(!self.operation.running && !project_is_dirty, |ui| {
+            ui.add_enabled_ui(operation_allowed && !project_is_dirty, |ui| {
                 clicked = super::super::components::design::primary_button(ui, label).clicked();
             })
             .response
-            .on_disabled_hover_text(if self.operation.running {
-                "Wait for the current operation to finish."
-            } else {
-                "Save or discard project edits before changing or running this setup."
-            });
+            .on_disabled_hover_text(
+                if let Some(reason) =
+                    service_action_id.and_then(|action_id| self.service_action_reason(action_id))
+                {
+                    reason
+                } else {
+                    "Save or discard project edits before changing or running this setup."
+                },
+            );
             if clicked {
                 action_to_run = Some(action);
             }

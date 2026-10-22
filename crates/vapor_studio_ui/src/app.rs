@@ -97,6 +97,17 @@ impl StudioApp {
             .map(|action| action.enabled)
     }
 
+    pub(super) fn service_action_reason(&self, action_id: &str) -> Option<&str> {
+        self.service
+            .as_ref()?
+            .latest_snapshot()
+            .available_actions
+            .iter()
+            .find(|action| action.id == action_id)?
+            .reason
+            .as_deref()
+    }
+
     pub fn new(creation: &eframe::CreationContext<'_>, workspace: Option<PathBuf>) -> Self {
         configure_studio_visuals(&creation.egui_ctx);
         let saved_workspace = creation
