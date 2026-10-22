@@ -492,6 +492,9 @@ impl StudioApp {
             next.phase,
             &next.status,
         );
+        if !self.operation.running {
+            self.operation.clear_queued_service_operations();
+        }
     }
 }
 
