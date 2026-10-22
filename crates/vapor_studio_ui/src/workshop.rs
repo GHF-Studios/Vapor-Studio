@@ -526,11 +526,6 @@ impl StudioApp {
         published_file_ids: Vec<String>,
         repreview_after_acquisition: Option<RepreviewRequest>,
     ) {
-        if self.operation.running {
-            self.status =
-                "Finish the current operation before downloading Workshop content.".to_owned();
-            return;
-        }
         if published_file_ids.is_empty() {
             self.status = "Select at least one Workshop item to download.".to_owned();
             return;
@@ -544,12 +539,17 @@ impl StudioApp {
         }
         let count = published_file_ids.len();
         let pending_acquisition_ids = published_file_ids.iter().cloned().collect();
+        let action = vapor_client_protocol::ClientAction::Workshop(
+            vapor_client_protocol::WorkshopAction::Acquire {
+                item_ids: published_file_ids,
+            },
+        );
+        if self.operation.service_action_is_pending_or_active(&action) {
+            self.status = "A Workshop download is already running or queued.".to_owned();
+            return;
+        }
         self.start_service_operation(
-            vapor_client_protocol::ClientAction::Workshop(
-                vapor_client_protocol::WorkshopAction::Acquire {
-                    item_ids: published_file_ids,
-                },
-            ),
+            action.clone(),
             None,
             OperationKind::Acquire,
             vapor_client_application::OperationPhase::Acquiring,
@@ -559,13 +559,7 @@ impl StudioApp {
                 format!("Downloading {count} items for use in Studio…")
             },
         );
-        if !self.operation.service_owned
-            || !self
-                .operation
-                .active_operation
-                .as_ref()
-                .is_some_and(|operation| operation.kind == OperationKind::Acquire)
-        {
+        if !self.operation.service_action_is_pending_or_active(&action) {
             return;
         }
         self.workshop.pending_acquisition_ids = pending_acquisition_ids;
@@ -596,10 +590,6 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn search_workshop_page(&mut self, page: u32) {
-        if self.operation.running {
-            self.status = "Wait for the current operation to finish.".to_owned();
-            return;
-        }
         let query = self.workshop.search_query.trim().to_owned();
         let content_kind = self
             .workshop
@@ -631,15 +621,16 @@ impl StudioApp {
     }
 
     pub(in crate::app) fn refresh_workshop_subscriptions(&mut self) {
-        if self.operation.running {
+        let action = vapor_client_protocol::ClientAction::Workshop(
+            vapor_client_protocol::WorkshopAction::LoadSubscriptions,
+        );
+        if self.operation.service_action_is_pending_or_active(&action) {
             return;
         }
         self.workshop.next_subscription_poll =
             Some(Instant::now() + self.workshop.subscription_poll_interval);
         self.start_service_operation(
-            vapor_client_protocol::ClientAction::Workshop(
-                vapor_client_protocol::WorkshopAction::LoadSubscriptions,
-            ),
+            action,
             None,
             OperationKind::LoadWorkshopSubscriptions,
             vapor_client_application::OperationPhase::Resolving,

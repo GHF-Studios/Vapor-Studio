@@ -18,11 +18,15 @@ enum WorkshopSearchAction {
 impl StudioApp {
     pub(super) fn draw_workshop_search_panel(&mut self, ui: &mut egui::Ui) {
         let steam_available = self.workshop.steam_client_available;
+        let search_pending = self.workshop.pending_search.is_some()
+            || self
+                .operation
+                .service_action_id_is_pending_or_active("workshop.search");
         let mut run_search = false;
         ui.horizontal_wrapped(|ui| {
             let search_width = search_field_width(ui);
             let response = ui.add_enabled(
-                !self.operation.running && steam_available,
+                !search_pending && steam_available,
                 egui::TextEdit::singleline(&mut self.workshop.search_query)
                     .hint_text("Search Workshop items")
                     .desired_width(search_width),
@@ -31,7 +35,7 @@ impl StudioApp {
                 && ui.input(|input| input.key_pressed(egui::Key::Enter));
             run_search |= ui
                 .add_enabled(
-                    !self.operation.running && steam_available,
+                    !search_pending && steam_available,
                     egui::Button::new("Search Workshop"),
                 )
                 .clicked();
@@ -64,7 +68,7 @@ impl StudioApp {
                 });
         });
         ui.weak("Filter by Vapor content type. Subscribe to follow updates, or add an item to your Library when you want to use it. Neither action changes a composition.");
-        if run_search && !self.operation.running && steam_available {
+        if run_search && !search_pending && steam_available {
             self.search_workshop();
         }
         if let Some((query, page, _content_kind)) = self.workshop.pending_search.as_ref() {
@@ -121,13 +125,13 @@ impl StudioApp {
                     });
                 let previous = ui
                     .add_enabled(
-                        !self.operation.running && steam_available && self.workshop.page > 1,
+                        !search_pending && steam_available && self.workshop.page > 1,
                         egui::Button::new("Previous Steam page"),
                     )
                     .clicked();
                 let next = ui
                     .add_enabled(
-                        !self.operation.running
+                        !search_pending
                             && steam_available
                             && self.workshop.page < page_count,
                         egui::Button::new("Next Steam page"),
@@ -179,7 +183,7 @@ impl StudioApp {
                 });
                 if ui
                     .add_enabled(
-                        !self.operation.running && !visible_results.is_empty(),
+                        !visible_results.is_empty(),
                         egui::Button::new(if page_is_selected {
                             "Clear visible"
                         } else {
@@ -210,18 +214,13 @@ impl StudioApp {
                     "Selected across pages and searches · {count} item{}",
                     if count == 1 { "" } else { "s" }
                 ));
-                if ui
-                    .add_enabled(
-                        !self.operation.running,
-                        egui::Button::new("Clear selection"),
-                    )
-                    .clicked()
+                if ui.button("Clear selection").clicked()
                 {
                     self.workshop.selected_items.clear();
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running && steam_available,
+                        steam_available,
                         egui::Button::new(format!("Add {count} to Library")),
                     )
                     .clicked()
@@ -230,7 +229,7 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running && steam_available && subscription_batch_supported,
+                        steam_available && subscription_batch_supported,
                         egui::Button::new(format!("Subscribe {count}")),
                     )
                     .clicked()
@@ -239,7 +238,7 @@ impl StudioApp {
                 }
                 if ui
                     .add_enabled(
-                        !self.operation.running && steam_available && subscription_batch_supported,
+                        steam_available && subscription_batch_supported,
                         egui::Button::new("Unsubscribe selected"),
                     )
                     .clicked()
@@ -290,7 +289,7 @@ impl StudioApp {
                         }
                     },
                 );
-                if run_search && !self.operation.running && steam_available {
+                if run_search && !search_pending && steam_available {
                     self.search_workshop();
                 }
             }
@@ -320,12 +319,7 @@ impl StudioApp {
                                 .workshop
                                 .selected_items
                                 .contains(&item.published_file_id);
-                            if ui
-                                .add_enabled(
-                                    !self.operation.running,
-                                    egui::Checkbox::new(&mut selected, ""),
-                                )
-                                .changed()
+                            if ui.checkbox(&mut selected, "").changed()
                             {
                                 if selected {
                                     self.workshop
@@ -443,7 +437,7 @@ impl StudioApp {
                     }
                 } else if !locally_available {
                     let mut clicked = false;
-                    details.add_enabled_ui(!self.operation.running && steam_available, |ui| {
+                    details.add_enabled_ui(steam_available, |ui| {
                         clicked =
                             super::super::components::design::primary_button(ui, "Add to Library")
                                 .clicked();
@@ -457,7 +451,7 @@ impl StudioApp {
                     details.strong("Used by this composition");
                     let mut clicked = false;
                     details.add_enabled_ui(
-                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        !self.has_unsaved_workspace_edits(),
                         |ui| {
                             clicked = super::super::components::design::primary_button(
                                 ui,
@@ -473,8 +467,7 @@ impl StudioApp {
                     details.label("Available in Library");
                     let mut clicked = false;
                     details.add_enabled_ui(
-                        !self.operation.running
-                            && local_catalog_current
+                        local_catalog_current
                             && !self.has_unsaved_workspace_edits()
                             && !create_draft_blocks_assignment,
                         |ui| {
@@ -502,8 +495,7 @@ impl StudioApp {
                     }
                     let mut launch_clicked = false;
                     details.add_enabled_ui(
-                        !self.operation.running
-                            && local_catalog_current
+                        local_catalog_current
                             && !local_conflict
                             && !self.has_unsaved_workspace_edits()
                             && !create_draft_blocks_assignment,
@@ -524,8 +516,6 @@ impl StudioApp {
                         "Discard the Create draft before switching this composition."
                     } else if self.has_unsaved_workspace_edits() {
                         "Save or discard project edits before switching this composition."
-                    } else if self.operation.running {
-                        "Wait for the current operation to finish."
                     } else {
                         "Launch this composition."
                     });
@@ -538,7 +528,7 @@ impl StudioApp {
                     details.label("Available in Library");
                     let mut clicked = false;
                     details.add_enabled_ui(
-                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        !self.has_unsaved_workspace_edits(),
                         |ui| {
                             clicked = super::super::components::design::primary_button(
                                 ui,
@@ -557,7 +547,7 @@ impl StudioApp {
                 details.horizontal_wrapped(|ui| {
                     if ui
                         .add_enabled(
-                            !self.operation.running && steam_available,
+                            steam_available,
                             egui::Button::new(if subscribed { "Unsubscribe" } else { "Subscribe" }),
                         )
                         .on_hover_text(if self.workshop.subscriptions_loaded {
@@ -575,7 +565,7 @@ impl StudioApp {
                     if locally_available
                         && ui
                             .add_enabled(
-                                !self.operation.running && steam_available,
+                                steam_available,
                                 egui::Button::new("Update from Workshop"),
                             )
                             .clicked()

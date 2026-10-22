@@ -94,7 +94,7 @@ impl StudioApp {
             .available_actions
             .iter()
             .find(|action| action.id == action_id)
-            .map(|action| action.enabled)
+            .map(|action| action.enabled || action.queueable)
     }
 
     pub(super) fn service_action_reason(&self, action_id: &str) -> Option<&str> {
@@ -394,15 +394,21 @@ impl StudioApp {
     }
 
     pub(super) fn discover_superworkspace_projects_if_ready(&mut self) {
+        let action = ClientAction::Workspace(
+            vapor_client_protocol::WorkspaceAction::DiscoverSuperworkspaceRepositories,
+        );
         let is_ready = self.service.as_ref().is_some_and(|service| {
             let snapshot = service.latest_snapshot();
-            snapshot.superworkspace.status == "ready" && snapshot.active_operation.is_none()
+            snapshot.superworkspace.status == "ready"
+                && !snapshot.superworkspace.available_repositories_loaded
+                && snapshot
+                    .superworkspace
+                    .available_repositories_error
+                    .is_none()
         });
-        if is_ready && !self.operation.running {
+        if is_ready && !self.operation.service_action_is_pending_or_active(&action) {
             self.start_service_operation(
-                ClientAction::Workspace(
-                    vapor_client_protocol::WorkspaceAction::DiscoverSuperworkspaceRepositories,
-                ),
+                action,
                 None,
                 vapor_client_application::OperationKind::Discover,
                 vapor_client_application::OperationPhase::Resolving,

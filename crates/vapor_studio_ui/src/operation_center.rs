@@ -41,17 +41,16 @@ impl StudioApp {
                     vapor_client_application::OperationStatus::Failed { .. }
                 )
             })
-            || (!self.operation.running
-                && self
-                    .operation
-                    .operation_history
-                    .front()
-                    .is_some_and(|operation| {
-                        matches!(
-                            &operation.event.status,
-                            vapor_client_application::OperationStatus::Failed { .. }
-                        )
-                    }))
+            || self
+                .operation
+                .operation_history
+                .front()
+                .is_some_and(|operation| {
+                    matches!(
+                        &operation.event.status,
+                        vapor_client_application::OperationStatus::Failed { .. }
+                    )
+                })
     }
 
     pub(super) fn draw_operation_center(&mut self, ui: &mut egui::Ui) {
@@ -62,6 +61,12 @@ impl StudioApp {
                     ui.spinner();
                 }
                 ui.strong(operation_kind_label(&operation.kind));
+                if self.operation.active_operations.len() > 1 {
+                    ui.weak(format!(
+                        "+ {} more",
+                        self.operation.active_operations.len() - 1
+                    ));
+                }
                 ui.weak(operation_phase_label(&operation.phase));
                 ui.label(compact_status(&self.status))
                     .on_hover_text(&self.status);
@@ -97,6 +102,18 @@ impl StudioApp {
                         ui.weak(format!("{} {}", progress.completed, progress.unit));
                     }
                 }
+            } else if !self.operation.pending_service_requests.is_empty() {
+                ui.spinner();
+                ui.strong("Sending task to Vapor…");
+                ui.weak(format!(
+                    "{} request{} pending",
+                    self.operation.pending_service_requests.len(),
+                    if self.operation.pending_service_requests.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                ));
             } else if let Some(last) = self.operation.operation_history.front() {
                 let tone = match &last.event.status {
                     vapor_client_application::OperationStatus::Succeeded { summary }
@@ -204,6 +221,12 @@ impl StudioApp {
                     };
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(label).monospace().color(color));
+                        ui.label(
+                            egui::RichText::new(format!("#{}", line.operation_id))
+                                .small()
+                                .monospace()
+                                .color(egui::Color32::DARK_GRAY),
+                        );
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(&line.text)

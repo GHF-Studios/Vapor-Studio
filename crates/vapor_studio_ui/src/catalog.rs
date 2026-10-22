@@ -238,23 +238,37 @@ impl StudioApp {
             match frame {
                 ProtocolFrame::Response(response) => {
                     self.apply_service_catalog_snapshot(&response.snapshot);
-                    let operation_request =
-                        self.operation.service_request_id.as_ref() == Some(&response.request_id);
-                    let operation_kind = self
+                    let pending_operation = self
                         .operation
-                        .active_operation
+                        .reconcile_service_request(&response.request_id);
+                    let operation_request = pending_operation.is_some();
+                    let operation_kind = pending_operation
                         .as_ref()
                         .map(|operation| operation.kind.clone());
-                    if operation_request {
-                        self.operation.service_request_id = None;
-                        if response.kind != ClientResponseKind::OperationAccepted {
-                            self.operation.running = false;
-                            self.operation.service_owned = false;
-                            self.operation.active_operation = None;
-                        }
-                    }
+                    let conflict = response.error.as_ref().is_some_and(|error| {
+                        error.code == vapor_client_protocol::ServiceErrorCode::OperationInProgress
+                    });
                     match response.error {
                         Some(error) => {
+                            if conflict {
+                                if let Some(operation) = pending_operation {
+                                    match self
+                                        .operation
+                                        .queue_conflicting_service_operation(operation)
+                                    {
+                                        Ok(queued) => {
+                                            self.status = format!(
+                                                "Queued behind a conflicting task · {queued} waiting."
+                                            );
+                                        }
+                                        Err(()) => {
+                                            self.status = "The operation queue is full. Wait for a task to finish before retrying.".to_owned();
+                                        }
+                                    }
+                                    self.operation.sync_activity_state();
+                                }
+                                continue;
+                            }
                             if operation_request {
                                 match operation_kind {
                                     Some(vapor_client_application::OperationKind::SearchWorkshop) => {
@@ -286,7 +300,10 @@ impl StudioApp {
                         }
                         None => {}
                     }
-                    if operation_request && response.kind != ClientResponseKind::OperationAccepted {
+                    if operation_request
+                        && response.kind != ClientResponseKind::OperationAccepted
+                        && !conflict
+                    {
                         self.start_next_service_operation();
                     }
                 }
@@ -321,10 +338,6 @@ impl StudioApp {
             eprintln!("[vapor-studio] shared connection ended: {error}");
             let operation_was_running = self.operation.service_owned;
             if operation_was_running {
-                self.operation.running = false;
-                self.operation.service_owned = false;
-                self.operation.service_request_id = None;
-                self.operation.active_operation = None;
                 self.operation.clear_queued_service_operations();
                 self.status =
                     "Connection interrupted. The active action may have completed; queued actions were cleared. Check its result before retrying."
@@ -483,7 +496,15 @@ impl StudioApp {
             .workspace_content
             .unregistered_projects_error
             .clone();
-        self.apply_service_operation_snapshot(snapshot.active_operation.as_ref());
+        if snapshot.active_operations.is_empty() {
+            if let Some(operation) = snapshot.active_operation.as_ref() {
+                self.apply_service_operation_snapshot(std::slice::from_ref(operation));
+            } else {
+                self.apply_service_operation_snapshot(&[]);
+            }
+        } else {
+            self.apply_service_operation_snapshot(&snapshot.active_operations);
+        }
         let selected_composition_id = self
             .composition
             .items

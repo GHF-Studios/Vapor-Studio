@@ -29,6 +29,9 @@ enum SubscriptionAction {
 impl StudioApp {
     pub(super) fn draw_workshop_subscriptions_panel(&mut self, ui: &mut egui::Ui) {
         let steam_available = self.workshop.steam_client_available;
+        let subscriptions_loading = self
+            .operation
+            .service_action_id_is_pending_or_active("workshop.load-subscriptions");
         section_header(
             ui,
             "Your subscriptions",
@@ -44,7 +47,7 @@ impl StudioApp {
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
-                    !self.operation.running && steam_available,
+                    !subscriptions_loading && steam_available,
                     egui::Button::new(if self.workshop.subscriptions_loaded {
                         "Refresh subscriptions"
                     } else {
@@ -66,12 +69,13 @@ impl StudioApp {
         if !self.workshop.subscriptions_loaded {
             let loading = self
                 .operation
-                .active_operation
-                .as_ref()
-                .is_some_and(|operation| {
+                .active_operations
+                .iter()
+                .any(|operation| {
                     operation.kind
                         == vapor_client_application::OperationKind::LoadWorkshopSubscriptions
-                });
+                })
+                || subscriptions_loading;
             empty_state(
                 ui,
                 if loading {
@@ -192,7 +196,7 @@ impl StudioApp {
                 ));
                 if ui
                     .add_enabled(
-                        !self.operation.running && matching_subscriptions > 0,
+                        matching_subscriptions > 0,
                         egui::Button::new(if all_visible_selected {
                             "Clear visible"
                         } else {
@@ -208,10 +212,7 @@ impl StudioApp {
                 }
                 if selected_visible > 0
                     && ui
-                        .add_enabled(
-                            !self.operation.running,
-                            egui::Button::new(format!("Add to Library · {selected_visible}")),
-                        )
+                        .button(format!("Add to Library · {selected_visible}"))
                         .on_hover_text("Add only the selected items currently visible in this view to your Library.")
                         .clicked()
                 {
@@ -222,7 +223,7 @@ impl StudioApp {
                 if selected_visible > 0
                     && ui
                         .add_enabled(
-                            !self.operation.running && steam_available && subscription_batch_supported,
+                            steam_available && subscription_batch_supported,
                             egui::Button::new(format!("Unsubscribe visible · {selected_visible}")),
                         )
                         .on_disabled_hover_text(format!(
@@ -297,12 +298,7 @@ impl StudioApp {
                     ui.group(|ui| {
                         ui.horizontal_wrapped(|ui| {
                             let mut selected = self.workshop.selected_items.contains(id);
-                            if ui
-                                .add_enabled(
-                                    !self.operation.running,
-                                    egui::Checkbox::new(&mut selected, ""),
-                                )
-                                .changed()
+                            if ui.checkbox(&mut selected, "").changed()
                             {
                                 action = Some(SubscriptionAction::SetSelected(id.clone(), selected));
                             }
@@ -344,7 +340,7 @@ impl StudioApp {
                                 );
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running && steam_available,
+                                        steam_available,
                                         egui::Button::new("Review item details"),
                                     )
                                     .clicked()
@@ -360,8 +356,7 @@ impl StudioApp {
                                     ui.strong("Used by this composition");
                                 } else if ui
                                     .add_enabled(
-                                        !self.operation.running
-                                            && local_catalog_current
+                                        local_catalog_current
                                             && !self.has_unsaved_workspace_edits()
                                             && !create_draft_blocks_assignment,
                                         egui::Button::new(format!(
@@ -384,8 +379,7 @@ impl StudioApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running
-                                            && local_catalog_current
+                                        local_catalog_current
                                             && !self.has_unsaved_workspace_edits()
                                             && !create_draft_blocks_assignment,
                                         egui::Button::new("Launch this composition"),
@@ -408,8 +402,7 @@ impl StudioApp {
                                 if (local.included_in_active_composition || local.selected_as_composition_root)
                                     && ui
                                         .add_enabled(
-                                            !self.operation.running
-                                                && !self.has_unsaved_workspace_edits(),
+                                            !self.has_unsaved_workspace_edits(),
                                             egui::Button::new("Review composition"),
                                         )
                                         .on_hover_text(
@@ -439,7 +432,7 @@ impl StudioApp {
                             ui.horizontal_wrapped(|ui| {
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running && steam_available,
+                                            steam_available,
                                         egui::Button::new(download_label),
                                     )
                                     .clicked()
@@ -448,7 +441,7 @@ impl StudioApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.operation.running && steam_available,
+                                            steam_available,
                                         egui::Button::new("Unsubscribe"),
                                     )
                                     .clicked()

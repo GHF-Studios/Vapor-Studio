@@ -115,7 +115,7 @@ impl StudioApp {
         ui.add_space(12.0);
         ui.horizontal_wrapped(|ui| {
             let mut find_clicked = false;
-            ui.add_enabled_ui(!self.operation.running, |ui| {
+            ui.add_enabled_ui(self.service.is_some(), |ui| {
                 find_clicked = primary_button(ui, "Discover content").clicked();
             });
             if find_clicked {
@@ -124,7 +124,10 @@ impl StudioApp {
             }
             if ui
                 .add_enabled(
-                    !self.operation.running,
+                    self.service.is_some()
+                        && self
+                            .service_action_enabled("catalog.refresh")
+                            .unwrap_or(false),
                     egui::Button::new("Browse content on this device"),
                 )
                 .clicked()
@@ -255,7 +258,10 @@ impl StudioApp {
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
-                        !self.operation.running && !self.has_unsaved_workspace_edits(),
+                        self.service.is_some()
+                            && self
+                                .service_action_enabled("catalog.refresh")
+                                .unwrap_or(false),
                         egui::Button::new("Browse this device"),
                     )
                     .clicked()
