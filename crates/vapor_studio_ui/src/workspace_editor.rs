@@ -601,6 +601,46 @@ impl StudioApp {
                 self.apply_workspace_file_created(PathBuf::from(path));
                 self.finish_service_result_operation(&operation_id);
             }
+            WorkspaceFileResult::CanonicalRustModuleCreated {
+                operation_id,
+                module_path,
+                module_contents,
+                module_fingerprint,
+                parent_path,
+                parent_contents,
+                parent_fingerprint,
+            } => {
+                if !self.workspace_file_result_matches_active(&operation_id) {
+                    return;
+                }
+                let module_path = PathBuf::from(module_path);
+                let parent_path = PathBuf::from(parent_path);
+                if let Some(document) = self.workspace.editor.documents.get_mut(&parent_path) {
+                    let mut current = document.contents.clone();
+                    let module_name = module_path
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default();
+                    let declaration = format!("pub mod {module_name};");
+                    if !current.lines().any(|line| line.trim() == declaration) {
+                        if !current.is_empty() && !current.ends_with('\n') {
+                            current.push('\n');
+                        }
+                        if !current.is_empty() && !current.ends_with("\n\n") {
+                            current.push('\n');
+                        }
+                        current.push_str(&declaration);
+                        current.push('\n');
+                    }
+                    document.original = parent_contents;
+                    document.original_fingerprint = parent_fingerprint;
+                    document.contents = current;
+                    document.refresh_inspection(&parent_path);
+                }
+                self.apply_workspace_file_created(module_path.clone());
+                self.apply_workspace_file_opened(module_path, module_contents, module_fingerprint);
+                self.finish_service_result_operation(&operation_id);
+            }
             WorkspaceFileResult::Completed { operation_id } => {
                 if !self.workspace_file_result_matches_active(&operation_id) {
                     return;
