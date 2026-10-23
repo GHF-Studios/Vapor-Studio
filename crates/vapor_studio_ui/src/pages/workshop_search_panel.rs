@@ -68,7 +68,15 @@ impl StudioApp {
                 });
         });
         ui.weak("Filter by Vapor content type. Subscribe to follow updates, or add an item to your Library when you want to use it. Neither action changes a composition.");
-        if run_search && !search_pending && steam_available {
+        if run_search && steam_available {
+            if search_pending {
+                self.workshop.queued_search = true;
+            } else {
+                self.workshop.queued_search = false;
+                self.search_workshop();
+            }
+        } else if self.workshop.queued_search && !search_pending && steam_available {
+            self.workshop.queued_search = false;
             self.search_workshop();
         }
         if let Some((query, page, _content_kind)) = self.workshop.pending_search.as_ref() {

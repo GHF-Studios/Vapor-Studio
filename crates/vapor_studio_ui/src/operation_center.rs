@@ -113,13 +113,19 @@ impl StudioApp {
     pub(super) fn draw_operation_console(&mut self, ui: &mut egui::Ui) {
         use vapor_console_core::ConsoleLevel;
 
-        let problem_count = self
-            .operation
-            .console
-            .history
-            .records()
-            .filter(|record| matches!(record.level, ConsoleLevel::Warn | ConsoleLevel::Error))
-            .count();
+        let history = &self.operation.console.history;
+        if self.operation.problem_history_revision != Some(history.revision()) {
+            self.operation.problem_indices = history
+                .records()
+                .enumerate()
+                .filter_map(|(index, record)| {
+                    matches!(record.level, ConsoleLevel::Warn | ConsoleLevel::Error)
+                        .then_some(index)
+                })
+                .collect();
+            self.operation.problem_history_revision = Some(history.revision());
+        }
+        let problem_count = self.operation.problem_indices.len();
         ui.horizontal(|ui| {
             if ui
                 .selectable_label(
@@ -148,30 +154,11 @@ impl StudioApp {
             if problem_count == 0 {
                 ui.weak("Warnings and errors from Vapor operations appear here.");
             } else {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for record in self.operation.console.history.records().filter(|record| {
-                            matches!(record.level, ConsoleLevel::Warn | ConsoleLevel::Error)
-                        }) {
-                            let color = if record.level == ConsoleLevel::Error {
-                                egui::Color32::LIGHT_RED
-                            } else {
-                                egui::Color32::YELLOW
-                            };
-                            ui.horizontal_wrapped(|ui| {
-                                ui.colored_label(color, record.level.label());
-                                ui.weak(&record.source.0);
-                                if let Some(target) = &record.target {
-                                    ui.weak(target);
-                                }
-                                ui.label(&record.message);
-                                for field in &record.fields {
-                                    ui.weak(format!("{}={}", field.key, field.value));
-                                }
-                            });
-                        }
-                    });
+                vapor_gui_core::console::show_records(
+                    ui,
+                    &self.operation.console.history,
+                    &self.operation.problem_indices,
+                );
             }
         } else {
             if self.operation.console.history.dropped_count() > 0 {

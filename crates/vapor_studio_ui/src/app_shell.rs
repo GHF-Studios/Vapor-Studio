@@ -421,6 +421,11 @@ impl eframe::App for StudioApp {
         egui::Panel::bottom("studio-operation-center")
             .resizable(self.console_open)
             .default_size(if self.console_open { 320.0 } else { 54.0 })
+            .size_range(if self.console_open {
+                140.0..=520.0
+            } else {
+                40.0..=80.0
+            })
             .show(ui, |ui| self.draw_operation_center(ui));
         egui::CentralPanel::default().show(ui, |ui| {
             let workspace_editor =

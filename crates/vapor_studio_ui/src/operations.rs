@@ -12,7 +12,6 @@ use vapor_client_protocol::{
     OperationOutputEvent as ServiceOperationOutputEvent, OperationPhase as ServiceOperationPhase,
     OperationStatus as ServiceOperationStatus, RequestId,
 };
-use vapor_console_core::ConsoleRecord;
 use vapor_gui_core::console::ConsolePanelState;
 
 #[derive(Default)]
@@ -25,6 +24,8 @@ pub(super) struct OperationState {
     active_service_action_ids: HashMap<String, String>,
     pub(super) operation_history: VecDeque<HistoricalOperation>,
     pub(super) console: ConsolePanelState,
+    pub(super) problem_history_revision: Option<u64>,
+    pub(super) problem_indices: Vec<usize>,
     queued_service_operations: VecDeque<QueuedServiceOperation>,
     pub(super) pending_service_requests: HashMap<RequestId, QueuedServiceOperation>,
 }
@@ -90,19 +91,7 @@ impl OperationState {
         {
             return;
         }
-        for line in event.text.lines().filter(|line| !line.trim().is_empty()) {
-            let source = if event.source.is_empty() {
-                "command"
-            } else {
-                &event.source
-            };
-            let mut record = ConsoleRecord::new(event.timestamp_unix_ms, event.level, source, line)
-                .target(event.action.clone())
-                .field("operation", event.id.clone())
-                .field("stream", format!("{:?}", event.stream).to_ascii_lowercase());
-            if let Some(process) = &event.process {
-                record = record.field("process", process.clone());
-            }
+        for record in vapor_gui_core::console::records_from_operation_output(event) {
             self.console.history.push(record);
         }
     }
@@ -635,12 +624,15 @@ mod tests {
 
         state.apply_service_operation_output(&OperationOutputEvent {
             id: "7".to_owned(),
+            origin: vapor_client_protocol::ClientOrigin::Studio,
+            composition_id: Some("loo-cast".to_owned()),
             stream: OperationOutputStream::Stderr,
             timestamp_unix_ms: 123,
             level: vapor_client_protocol::ConsoleLevel::Error,
             source: "workspace".to_owned(),
             action: "workspace.test".to_owned(),
             process: Some("cargo".to_owned()),
+            diagnostic: None,
             text: "compiler stopped".to_owned(),
         });
         let record = state.console.history.records().next().unwrap();
@@ -648,6 +640,18 @@ mod tests {
         assert_eq!(record.level, vapor_client_protocol::ConsoleLevel::Error);
         assert_eq!(record.source.0, "workspace");
         assert_eq!(record.target.as_deref(), Some("workspace.test"));
+        assert!(
+            record
+                .fields
+                .iter()
+                .any(|field| { field.key == "origin" && field.value == "studio" })
+        );
+        assert!(
+            record
+                .fields
+                .iter()
+                .any(|field| { field.key == "composition" && field.value == "loo-cast" })
+        );
         assert!(
             record
                 .fields
