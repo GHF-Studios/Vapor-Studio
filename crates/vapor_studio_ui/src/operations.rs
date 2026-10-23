@@ -633,6 +633,7 @@ mod tests {
             action: "workspace.test".to_owned(),
             process: Some("cargo".to_owned()),
             diagnostic: None,
+            raw_payload: Some("error[E0502]: detailed compiler stderr".to_owned()),
             text: "compiler stopped".to_owned(),
         });
         let record = state.console.history.records().next().unwrap();
@@ -658,6 +659,9 @@ mod tests {
                 .iter()
                 .any(|field| field.key == "process" && field.value == "cargo")
         );
+        assert!(record.fields.iter().any(|field| {
+            field.key == "raw" && field.value == "error[E0502]: detailed compiler stderr"
+        }));
     }
 
     #[test]
