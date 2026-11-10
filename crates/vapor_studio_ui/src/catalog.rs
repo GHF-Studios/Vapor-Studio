@@ -381,34 +381,32 @@ impl StudioApp {
         snapshot: &vapor_client_protocol::ClientSnapshot,
     ) {
         self.workshop.steam_client_available = snapshot.host.steam_client_available;
-        self.root_publishing.identity = snapshot.root_distribution;
         self.diagnostics
             .set_profile_traces(snapshot.profile_traces.clone());
         if let Some(error) = snapshot.profile_trace_error.as_ref() {
             self.diagnostics.set_status(error.clone());
         }
         self.apply_service_workshop_snapshot(&snapshot.workshop);
-        self.root_publishing.preview = snapshot.root_publishing.clone();
-        if let Some(publishing) = snapshot.root_publishing.as_ref() {
-            self.root_publishing.status = if publishing.planned {
+        self.application_release.preview = snapshot.application_release.clone();
+        if let Some(publishing) = snapshot.application_release.as_ref() {
+            self.application_release.status = if publishing.planned {
                 format!(
-                    "Steam root review ready · App {} · depot {} · {} files · account {}.",
+                    "Loo-Cast content review ready · App {} · {} files · account {}.",
                     publishing.app_id,
-                    publishing.depot_id,
-                    publishing.copied_files,
+                    publishing.files,
                     publishing.account,
                 )
             } else if publishing.succeeded {
                 format!(
-                    "Steam upload completed · App {} · depot {} · account {} · branch {}.",
+                    "Steam content upload completed · App {} · {} depot(s) · account {} · branch {}.",
                     publishing.app_id,
-                    publishing.depot_id,
+                    publishing.depot_ids.len(),
                     publishing.account,
-                    publishing.set_live.as_deref().unwrap_or("not changed"),
+                    publishing.branch,
                 )
             } else {
                 format!(
-                    "Steam root upload finished with {}.",
+                    "Steam content upload finished with {}.",
                     publishing.status.as_deref().unwrap_or("unknown status"),
                 )
             };

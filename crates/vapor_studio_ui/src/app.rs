@@ -1,5 +1,7 @@
 #[path = "app_shell.rs"]
 mod app_shell;
+#[path = "application_release.rs"]
+mod application_release;
 #[path = "authoring_results.rs"]
 mod authoring_results;
 #[path = "catalog.rs"]
@@ -24,8 +26,6 @@ mod operation_protocol;
 mod operations;
 #[path = "pages/mod.rs"]
 mod pages;
-#[path = "root_publishing.rs"]
-mod root_publishing;
 #[path = "source_authoring.rs"]
 mod source_authoring;
 #[path = "workshop.rs"]
@@ -49,7 +49,7 @@ use compositions::CompositionState;
 use directory_picker::DirectoryPicker;
 use eframe::egui;
 use operations::OperationState;
-use root_publishing::RootPublishingState;
+use application_release::ApplicationReleaseState;
 use source_authoring::AuthoringState;
 use std::{
     path::PathBuf,
@@ -70,7 +70,7 @@ pub struct StudioApp {
     authoring: AuthoringState,
     composition_preview: CompositionPreviewState,
     workshop: WorkshopState,
-    root_publishing: RootPublishingState,
+    application_release: ApplicationReleaseState,
     status: String,
     operation: OperationState,
     service: Option<Client>,
@@ -207,7 +207,7 @@ impl StudioApp {
             ),
             catalog: CatalogState::default(),
             workshop: WorkshopState::default(),
-            root_publishing: RootPublishingState::default(),
+            application_release: ApplicationReleaseState::default(),
             authoring: AuthoringState::default(),
             composition_preview: CompositionPreviewState::default(),
             status: "Choose a workspace to manage authored content. Use Vapor Launcher to play compositions.".to_owned(),

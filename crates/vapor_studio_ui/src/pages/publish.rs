@@ -1,6 +1,6 @@
 use super::super::StudioApp;
 use super::super::components::design::{StatusTone, page_header, status_text, use_stacked_form};
-use super::super::root_publishing::{PublishTab, root_publish_confirmation};
+use super::super::application_release::{ApplicationReleaseState, PublishTab};
 use super::workspace_content_panel::{display_target, format_bytes};
 use eframe::egui;
 
@@ -24,25 +24,25 @@ impl StudioApp {
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add(egui::Button::selectable(
-                    self.root_publishing.tab == PublishTab::WorkshopContent,
+                    self.application_release.tab == PublishTab::WorkshopContent,
                     "Workshop content",
                 ))
                 .clicked()
             {
-                self.root_publishing.tab = PublishTab::WorkshopContent;
+                self.application_release.tab = PublishTab::WorkshopContent;
             }
             if ui
                 .add(egui::Button::selectable(
-                    self.root_publishing.tab == PublishTab::VaporApp,
-                    "Vapor app release",
+                    self.application_release.tab == PublishTab::SteamProduct,
+                    "Loo-Cast Steam content",
                 ))
                 .clicked()
             {
-                self.root_publishing.tab = PublishTab::VaporApp;
+                self.application_release.tab = PublishTab::SteamProduct;
             }
         });
 
-        if self.root_publishing.tab == PublishTab::WorkshopContent {
+        if self.application_release.tab == PublishTab::WorkshopContent {
             let mut action = None;
             ui.group(|ui| {
             ui.heading("Publish a Workshop item");
@@ -246,158 +246,201 @@ impl StudioApp {
             }
         } else {
             ui.group(|ui| {
-            ui.heading("Publish a Vapor app build");
-            ui.label("This publishes a Vapor release build to the Steam app and depot selected for this installation.");
-            ui.label(format!(
-                "Steam app {} · depot {}",
-                self.root_publishing.identity.app_id,
-                self.root_publishing.identity.depot_id,
-            ));
+                ui.heading("Loo-Cast Steam content");
+                ui.label("This Steam app is a content mount: the engine, game, packagepack, and composition manifest. Vapor itself—including its tools, caches, and user data—stays in Vapor home.");
 
-            let mut settings_changed = false;
-            if use_stacked_form(ui) {
-                ui.label("Publisher account");
-                let field_width = ui.available_width();
-                settings_changed |= ui
-                    .add_enabled(
-                        !self.operation.running,
-                        egui::TextEdit::singleline(&mut self.root_publishing.account)
-                            .desired_width(field_width)
-                            .hint_text("Steamworks account name"),
-                    )
-                    .changed();
-                ui.label("Build description");
-                let field_width = ui.available_width();
-                settings_changed |= ui
-                    .add_enabled(
-                        !self.operation.running,
-                        egui::TextEdit::singleline(&mut self.root_publishing.description)
-                            .desired_width(field_width)
-                            .hint_text("Vapor root package"),
-                    )
-                    .changed();
-                ui.label("Beta branch");
-                let field_width = ui.available_width();
-                settings_changed |= ui
-                    .add_enabled(
-                        !self.operation.running,
-                        egui::TextEdit::singleline(&mut self.root_publishing.set_live_branch)
-                            .desired_width(field_width)
-                            .hint_text("Leave empty to upload without changing a branch"),
-                    )
-                    .changed();
-            } else {
-                let field_width = (ui.available_width() - 160.0).clamp(180.0, 420.0);
-                egui::Grid::new("root-publish-settings")
-                    .num_columns(2)
-                    .spacing([14.0, 9.0])
-                    .show(ui, |ui| {
-                        ui.label("Publisher account");
-                        settings_changed |= ui
-                            .add_enabled(
-                                !self.operation.running,
-                                egui::TextEdit::singleline(&mut self.root_publishing.account)
+                let mut settings_changed = false;
+                if use_stacked_form(ui) {
+                    ui.label("Publisher account");
+                    settings_changed |= ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::TextEdit::singleline(&mut self.application_release.account)
+                                .desired_width(ui.available_width())
+                                .hint_text("Steamworks account name"),
+                        )
+                        .changed();
+                    ui.label("Release description");
+                    settings_changed |= ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::TextEdit::singleline(&mut self.application_release.description)
+                                .desired_width(ui.available_width())
+                                .hint_text("Loo-Cast content release"),
+                        )
+                        .changed();
+                    ui.label("Beta branch");
+                    settings_changed |= ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::TextEdit::singleline(&mut self.application_release.branch)
+                                .desired_width(ui.available_width())
+                                .hint_text("Leave empty to use the manifest default"),
+                        )
+                        .changed();
+                } else {
+                    let field_width = (ui.available_width() - 150.0).clamp(180.0, 420.0);
+                    egui::Grid::new("loo-cast-content-release-settings")
+                        .num_columns(2)
+                        .spacing([14.0, 9.0])
+                        .show(ui, |ui| {
+                            ui.label("Publisher account");
+                            settings_changed |= ui
+                                .add_enabled(
+                                    !self.operation.running,
+                                    egui::TextEdit::singleline(
+                                        &mut self.application_release.account,
+                                    )
                                     .desired_width(field_width)
                                     .hint_text("Steamworks account name"),
-                            )
-                            .changed();
-                        ui.end_row();
-                        ui.label("Build description");
-                        settings_changed |= ui
-                            .add_enabled(
-                                !self.operation.running,
-                                egui::TextEdit::singleline(
-                                    &mut self.root_publishing.description,
                                 )
-                                .desired_width(field_width)
-                                .hint_text("Vapor root package"),
-                            )
-                            .changed();
-                        ui.end_row();
-                        ui.label("Beta branch");
-                        settings_changed |= ui
-                            .add_enabled(
-                                !self.operation.running,
-                                egui::TextEdit::singleline(
-                                    &mut self.root_publishing.set_live_branch,
+                                .changed();
+                            ui.end_row();
+                            ui.label("Release description");
+                            settings_changed |= ui
+                                .add_enabled(
+                                    !self.operation.running,
+                                    egui::TextEdit::singleline(
+                                        &mut self.application_release.description,
+                                    )
+                                    .desired_width(field_width)
+                                    .hint_text("Loo-Cast content release"),
                                 )
-                                .desired_width(field_width)
-                                .hint_text("Leave empty to upload without changing a branch"),
-                            )
-                            .changed();
-                        ui.end_row();
-                    });
-            }
-            ui.weak("Steam may ask for your password or Steam Guard code during upload. Leave the branch empty to keep the current live branch unchanged.");
-            if settings_changed {
-                self.invalidate_root_publish_review();
-            }
-
-            ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(
-                    !self.operation.running && !self.root_publishing.account.trim().is_empty(),
-                    egui::Button::new("Review Steam upload"),
-                ).clicked() {
-                    self.preview_steam_package();
+                                .changed();
+                            ui.end_row();
+                            ui.label("Beta branch");
+                            settings_changed |= ui
+                                .add_enabled(
+                                    !self.operation.running,
+                                    egui::TextEdit::singleline(&mut self.application_release.branch)
+                                        .desired_width(field_width)
+                                        .hint_text("Leave empty to use the manifest default"),
+                                )
+                                .changed();
+                            ui.end_row();
+                        });
                 }
-                if self.root_publishing.preview.is_some() && ui.add_enabled(
-                    !self.operation.running,
-                    egui::Button::new("Discard review"),
-                ).clicked() {
-                    self.invalidate_root_publish_review();
+                ui.weak("Steam may request your password or Steam Guard code during upload. Publishing uses the exact files declared by the app manifest.");
+                ui.label("Include ABI-specific product files for:");
+                ui.horizontal(|ui| {
+                    settings_changed |= ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::Checkbox::new(&mut self.application_release.linux, "Linux"),
+                        )
+                        .changed();
+                    settings_changed |= ui
+                        .add_enabled(
+                            !self.operation.running,
+                            egui::Checkbox::new(&mut self.application_release.windows, "Windows"),
+                        )
+                        .changed();
+                });
+                if self.application_release.runtime_targets().is_empty() {
+                    status_text(
+                        ui,
+                        "Choose at least one ABI target before staging the Steam content release.",
+                        StatusTone::Caution,
+                    );
+                }
+                if settings_changed {
+                    self.invalidate_application_release_review();
+                }
+
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.operation.running
+                                && !self.application_release.account.trim().is_empty()
+                                && !self.application_release.runtime_targets().is_empty(),
+                            egui::Button::new("Review content release"),
+                        )
+                        .clicked()
+                    {
+                        self.stage_steam_product_release();
+                    }
+                    if self.application_release.preview.is_some()
+                        && ui
+                            .add_enabled(
+                                !self.operation.running,
+                                egui::Button::new("Discard review"),
+                            )
+                            .clicked()
+                    {
+                        self.invalidate_application_release_review();
+                    }
+                });
+
+                if let Some(preview) = self.application_release.preview.as_ref() {
+                    ui.separator();
+                    ui.strong(if preview.planned {
+                        "Reviewed content release"
+                    } else {
+                        "Content release result"
+                    });
+                    ui.label(format!(
+                        "App {} · {} depot(s) · {} files",
+                        preview.app_id,
+                        preview.depot_ids.len(),
+                        preview.files,
+                    ));
+                    ui.label(format!(
+                        "Account: {} · branch: {}",
+                        preview.account,
+                        if preview.branch.is_empty() {
+                            "unchanged"
+                        } else {
+                            &preview.branch
+                        }
+                    ));
+                    ui.collapsing("ABI targets", |ui| {
+                        for path in &preview.runtime_targets {
+                            ui.small(path);
+                        }
+                    });
+                    if preview.planned {
+                        let confirmation = ApplicationReleaseState::confirmation_phrase(preview);
+                        status_text(
+                            ui,
+                            "This uploads the reviewed Loo-Cast content mount. No Vapor runtime or user data is included unless the app manifest explicitly declares it.",
+                            StatusTone::Caution,
+                        );
+                        ui.label(format!("Type {confirmation} to authorize this upload."));
+                        ui.add_enabled(
+                            !self.operation.running,
+                            egui::TextEdit::singleline(
+                                &mut self.application_release.confirmation,
+                            )
+                            .hint_text(&confirmation),
+                        );
+                        if ui
+                            .add_enabled(
+                                !self.operation.running
+                                    && self.application_release.confirmation.trim()
+                                        == confirmation,
+                                egui::Button::new("Upload content release"),
+                            )
+                            .clicked()
+                        {
+                            self.publish_reviewed_steam_product();
+                        }
+                    } else if let Some(status) = preview.status.as_ref() {
+                        if preview.succeeded {
+                            status_text(ui, "Steam content upload completed.", StatusTone::Positive);
+                        } else {
+                            status_text(
+                                ui,
+                                &format!("Steam content upload failed ({status})."),
+                                StatusTone::Error,
+                            );
+                        }
+                    }
+                }
+                if !self.application_release.status.is_empty() {
+                    ui.separator();
+                    ui.label(&self.application_release.status);
                 }
             });
-
-            if let Some(preview) = self.root_publishing.preview.as_ref() {
-                ui.separator();
-                ui.strong(if preview.planned { "Reviewed Steam upload" } else { "Steam upload result" });
-                ui.label(format!(
-                    "App {} · depot {} · {} files · {} source roots",
-                    preview.app_id,
-                    preview.depot_id,
-                    preview.copied_files,
-                    preview.included_roots.len(),
-                ));
-                ui.label(format!("Account: {} · branch: {}", preview.account, preview.set_live.as_deref().unwrap_or("unchanged")));
-                ui.collapsing("Advanced package details", |ui| {
-                    ui.small(format!("Upload command: {}", preview.steamcmd));
-                    ui.small(format!("Package location: {}", preview.package_root));
-                });
-                ui.collapsing("Included depot paths", |ui| {
-                    for path in &preview.included_roots {
-                        ui.small(path);
-                    }
-                });
-                if preview.planned {
-                    let confirmation = root_publish_confirmation(preview.app_id, preview.set_live.as_deref());
-                    status_text(ui, "This sends the reviewed build to Steam. Steam may ask for your password or Steam Guard code.", StatusTone::Caution);
-                    if preview.set_live.is_some() {
-                        status_text(ui, "The selected beta branch will be changed after upload.", StatusTone::Caution);
-                    }
-                    ui.label(format!("Type {confirmation} to authorize this upload."));
-                    ui.add_enabled(
-                        !self.operation.running,
-                        egui::TextEdit::singleline(&mut self.root_publishing.confirmation).hint_text(&confirmation),
-                    );
-                    if ui.add_enabled(
-                        !self.operation.running && self.root_publishing.confirmation.trim() == confirmation,
-                        egui::Button::new(if preview.set_live.is_some() { "Upload and set branch live" } else { "Upload Steam build" }),
-                    ).clicked() {
-                        self.publish_steam_root();
-                    }
-                } else if let Some(status) = preview.status.as_ref() {
-                    if preview.succeeded {
-                        status_text(ui, "Steam upload completed.", StatusTone::Positive);
-                    } else {
-                        status_text(ui, &format!("Steam upload failed ({status})."), StatusTone::Error);
-                    }
-                }
-            }
-            if !self.root_publishing.status.is_empty() {
-                ui.separator();
-                ui.label(&self.root_publishing.status);
-            }
-        });
         }
     }
 }
