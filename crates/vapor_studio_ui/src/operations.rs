@@ -378,7 +378,7 @@ impl StudioApp {
         if let Some(message) = status_message {
             self.status = message.clone();
             if event.action.starts_with("publishing.") {
-                self.root_publishing.status = message;
+                self.application_release.status = message;
             }
         }
         if terminal {
@@ -534,8 +534,8 @@ fn operation_kind_for_action(action: &str) -> OperationKind {
         "workshop.acquire" => OperationKind::Acquire,
         "workshop.stage" => OperationKind::StageWorkshop,
         "workshop.publish" => OperationKind::PublishWorkshop,
-        "publishing.stage-root" => OperationKind::StageRootDistribution,
-        "publishing.publish-root" => OperationKind::PublishRootDistribution,
+        "publishing.stage-application" => OperationKind::StageApplicationRelease,
+        "publishing.publish-application" => OperationKind::PublishApplicationRelease,
         "workshop.load-subscriptions" => OperationKind::LoadWorkshopSubscriptions,
         "workshop.subscribe" | "workshop.unsubscribe" => OperationKind::ChangeWorkshopSubscription,
         "library.set-auto-install" => OperationKind::ChangeWorkshopSubscription,

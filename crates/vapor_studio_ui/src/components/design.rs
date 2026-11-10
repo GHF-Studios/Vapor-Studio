@@ -82,7 +82,7 @@ pub(crate) fn search_field_width(ui: &egui::Ui) -> f32 {
 pub(crate) fn page_header(ui: &mut egui::Ui, eyebrow: &str, title: &str, description: &str) {
     ui.vertical(|ui| {
         ui.label(
-            egui::RichText::new(eyebrow.to_ascii_uppercase())
+            egui::RichText::new(eyebrow)
                 .small()
                 .strong()
                 .color(ACCENT),

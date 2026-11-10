@@ -530,7 +530,7 @@ impl StudioApp {
         })
             .inner;
         if review_workshop && let Some(selector) = workshop_selector {
-            self.root_publishing.tab = super::super::root_publishing::PublishTab::WorkshopContent;
+            self.application_release.tab = super::super::application_release::PublishTab::WorkshopContent;
             self.stage_workshop_content(selector);
             self.activate_navigation_section(super::super::Section::Publish);
         }

@@ -440,8 +440,8 @@ impl StudioApp {
                 );
             }
             Some(ContentDetailAction::ReviewPublish) => {
-                self.root_publishing.tab =
-                    super::super::root_publishing::PublishTab::WorkshopContent;
+                self.application_release.tab =
+                    super::super::application_release::PublishTab::WorkshopContent;
                 self.activate_navigation_section(Section::Publish);
             }
             Some(ContentDetailAction::CreateComposition(identity, workspace)) => {
