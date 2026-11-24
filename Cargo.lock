@@ -4085,6 +4085,7 @@ dependencies = [
  "vapor_client_domain",
  "vapor_content",
  "vapor_core",
+ "vapor_steam",
 ]
 
 [[package]]

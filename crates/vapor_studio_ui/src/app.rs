@@ -281,6 +281,7 @@ impl StudioApp {
         self.service_connection_config = Some((service_path.clone(), bootstrap.clone()));
         match Client::connect_or_start(&service_path, bootstrap) {
             Ok(mut client) => {
+                client.set_origin(vapor_client_protocol::ClientOrigin::Studio);
                 if let Err(error) = client.send(
                     ClientAction::Developer(
                         vapor_client_protocol::DeveloperAction::SubscribeTelemetry {
@@ -334,6 +335,10 @@ impl StudioApp {
             .name("vapor-studio-service-reconnect".to_owned())
             .spawn(move || {
                 let result = Client::connect_or_start(&service_path, bootstrap)
+                    .map(|mut client| {
+                        client.set_origin(vapor_client_protocol::ClientOrigin::Studio);
+                        client
+                    })
                     .map_err(|error| error.to_string());
                 let _ = sender.send(result);
             });
