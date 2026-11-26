@@ -61,7 +61,7 @@ impl StudioApp {
                 format!("{} · unsaved", Section::Compose.label())
             }
             Section::Publish
-                if self.workshop.preview.is_some() || self.root_publishing.preview.is_some() =>
+                if self.workshop.preview.is_some() || self.application_release.preview.is_some() =>
             {
                 format!("{} · review ready", Section::Publish.label())
             }

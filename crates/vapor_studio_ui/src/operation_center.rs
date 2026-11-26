@@ -269,8 +269,8 @@ pub(super) fn operation_kind_label(kind: &vapor_client_application::OperationKin
         RunInstalled => "Launch composition",
         StageWorkshop => "Review Workshop upload",
         PublishWorkshop => "Publish to Steam Workshop",
-        StageRootDistribution => "Review Steam release",
-        PublishRootDistribution => "Publish Steam release",
+        StageApplicationRelease => "Review Steam application release",
+        PublishApplicationRelease => "Publish Steam application release",
     }
 }
 
